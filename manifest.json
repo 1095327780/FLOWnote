@@ -1,0 +1,9 @@
+{
+  "id": "opencode-assistant",
+  "name": "OpenCode Assistant",
+  "version": "0.3.21",
+  "minAppVersion": "1.5.0",
+  "description": "在 Obsidian 中使用 OpenCode 聊天、会话、技能与诊断。",
+  "author": "阿浩learn",
+  "isDesktopOnly": true
+}
