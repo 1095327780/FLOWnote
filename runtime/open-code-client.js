@@ -100,6 +100,42 @@ class OpenCodeClient {
       return { ok: false };
     });
   }
+  listProviders() {
+    return this.withTransport("listProviders", (t) => {
+      if (typeof t.listProviders === "function") return t.listProviders();
+      return { all: [], connected: [], default: {} };
+    });
+  }
+  listProviderAuthMethods() {
+    return this.withTransport("listProviderAuthMethods", (t) => {
+      if (typeof t.listProviderAuthMethods === "function") return t.listProviderAuthMethods();
+      return {};
+    });
+  }
+  authorizeProviderOauth(options) {
+    return this.withTransport("authorizeProviderOauth", (t) => {
+      if (typeof t.authorizeProviderOauth === "function") return t.authorizeProviderOauth(options);
+      throw new Error("当前传输层不支持 Provider OAuth 授权。");
+    });
+  }
+  completeProviderOauth(options) {
+    return this.withTransport("completeProviderOauth", (t) => {
+      if (typeof t.completeProviderOauth === "function") return t.completeProviderOauth(options);
+      throw new Error("当前传输层不支持 Provider OAuth 回调。");
+    });
+  }
+  setProviderApiKeyAuth(options) {
+    return this.withTransport("setProviderApiKeyAuth", (t) => {
+      if (typeof t.setProviderApiKeyAuth === "function") return t.setProviderApiKeyAuth(options);
+      throw new Error("当前传输层不支持 Provider API Key 设置。");
+    });
+  }
+  clearProviderAuth(options) {
+    return this.withTransport("clearProviderAuth", (t) => {
+      if (typeof t.clearProviderAuth === "function") return t.clearProviderAuth(options);
+      throw new Error("当前传输层不支持 Provider 凭据清除。");
+    });
+  }
   async stop() {
     await this.sdk.stop();
     await this.compat.stop();

@@ -1,5 +1,4 @@
 const { Notice, setIcon } = require("obsidian");
-const { DiagnosticsModal } = require("../modals");
 
 function openSettings() {
   this.app.setting.open();
@@ -21,45 +20,63 @@ function createSvgNode(tag, attrs = {}) {
   return node;
 }
 
+function isFreeModel(modelName) {
+  const raw = String(modelName || "").trim().toLowerCase();
+  if (!raw) return false;
+  const modelId = raw.includes("/") ? raw.slice(raw.indexOf("/") + 1) : raw;
+  return /(?:^|[-_:.\/])free$/.test(modelId);
+}
+
+function extractModelProvider(modelName) {
+  const raw = String(modelName || "").trim().toLowerCase();
+  if (!raw) return "未标注厂商";
+  const slashIndex = raw.indexOf("/");
+  if (slashIndex <= 0) return "未标注厂商";
+  return raw.slice(0, slashIndex) || "未标注厂商";
+}
+
+function splitModelsByFree(models) {
+  const uniq = [...new Set((Array.isArray(models) ? models : []).map((m) => String(m || "").trim()).filter(Boolean))];
+  uniq.sort((a, b) => a.localeCompare(b));
+  return uniq.reduce((acc, model) => {
+    if (isFreeModel(model)) {
+      acc.free.push(model);
+      return acc;
+    }
+    const provider = extractModelProvider(model);
+    if (!acc.byProvider[provider]) acc.byProvider[provider] = [];
+    acc.byProvider[provider].push(model);
+    return acc;
+  }, { free: [], byProvider: {} });
+}
+
+function appendGroupedModelOptions(selectEl, models) {
+  const grouped = splitModelsByFree(models);
+
+  if (grouped.free.length) {
+    const freeGroup = selectEl.createEl("optgroup", { attr: { label: `免费模型 (${grouped.free.length})` } });
+    grouped.free.forEach((m) => freeGroup.createEl("option", { value: m, text: m }));
+  }
+
+  Object.entries(grouped.byProvider)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([provider, providerModels]) => {
+      const providerGroup = selectEl.createEl("optgroup", {
+        attr: { label: `${provider} (${providerModels.length})` },
+      });
+      providerModels.forEach((m) => providerGroup.createEl("option", { value: m, text: m }));
+    });
+}
+
 function renderSidebarToggleIcon(button) {
   if (!button) return;
-  button.innerHTML = "";
-
-  const svg = this.createSvgNode("svg", {
-    class: "oc-side-toggle-icon",
-    viewBox: "0 0 20 20",
-    "aria-hidden": "true",
-    focusable: "false",
-  });
-
-  svg.appendChild(this.createSvgNode("rect", {
-    x: "2.75",
-    y: "3.25",
-    width: "14.5",
-    height: "13.5",
-    rx: "2",
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": "1.3",
-  }));
-  svg.appendChild(this.createSvgNode("line", {
-    x1: "7.2",
-    y1: "3.7",
-    x2: "7.2",
-    y2: "16.3",
-    stroke: "currentColor",
-    "stroke-width": "1.2",
-  }));
-  svg.appendChild(this.createSvgNode("path", {
-    d: this.isSidebarCollapsed ? "M10.4 6.8L13.6 10L10.4 13.2" : "M12.8 6.8L9.6 10L12.8 13.2",
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": "1.7",
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round",
-  }));
-
-  button.appendChild(svg);
+  button.empty();
+  button.classList.toggle("is-collapsed", Boolean(this.isSidebarCollapsed));
+  try {
+    setIcon(button, this.isSidebarCollapsed ? "panel-left-open" : "panel-left-close");
+  } catch {
+    setIcon(button, this.isSidebarCollapsed ? "chevrons-right" : "chevrons-left");
+  }
 }
 
 function scrollMessagesTo(target) {
@@ -74,11 +91,52 @@ function toggleSidebarCollapsed() {
   this.render();
 }
 
+function normalizeSessionTitle(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function isPlaceholderSessionTitle(title) {
+  const normalized = normalizeSessionTitle(title).toLowerCase();
+  if (!normalized) return true;
+  return normalized === "新会话"
+    || normalized === "未命名会话"
+    || normalized === "new session"
+    || normalized === "untitled"
+    || normalized === "untitled session";
+}
+
+function deriveSessionTitleFromPrompt(prompt) {
+  let text = normalizeSessionTitle(prompt);
+  if (!text) return "";
+
+  if (text.startsWith("/")) {
+    const firstSpace = text.indexOf(" ");
+    if (firstSpace > 1) {
+      const rest = normalizeSessionTitle(text.slice(firstSpace + 1));
+      text = rest || text.slice(1);
+    } else {
+      text = text.slice(1);
+    }
+  }
+
+  text = text.replace(/^[\s:：\-—]+/, "");
+  if (!text) return "";
+  return text.length > 28 ? `${text.slice(0, 28)}…` : text;
+}
+
+function sessionDisplayTitle(session) {
+  if (!session || typeof session !== "object") return "未命名会话";
+  const current = normalizeSessionTitle(session.title);
+  if (current && !isPlaceholderSessionTitle(current)) return current;
+  const inferred = deriveSessionTitleFromPrompt(session.lastUserPrompt || "");
+  return inferred || current || "未命名会话";
+}
+
 function activeSessionLabel() {
   const st = this.plugin.sessionStore.state();
   const session = st.sessions.find((s) => s.id === st.activeSessionId);
   if (!session) return "未选择会话";
-  return session.title || "未命名会话";
+  return this.sessionDisplayTitle(session);
 }
 
 function render() {
@@ -112,6 +170,9 @@ function renderHeader(header) {
   const logo = brand.createDiv({ cls: "oc-brand-logo" });
   setIcon(logo, "bot");
   brand.createDiv({ cls: "oc-brand-title", text: "OpenCode Assistant" });
+
+  const actions = header.createDiv({ cls: "oc-header-actions" });
+  actions.createDiv({ cls: "oc-header-meta", text: "Chat Runtime" });
 }
 
 function renderSidebar(side) {
@@ -123,6 +184,7 @@ function renderSidebar(side) {
 
   const sideActions = header.createDiv({ cls: "oc-side-actions" });
   const toggleBtn = sideActions.createEl("button", { cls: "oc-side-toggle" });
+  toggleBtn.setAttr("type", "button");
   toggleBtn.setAttr("aria-label", this.isSidebarCollapsed ? "展开会话列表" : "收起会话列表");
   toggleBtn.setAttr("title", this.isSidebarCollapsed ? "展开会话列表" : "收起会话列表");
   this.renderSidebarToggleIcon(toggleBtn);
@@ -135,7 +197,7 @@ function renderSidebar(side) {
   const addBtn = sideActions.createEl("button", { cls: "oc-side-add", text: "新建" });
   addBtn.addEventListener("click", async () => {
     try {
-      const session = await this.plugin.createSession("新会话");
+      const session = await this.plugin.createSession("");
       this.plugin.sessionStore.setActiveSession(session.id);
       await this.plugin.persistState();
       this.render();
@@ -155,7 +217,8 @@ function renderSidebar(side) {
   }
 
   sessions.forEach((s) => {
-    const item = list.createDiv({ cls: "oc-session-item" });
+    const displayTitle = this.sessionDisplayTitle(s);
+    const item = list.createDiv({ cls: "oc-session-item", attr: { title: displayTitle } });
     if (s.id === active) item.addClass("is-active");
     item.addEventListener("click", async () => {
       this.plugin.sessionStore.setActiveSession(s.id);
@@ -163,9 +226,58 @@ function renderSidebar(side) {
       this.render();
     });
 
-    item.createDiv({ cls: "oc-session-title", text: s.title || "未命名会话" });
+    const actions = item.createDiv({ cls: "oc-session-item-actions" });
+
+    const renameBtn = actions.createEl("button", { cls: "oc-session-item-action" });
+    renameBtn.setAttr("type", "button");
+    renameBtn.setAttr("aria-label", "重命名会话");
+    renameBtn.setAttr("title", "重命名");
+    setIcon(renameBtn, "pencil");
+    renameBtn.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const next = window.prompt("重命名会话", displayTitle);
+      if (next === null) return;
+      const normalized = normalizeSessionTitle(next);
+      if (!normalized) {
+        new Notice("会话名称不能为空");
+        return;
+      }
+      const renamed = this.plugin.sessionStore.renameSession(s.id, normalized);
+      if (!renamed) {
+        new Notice("未找到要重命名的会话");
+        return;
+      }
+      await this.plugin.persistState();
+      this.render();
+    });
+
+    const deleteBtn = actions.createEl("button", { cls: "oc-session-item-action is-danger" });
+    deleteBtn.setAttr("type", "button");
+    deleteBtn.setAttr("aria-label", "删除会话");
+    deleteBtn.setAttr("title", "删除会话");
+    setIcon(deleteBtn, "trash-2");
+    deleteBtn.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const confirmed = window.confirm(`确认删除会话「${displayTitle}」？`);
+      if (!confirmed) return;
+      const removed = typeof this.plugin.deleteSession === "function"
+        ? await this.plugin.deleteSession(s.id)
+        : this.plugin.sessionStore.removeSession(s.id);
+      if (!removed) {
+        new Notice("删除失败：未找到该会话");
+        return;
+      }
+      if (typeof this.plugin.deleteSession !== "function") {
+        await this.plugin.persistState();
+      }
+      this.render();
+    });
+
+    item.createDiv({ cls: "oc-session-title", text: displayTitle });
     if (s.lastUserPrompt) {
-      item.createDiv({ cls: "oc-session-preview", text: s.lastUserPrompt });
+      item.createDiv({ cls: "oc-session-preview", text: s.lastUserPrompt, attr: { title: s.lastUserPrompt } });
     }
 
     item.createDiv({ cls: "oc-session-meta", text: s.updatedAt ? new Date(s.updatedAt).toLocaleString() : "" });
@@ -184,38 +296,10 @@ function renderMain(main) {
   const toolbarLeft = toolbar.createDiv({ cls: "oc-toolbar-left" });
   const toolbarRight = toolbar.createDiv({ cls: "oc-toolbar-right" });
 
-  this.elements.statusPill = toolbarLeft.createDiv({ cls: "oc-status-pill", text: "Checking..." });
-
-  const modelSelect = toolbarLeft.createEl("select", { cls: "oc-select" });
-  this.elements.modelSelect = modelSelect;
-  modelSelect.createEl("option", { value: "", text: "模型: 默认（官方）" });
-  (this.plugin.cachedModels || []).forEach((m) => modelSelect.createEl("option", { value: m, text: `模型: ${m}` }));
-  if (this.selectedModel) modelSelect.value = this.selectedModel;
-  modelSelect.addEventListener("change", async () => {
-    try {
-      await this.applyModelSelection(modelSelect.value);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      modelSelect.value = this.selectedModel || "";
-      new Notice(`模型切换失败: ${msg}`);
-    }
-  });
-
-  const retryBtn = toolbarRight.createEl("button", { cls: "oc-toolbar-btn", text: "重试上条" });
-  retryBtn.addEventListener("click", async () => {
-    const active = this.plugin.sessionStore.state().activeSessionId;
-    const messages = this.plugin.sessionStore.state().messagesBySession[active] || [];
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    if (!lastUser) return new Notice("没有可重试的用户消息");
-    await this.sendPrompt(lastUser.text);
-  });
-
-  const diagBtn = toolbarRight.createEl("button", { cls: "oc-toolbar-btn", text: "诊断" });
-  diagBtn.addEventListener("click", async () => {
-    const result = await this.plugin.diagnosticsService.run();
-    new DiagnosticsModal(this.app, result).open();
-    this.applyStatus(result);
-  });
+  const connectionIndicator = toolbarLeft.createDiv({ cls: "oc-connection-indicator" });
+  this.elements.statusDot = connectionIndicator.createDiv({ cls: "oc-connection-dot warn" });
+  this.elements.statusDot.setAttribute("aria-label", "连接状态未知");
+  this.elements.statusDot.setAttribute("title", "连接状态未知");
 
   const settingsBtn = this.buildIconButton(toolbarRight, "settings", "设置", () => this.openSettings());
   settingsBtn.addClass("oc-toolbar-btn");
@@ -240,6 +324,23 @@ function renderMain(main) {
   this.elements.composer = composer;
   const navRow = composer.createDiv({ cls: "oc-input-nav-row" });
   const quick = navRow.createDiv({ cls: "oc-quick" });
+
+  const modelPicker = quick.createDiv({ cls: "oc-model-picker" });
+  const modelSelect = modelPicker.createEl("select", { cls: "oc-model-select" });
+  this.elements.modelSelect = modelSelect;
+  modelSelect.createEl("option", { value: "", text: "模型 /models" });
+  appendGroupedModelOptions(modelSelect, this.plugin.cachedModels || []);
+  if (this.selectedModel) modelSelect.value = this.selectedModel;
+  if (modelSelect.value !== this.selectedModel) this.selectedModel = modelSelect.value;
+  modelSelect.addEventListener("change", async () => {
+    try {
+      await this.applyModelSelection(modelSelect.value);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      modelSelect.value = this.selectedModel || "";
+      new Notice(`模型切换失败: ${msg}`);
+    }
+  });
 
   const skillPicker = quick.createDiv({ cls: "oc-skill-picker" });
   const skillSelect = skillPicker.createEl("select", { cls: "oc-skill-select" });
@@ -282,14 +383,23 @@ function renderMain(main) {
     });
   }
 
-  const modelCmdBtn = quick.createEl("button", { cls: "oc-quick-btn", text: "模型 /models" });
-  modelCmdBtn.addEventListener("click", async () => {
-    const sessionId = await this.ensureActiveSession();
-    await this.openModelSelector(sessionId);
-  });
   navRow.createDiv({ cls: "oc-nav-row-meta", text: "Ctrl/Cmd + Enter 发送" });
 
-  const inputWrapper = composer.createDiv({ cls: "oc-input-wrapper" });
+  const inputContainer = composer.createDiv({ cls: "oc-input-container" });
+  const inputWrapper = inputContainer.createDiv({ cls: "oc-input-wrapper" });
+  const contextRow = inputWrapper.createDiv({ cls: "oc-context-row" });
+  const fileIndicator = contextRow.createDiv({ cls: "oc-file-indicator" });
+  const selectionIndicator = contextRow.createDiv({
+    cls: "oc-selection-indicator",
+    text: "",
+  });
+  contextRow.toggleClass("has-content", false);
+  fileIndicator.empty();
+  selectionIndicator.empty();
+  this.elements.contextRow = contextRow;
+  this.elements.fileIndicator = fileIndicator;
+  this.elements.selectionIndicator = selectionIndicator;
+
   this.elements.input = inputWrapper.createEl("textarea", {
     cls: "oc-input",
     attr: { placeholder: "输入消息…支持技能注入和模型切换" },
@@ -314,7 +424,7 @@ function renderMain(main) {
 
   composer.createDiv({
     cls: "oc-hint",
-    text: "支持会话切换、技能命令、模型切换、连接诊断和错误恢复。可通过技能下拉或 /skills 快速填入命令，/models、/model、/modle 会触发模型选择器。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
+    text: "支持会话切换、技能命令、模型切换和错误恢复。可通过下拉列表或 /skills、/model 快速切换。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
   });
 
   this.renderInlineQuestionPanel(this.plugin.sessionStore.getActiveMessages());
@@ -322,23 +432,30 @@ function renderMain(main) {
 }
 
 function applyStatus(result) {
-  if (!this.elements.statusPill) return;
-  this.elements.statusPill.removeClass("ok", "error", "warn");
+  const dot = this.elements.statusDot;
+  if (!dot) return;
+
+  dot.removeClass("ok", "error", "warn");
 
   if (!result || !result.connection) {
-    this.elements.statusPill.addClass("warn");
-    this.elements.statusPill.setText("Unknown");
+    dot.addClass("warn");
+    dot.setAttribute("aria-label", "连接状态未知");
+    dot.setAttribute("title", "连接状态未知");
     return;
   }
 
   if (result.connection.ok) {
-    this.elements.statusPill.addClass("ok");
-    this.elements.statusPill.setText(`Connected (${result.connection.mode})`);
+    dot.addClass("ok");
+    const label = `连接正常 (${result.connection.mode})`;
+    dot.setAttribute("aria-label", label);
+    dot.setAttribute("title", label);
     return;
   }
 
-  this.elements.statusPill.addClass("error");
-  this.elements.statusPill.setText("Connection Error");
+  dot.addClass("error");
+  const label = `连接异常 (${result.connection.mode})`;
+  dot.setAttribute("aria-label", label);
+  dot.setAttribute("title", label);
 }
 
 module.exports = { layoutRendererMethods: {
@@ -348,6 +465,10 @@ module.exports = { layoutRendererMethods: {
   renderSidebarToggleIcon,
   scrollMessagesTo,
   toggleSidebarCollapsed,
+  normalizeSessionTitle,
+  isPlaceholderSessionTitle,
+  deriveSessionTitleFromPrompt,
+  sessionDisplayTitle,
   activeSessionLabel,
   render,
   renderHeader,

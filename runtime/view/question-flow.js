@@ -450,6 +450,7 @@ function clearInlineQuestionWidget(silent = true) {
   this.inlineQuestionWidget = null;
   this.inlineQuestionKey = "";
   if (this.elements.inlineQuestionHost) {
+    this.elements.inlineQuestionHost.removeClass("is-active");
     this.elements.inlineQuestionHost.empty();
   }
   if (this.elements.composer) {
@@ -607,6 +608,7 @@ function renderInlineQuestionPanel(messages) {
   }
 
   this.elements.composer.addClass("is-inline-hidden");
+  this.elements.inlineQuestionHost.addClass("is-active");
   if (this.inlineQuestionWidget && this.inlineQuestionKey === interaction.key) {
     return;
   }

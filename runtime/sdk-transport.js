@@ -123,6 +123,91 @@ class SdkTransport {
     }
   }
 
+  async listProviders() {
+    const client = await this.ensureClient();
+    const res = await client.provider.list({ directory: this.vaultPath });
+    const payload = res && res.data ? res.data : res || {};
+    const all = Array.isArray(payload.all) ? payload.all : [];
+    const connected = Array.isArray(payload.connected) ? payload.connected : [];
+    const defaults = payload && typeof payload.default === "object" && payload.default ? payload.default : {};
+    return {
+      all,
+      connected,
+      default: defaults,
+    };
+  }
+
+  async listProviderAuthMethods() {
+    const client = await this.ensureClient();
+    const res = await client.provider.auth({ directory: this.vaultPath });
+    const payload = res && res.data ? res.data : res || {};
+    return payload && typeof payload === "object" ? payload : {};
+  }
+
+  async authorizeProviderOauth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const method = Number(options.method);
+    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+
+    const client = await this.ensureClient();
+    const res = await client.provider.oauth.authorize({
+      providerID,
+      directory: this.vaultPath,
+      method: Number(method),
+    }, { signal: options.signal });
+    return res && res.data ? res.data : res;
+  }
+
+  async completeProviderOauth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const method = Number(options.method);
+    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+
+    const code = String(options.code || "").trim();
+    const params = {
+      providerID,
+      directory: this.vaultPath,
+      method: Number(method),
+    };
+    if (code) params.code = code;
+
+    const client = await this.ensureClient();
+    const res = await client.provider.oauth.callback(params, { signal: options.signal });
+    const payload = res && Object.prototype.hasOwnProperty.call(res, "data") ? res.data : res;
+    return payload === undefined ? true : Boolean(payload);
+  }
+
+  async setProviderApiKeyAuth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const key = String(options.key || "").trim();
+    if (!key) throw new Error("API Key 不能为空");
+
+    const client = await this.ensureClient();
+    await client.auth.set({
+      providerID,
+      auth: {
+        type: "api",
+        key,
+      },
+    }, { signal: options.signal });
+    return true;
+  }
+
+  async clearProviderAuth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const client = await this.ensureClient();
+    await client.auth.remove({ providerID }, { signal: options.signal });
+    return true;
+  }
+
   async listCommands() {
     const now = Date.now();
     if (now - this.commandCache.at < 30000 && this.commandCache.items.length) {
@@ -158,15 +243,14 @@ class SdkTransport {
     if (this.settings.authMode !== "custom-api-key") return;
     if (!this.settings.customApiKey.trim()) throw new Error("当前是自定义 API Key 模式，但 API Key 为空");
 
-    const client = await this.ensureClient();
     const providerId = this.settings.customProviderId.trim();
-
-    await client.auth.set({
+    await this.setProviderApiKeyAuth({
       providerID: providerId,
-      auth: { type: "api", key: this.settings.customApiKey.trim() },
+      key: this.settings.customApiKey.trim(),
     });
 
     if (this.settings.customBaseUrl.trim()) {
+      const client = await this.ensureClient();
       await client.config.update({
         directory: this.vaultPath,
         config: {

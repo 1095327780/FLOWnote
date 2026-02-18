@@ -31,6 +31,7 @@ class InlineAskUserQuestionPanel {
 
   render() {
     this.rootEl = this.containerEl.createDiv({ cls: "claudian-ask-question-inline" });
+    this.rootEl.toggleClass("is-immediate", Boolean(this.config.immediateSelect));
 
     const titleEl = this.rootEl.createDiv({ cls: "claudian-ask-inline-title" });
     titleEl.setText(this.config.title);

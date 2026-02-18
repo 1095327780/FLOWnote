@@ -19,6 +19,52 @@ function splitThinkingTag(text) {
   };
 }
 
+function isFreeModel(modelName) {
+  const raw = String(modelName || "").trim().toLowerCase();
+  if (!raw) return false;
+  const modelId = raw.includes("/") ? raw.slice(raw.indexOf("/") + 1) : raw;
+  return /(?:^|[-_:.\/])free$/.test(modelId);
+}
+
+function extractModelProvider(modelName) {
+  const raw = String(modelName || "").trim().toLowerCase();
+  if (!raw) return "未标注厂商";
+  const slashIndex = raw.indexOf("/");
+  if (slashIndex <= 0) return "未标注厂商";
+  return raw.slice(0, slashIndex) || "未标注厂商";
+}
+
+function splitModelsByFree(models) {
+  const uniq = [...new Set((Array.isArray(models) ? models : []).map((m) => String(m || "").trim()).filter(Boolean))];
+  uniq.sort((a, b) => a.localeCompare(b));
+  return uniq.reduce((acc, model) => {
+    if (isFreeModel(model)) {
+      acc.free.push(model);
+      return acc;
+    }
+    const provider = extractModelProvider(model);
+    if (!acc.byProvider[provider]) acc.byProvider[provider] = [];
+    acc.byProvider[provider].push(model);
+    return acc;
+  }, { free: [], byProvider: {} });
+}
+
+function appendGroupedModelOptions(selectEl, models) {
+  const grouped = splitModelsByFree(models);
+  if (grouped.free.length) {
+    const freeGroup = selectEl.createEl("optgroup", { attr: { label: `免费模型 (${grouped.free.length})` } });
+    grouped.free.forEach((m) => freeGroup.createEl("option", { value: m, text: m }));
+  }
+  Object.entries(grouped.byProvider)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([provider, providerModels]) => {
+      const providerGroup = selectEl.createEl("optgroup", {
+        attr: { label: `${provider} (${providerModels.length})` },
+      });
+      providerModels.forEach((m) => providerGroup.createEl("option", { value: m, text: m }));
+    });
+}
+
 class DiagnosticsModal extends Modal {
   constructor(app, result) {
     super(app);
@@ -397,35 +443,11 @@ class OpenCodeAssistantView extends ItemView {
     const toolbar = main.createDiv({ cls: "oc-toolbar" });
     const toolbarLeft = toolbar.createDiv({ cls: "oc-toolbar-left" });
     const toolbarRight = toolbar.createDiv({ cls: "oc-toolbar-right" });
-    this.elements.statusPill = toolbarLeft.createDiv({ cls: "oc-status-pill", text: "Checking..." });
 
-    const modelSelect = toolbarLeft.createEl("select", { cls: "oc-select" });
-    this.elements.modelSelect = modelSelect;
-    modelSelect.createEl("option", { value: "", text: "模型: 默认（官方）" });
-    const models = this.plugin.cachedModels || [];
-    models.forEach((model) => modelSelect.createEl("option", { value: model, text: `模型: ${model}` }));
-    if (this.selectedModel) modelSelect.value = this.selectedModel;
-    modelSelect.addEventListener("change", async () => {
-      this.selectedModel = modelSelect.value;
-      this.plugin.settings.defaultModel = this.selectedModel;
-      await this.plugin.saveSettings();
-    });
-
-    const retryBtn = toolbarRight.createEl("button", { cls: "oc-toolbar-btn", text: "重试上条" });
-    retryBtn.addEventListener("click", async () => {
-      const active = this.plugin.sessionStore.getState().activeSessionId;
-      const messages = this.plugin.sessionStore.getState().messagesBySession[active] || [];
-      const lastUser = [...messages].reverse().find((m) => m.role === "user");
-      if (!lastUser) return new Notice("没有可重试的用户消息");
-      await this.sendPrompt(lastUser.text);
-    });
-
-    const diagBtn = toolbarRight.createEl("button", { cls: "oc-toolbar-btn", text: "诊断" });
-    diagBtn.addEventListener("click", async () => {
-      const result = await this.plugin.diagnosticsService.run();
-      new DiagnosticsModal(this.app, result).open();
-      this.applyStatus(result);
-    });
+    const connectionIndicator = toolbarLeft.createDiv({ cls: "oc-connection-indicator" });
+    this.elements.statusDot = connectionIndicator.createDiv({ cls: "oc-connection-dot warn" });
+    this.elements.statusDot.setAttribute("aria-label", "连接状态未知");
+    this.elements.statusDot.setAttribute("title", "连接状态未知");
 
     const settingsBtn = this.buildIconButton(toolbarRight, "settings", "设置", () => this.openSettings());
     settingsBtn.addClass("oc-toolbar-btn");
@@ -451,6 +473,19 @@ class OpenCodeAssistantView extends ItemView {
     const composer = main.createDiv({ cls: "oc-composer" });
     const navRow = composer.createDiv({ cls: "oc-input-nav-row" });
     const quick = navRow.createDiv({ cls: "oc-quick" });
+
+    const modelPicker = quick.createDiv({ cls: "oc-model-picker" });
+    const modelSelect = modelPicker.createEl("select", { cls: "oc-model-select" });
+    this.elements.modelSelect = modelSelect;
+    modelSelect.createEl("option", { value: "", text: "模型 /models" });
+    const models = this.plugin.cachedModels || [];
+    appendGroupedModelOptions(modelSelect, models);
+    if (this.selectedModel) modelSelect.value = this.selectedModel;
+    modelSelect.addEventListener("change", async () => {
+      this.selectedModel = modelSelect.value;
+      this.plugin.settings.defaultModel = this.selectedModel;
+      await this.plugin.saveSettings();
+    });
 
     const skillPicker = quick.createDiv({ cls: "oc-skill-picker" });
     const skillSelect = skillPicker.createEl("select", { cls: "oc-skill-select" });
@@ -493,12 +528,6 @@ class OpenCodeAssistantView extends ItemView {
       });
     }
 
-    const modelCmdBtn = quick.createEl("button", { cls: "oc-quick-btn", text: "模型 /models" });
-    modelCmdBtn.addEventListener("click", () => {
-      if (!this.elements.input) return;
-      this.elements.input.value = "/models ";
-      this.elements.input.focus();
-    });
     navRow.createDiv({ cls: "oc-nav-row-meta", text: "Ctrl/Cmd + Enter 发送" });
 
     const inputWrapper = composer.createDiv({ cls: "oc-input-wrapper" });
@@ -525,30 +554,36 @@ class OpenCodeAssistantView extends ItemView {
 
     composer.createDiv({
       cls: "oc-hint",
-      text: "支持会话切换、技能命令、模型切换、连接诊断和错误恢复。可通过技能下拉或 /skills 快速填入命令。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
+      text: "支持会话切换、技能命令、模型切换和错误恢复。可通过下拉列表或 /skills、/model 快速切换。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
     });
 
     this.plugin.diagnosticsService.run().then((result) => this.applyStatus(result));
   }
 
   applyStatus(result) {
-    if (!this.elements.statusPill) return;
-    this.elements.statusPill.removeClass("ok", "error", "warn");
+    const dot = this.elements.statusDot;
+    if (!dot) return;
+    dot.removeClass("ok", "error", "warn");
 
     if (!result || !result.connection) {
-      this.elements.statusPill.addClass("warn");
-      this.elements.statusPill.setText("Unknown");
+      dot.addClass("warn");
+      dot.setAttribute("aria-label", "连接状态未知");
+      dot.setAttribute("title", "连接状态未知");
       return;
     }
 
     if (result.connection.ok) {
-      this.elements.statusPill.addClass("ok");
-      this.elements.statusPill.setText(`Connected (${result.connection.mode})`);
+      dot.addClass("ok");
+      const label = `连接正常 (${result.connection.mode})`;
+      dot.setAttribute("aria-label", label);
+      dot.setAttribute("title", label);
       return;
     }
 
-    this.elements.statusPill.addClass("error");
-    this.elements.statusPill.setText("Connection Error");
+    dot.addClass("error");
+    const label = `连接异常 (${result.connection.mode})`;
+    dot.setAttribute("aria-label", label);
+    dot.setAttribute("title", label);
   }
 
   setRuntimeStatus(text, tone = "info") {

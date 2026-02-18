@@ -351,7 +351,7 @@ function extractErrorText(error) {
   if (message) {
     let hint = "";
     if (/OAuth authentication is currently not allowed/i.test(message)) {
-      hint = "（可输入 /models 或点击“模型 /models”打开官方模型选择器；也可在设置里切到 custom-api-key 并填写 Provider/API Key）";
+      hint = "（可输入 /models 或通过模型下拉选择官方模型；也可在设置里切到 custom-api-key 并填写 Provider/API Key）";
     }
     return `${name}${status}${provider}: ${message}${hint}`;
   }

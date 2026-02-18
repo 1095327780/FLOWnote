@@ -148,7 +148,7 @@ class OpenCodeAssistantView extends ItemView {
     }
   
     if (!sessionId) {
-      const session = await this.plugin.createSession("新会话");
+      const session = await this.plugin.createSession("");
       sessionId = session.id;
       this.plugin.sessionStore.setActiveSession(sessionId);
       this.render();
@@ -177,6 +177,7 @@ class OpenCodeAssistantView extends ItemView {
     this.currentAbort = new AbortController();
     this.setBusy(true);
     this.setRuntimeStatus("正在等待 OpenCode 响应…", "working");
+    let shouldRerenderModelPicker = false;
   
     try {
       const prompt = this.plugin.skillService.buildInjectedPrompt(
@@ -323,6 +324,22 @@ class OpenCodeAssistantView extends ItemView {
         );
         this.setRuntimeStatus("等待问题回答…", "info");
       } else {
+        const activeModel = String(this.selectedModel || this.plugin.settings.defaultModel || "").trim();
+        if (activeModel && this.plugin && typeof this.plugin.markModelUnavailable === "function") {
+          const tracked = this.plugin.markModelUnavailable(activeModel, msg);
+          if (tracked && tracked.hidden) {
+            shouldRerenderModelPicker = true;
+            if (String(this.plugin.settings.defaultModel || "").trim() === activeModel) {
+              this.selectedModel = "";
+              this.plugin.settings.defaultModel = "";
+              try {
+                await this.plugin.saveSettings();
+              } catch {
+              }
+            }
+            new Notice(`模型可能不可用，已从列表暂时隐藏：${activeModel}`);
+          }
+        }
         this.setRuntimeStatus(`请求失败：${msg}`, "error");
         this.plugin.sessionStore.finalizeAssistantDraft(sessionId, draftId, `请求失败: ${msg}`, msg);
         new Notice(msg);
@@ -331,6 +348,10 @@ class OpenCodeAssistantView extends ItemView {
       this.currentAbort = null;
       this.setBusy(false);
       await this.plugin.persistState();
+      if (shouldRerenderModelPicker) {
+        this.render();
+        return;
+      }
       this.renderMessages();
       this.renderSidebar(this.root.querySelector(".oc-side"));
     }

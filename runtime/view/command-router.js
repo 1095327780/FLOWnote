@@ -1,5 +1,4 @@
 const { Notice } = require("obsidian");
-const { ModelSelectorModal } = require("../modals");
 
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -134,6 +133,9 @@ function openSkillSelector() {
 }
 
 async function refreshModelList() {
+  if (this.plugin && typeof this.plugin.refreshModelCatalog === "function") {
+    return this.plugin.refreshModelCatalog();
+  }
   const models = await this.plugin.opencodeClient.listModels();
   this.plugin.cachedModels = Array.isArray(models) ? models : [];
   return this.plugin.cachedModels;
@@ -142,7 +144,7 @@ async function refreshModelList() {
 async function ensureActiveSession() {
   const st = this.plugin.sessionStore.state();
   if (st.activeSessionId) return st.activeSessionId;
-  const session = await this.plugin.createSession("新会话");
+  const session = await this.plugin.createSession("");
   this.plugin.sessionStore.setActiveSession(session.id);
   await this.plugin.persistState();
   return session.id;
@@ -152,6 +154,11 @@ async function applyModelSelection(modelID, options = {}) {
   const normalized = String(modelID || "").trim();
   const previous = String(this.selectedModel || "");
   const previousSetting = String(this.plugin.settings.defaultModel || "");
+  const availableModels = Array.isArray(this.plugin.cachedModels) ? this.plugin.cachedModels : [];
+
+  if (normalized && availableModels.length && !availableModels.includes(normalized)) {
+    throw new Error(`模型不可用或当前账号未授权：${normalized}`);
+  }
 
   this.selectedModel = normalized;
   this.plugin.settings.defaultModel = normalized;
@@ -180,29 +187,27 @@ async function applyModelSelection(modelID, options = {}) {
 }
 
 async function openModelSelector(sessionId) {
-  const models = this.plugin.cachedModels && this.plugin.cachedModels.length
-    ? this.plugin.cachedModels
-    : await this.refreshModelList();
+  let select = this.elements.modelSelect;
+  if (!select) {
+    await this.refreshModelList();
+    this.render();
+    select = this.elements.modelSelect;
+  }
 
-  new ModelSelectorModal(this.app, {
-    models,
-    currentModel: this.selectedModel,
-    onRefresh: async () => this.refreshModelList(),
-    onSelect: async (picked) => {
-      try {
-        const text = await this.applyModelSelection(picked);
-        this.appendAssistantMessage(sessionId, text, "");
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        this.appendAssistantMessage(sessionId, `模型切换失败: ${msg}`, msg);
-        new Notice(`模型切换失败: ${msg}`);
-      } finally {
-        await this.plugin.persistState();
-        this.renderMessages();
-        this.renderSidebar(this.root.querySelector(".oc-side"));
-      }
-    },
-  }).open();
+  if (!select || select.disabled) {
+    new Notice("模型下拉尚未初始化，请稍后再试。");
+    return;
+  }
+
+  select.focus();
+  if (typeof select.showPicker === "function") {
+    try {
+      select.showPicker();
+      return;
+    } catch {
+    }
+  }
+  this.setRuntimeStatus("请从模型下拉列表中选择模型。", "info");
 }
 
 async function handleModelSlashCommand(userText, parsed) {
@@ -215,7 +220,7 @@ async function handleModelSlashCommand(userText, parsed) {
   });
 
   if (!parsed.args) {
-    this.appendAssistantMessage(sessionId, "已打开模型选择器。请选择一个模型。", "");
+    this.appendAssistantMessage(sessionId, "请从模型下拉列表中选择模型。", "");
     await this.plugin.persistState();
     this.renderMessages();
     this.renderSidebar(this.root.querySelector(".oc-side"));

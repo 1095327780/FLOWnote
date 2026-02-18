@@ -220,7 +220,7 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
         id: "opencode-new-session",
         name: "OpenCode: 新建会话",
         callback: async () => {
-          const session = await this.createSession("新会话");
+          const session = await this.createSession("");
           this.sessionStore.setActiveSession(session.id);
           await this.persistState();
           const view = this.getAssistantView();
@@ -245,6 +245,207 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
   log(line) {
     if (!this.settings || !this.settings.debugLogs) return;
     console.log("[opencode-assistant]", line);
+  }
+
+  normalizeModelID(modelID) {
+    return String(modelID || "").trim();
+  }
+
+  extractProviderFromModelID(modelID) {
+    const normalized = this.normalizeModelID(modelID).toLowerCase();
+    if (!normalized) return "";
+    const slashIndex = normalized.indexOf("/");
+    if (slashIndex <= 0) return "";
+    return normalized.slice(0, slashIndex).trim();
+  }
+
+  isFreeModelID(modelID) {
+    const normalized = this.normalizeModelID(modelID).toLowerCase();
+    if (!normalized) return false;
+    const modelName = normalized.includes("/") ? normalized.slice(normalized.indexOf("/") + 1) : normalized;
+    return /(?:^|[-_:.\/])free$/.test(modelName);
+  }
+
+  ensureModelCatalogState() {
+    if (!this.modelCatalog || typeof this.modelCatalog !== "object") {
+      this.modelCatalog = {};
+    }
+    if (!Array.isArray(this.modelCatalog.allModels)) this.modelCatalog.allModels = [];
+    if (!Array.isArray(this.modelCatalog.visibleModels)) this.modelCatalog.visibleModels = [];
+    if (!(this.modelCatalog.unavailable instanceof Map)) this.modelCatalog.unavailable = new Map();
+    if (!(this.modelCatalog.connectedProviders instanceof Set) && this.modelCatalog.connectedProviders !== null) {
+      this.modelCatalog.connectedProviders = null;
+    }
+    if (this.modelCatalog.connectedProviders === undefined) this.modelCatalog.connectedProviders = null;
+    return this.modelCatalog;
+  }
+
+  getUnavailableModelSet() {
+    const state = this.ensureModelCatalogState();
+    const out = new Set();
+    for (const [modelKey, meta] of state.unavailable.entries()) {
+      if (!modelKey) continue;
+      if (!meta || meta.hidden !== false) out.add(String(modelKey));
+    }
+    return out;
+  }
+
+  isHardUnsupportedModelError(message) {
+    const text = String(message || "").toLowerCase();
+    if (!text) return false;
+    return /unsupported model|no such model|model .* not found|invalid model|unknown model|does not support model/.test(text)
+      || /模型不支持|不支持该模型|模型不可用|模型不存在|无可用模型/.test(text)
+      || /unauthorized|forbidden|permission denied|auth.*failed|鉴权失败|无权限/.test(text)
+      || /(status=|http |请求失败 \()4(01|03|04|22)\b/.test(text)
+      || /长时间无响应.*不受当前账号\/api key 支持/.test(text);
+  }
+
+  shouldTrackModelFailure(message) {
+    const text = String(message || "").toLowerCase();
+    if (!text) return false;
+    if (this.isHardUnsupportedModelError(text)) return true;
+    return /timeout|timed out|超时|无响应|no response|session\.status=busy|session\.status=idle/.test(text);
+  }
+
+  markModelUnavailable(modelID, reason) {
+    const normalized = this.normalizeModelID(modelID);
+    if (!normalized) return { hidden: false, attempts: 0, model: "" };
+    if (!this.shouldTrackModelFailure(reason)) return { hidden: false, attempts: 0, model: normalized };
+
+    const state = this.ensureModelCatalogState();
+    const key = normalized.toLowerCase();
+    const previous = state.unavailable.get(key) || {};
+    const attempts = Math.max(0, Number(previous.attempts || 0)) + 1;
+    const hidden = this.isHardUnsupportedModelError(reason) || attempts >= 2;
+
+    state.unavailable.set(key, {
+      model: normalized,
+      attempts,
+      hidden,
+      reason: String(reason || ""),
+      updatedAt: Date.now(),
+    });
+
+    if (hidden) this.rebuildVisibleModelCache();
+    return { hidden, attempts, model: normalized };
+  }
+
+  clearUnavailableModels(options = {}) {
+    const state = this.ensureModelCatalogState();
+    const providerID = this.extractProviderFromModelID(options.providerID || "");
+    if (!providerID) {
+      state.unavailable.clear();
+      this.rebuildVisibleModelCache();
+      return;
+    }
+
+    for (const [modelKey, meta] of state.unavailable.entries()) {
+      const targetProvider = this.extractProviderFromModelID(meta && meta.model ? meta.model : modelKey);
+      if (targetProvider === providerID) state.unavailable.delete(modelKey);
+    }
+    this.rebuildVisibleModelCache();
+  }
+
+  normalizeConnectedProviders(connectedProviders) {
+    let out = null;
+    if (connectedProviders instanceof Set) {
+      out = new Set(
+        [...connectedProviders]
+          .map((id) => String(id || "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+    } else if (Array.isArray(connectedProviders)) {
+      out = new Set(
+        connectedProviders
+          .map((id) => String(id || "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+    }
+
+    const customProviderID = String(this.settings && this.settings.customProviderId ? this.settings.customProviderId : "")
+      .trim()
+      .toLowerCase();
+    if (customProviderID && this.settings && this.settings.authMode === "custom-api-key") {
+      if (!(out instanceof Set)) out = new Set();
+      out.add(customProviderID);
+    }
+
+    return out;
+  }
+
+  filterModelList(models, connectedProviders) {
+    const uniq = [...new Set(
+      (Array.isArray(models) ? models : [])
+        .map((model) => this.normalizeModelID(model))
+        .filter(Boolean),
+    )];
+    uniq.sort((a, b) => a.localeCompare(b));
+
+    const unavailable = this.getUnavailableModelSet();
+    const hasConnectedFilter = connectedProviders instanceof Set;
+
+    return uniq.filter((modelID) => {
+      const key = modelID.toLowerCase();
+      if (unavailable.has(key)) return false;
+      if (this.isFreeModelID(modelID)) return true;
+      if (!hasConnectedFilter) return true;
+      const providerID = this.extractProviderFromModelID(modelID);
+      if (!providerID) return true;
+      return connectedProviders.has(providerID);
+    });
+  }
+
+  rebuildVisibleModelCache() {
+    const state = this.ensureModelCatalogState();
+    const visible = this.filterModelList(state.allModels, state.connectedProviders);
+    state.visibleModels = visible;
+    this.cachedModels = visible;
+    return visible;
+  }
+
+  async refreshModelCatalog(options = {}) {
+    const state = this.ensureModelCatalogState();
+    const cfg = options && typeof options === "object" ? options : {};
+
+    if (cfg.resetUnavailable) this.clearUnavailableModels();
+
+    let incomingModels = Array.isArray(cfg.models) ? cfg.models : null;
+    if (!incomingModels) {
+      try {
+        incomingModels = await this.opencodeClient.listModels();
+      } catch (e) {
+        this.log(`refresh models failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (Array.isArray(incomingModels)) {
+      state.allModels = incomingModels
+        .map((model) => this.normalizeModelID(model))
+        .filter(Boolean);
+    }
+
+    let connectedProviders = null;
+    if (cfg.connectedProviders instanceof Set || Array.isArray(cfg.connectedProviders)) {
+      connectedProviders = cfg.connectedProviders;
+    } else if (cfg.providerResult && Array.isArray(cfg.providerResult.connected)) {
+      connectedProviders = cfg.providerResult.connected;
+    } else {
+      try {
+        const providerResult = await this.opencodeClient.listProviders();
+        if (providerResult && Array.isArray(providerResult.connected)) {
+          connectedProviders = providerResult.connected;
+        }
+      } catch (e) {
+        this.log(`refresh providers failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    state.connectedProviders = this.normalizeConnectedProviders(connectedProviders);
+    const visible = this.rebuildVisibleModelCache();
+    const currentDefaultModel = this.normalizeModelID(this.settings && this.settings.defaultModel ? this.settings.defaultModel : "");
+    if (currentDefaultModel && !visible.includes(currentDefaultModel)) {
+      this.settings.defaultModel = "";
+    }
+    return visible;
   }
 
   getVaultPath() {
@@ -356,11 +557,15 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     if (raw.settings || raw.runtimeState) {
       this.settings = runtime.normalizeSettings(raw.settings || {});
       this.runtimeState = runtime.migrateLegacyMessages(raw.runtimeState || { sessions: [], activeSessionId: "", messagesBySession: {} });
+      if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+      this.ensureModelCatalogState();
       return;
     }
 
     this.settings = runtime.normalizeSettings(raw);
     this.runtimeState = runtime.migrateLegacyMessages({ sessions: [], activeSessionId: "", messagesBySession: {} });
+    if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+    this.ensureModelCatalogState();
   }
 
   async saveSettings() {
@@ -398,15 +603,33 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
       updatedAt: Date.now(),
     };
 
+    if (this.runtimeState && Array.isArray(this.runtimeState.deletedSessionIds)) {
+      this.runtimeState.deletedSessionIds = this.runtimeState.deletedSessionIds.filter((id) => id !== session.id);
+    }
+
     this.sessionStore.upsertSession(session);
     await this.persistState();
     return session;
   }
 
+  async deleteSession(sessionId) {
+    if (!this.sessionStore || typeof this.sessionStore.removeSession !== "function") return false;
+    const removed = this.sessionStore.removeSession(sessionId);
+    if (!removed) return false;
+    await this.persistState();
+    return true;
+  }
+
   async syncSessionsFromRemote() {
     try {
       const remote = await this.opencodeClient.listSessions();
+      const deletedSet = new Set(
+        Array.isArray(this.runtimeState && this.runtimeState.deletedSessionIds)
+          ? this.runtimeState.deletedSessionIds
+          : [],
+      );
       remote.forEach((s) => {
+        if (!s || deletedSet.has(s.id)) return;
         this.sessionStore.upsertSession({
           id: s.id,
           title: s.title || "未命名会话",
@@ -433,11 +656,7 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     }
     if (syncResult.errors.length) this.log(`bundled skills bootstrap sync: ${syncResult.errors.join("; ")}`);
     this.skillService.loadSkills();
-    try {
-      this.cachedModels = await this.opencodeClient.listModels();
-    } catch {
-      this.cachedModels = [];
-    }
+    await this.refreshModelCatalog();
     await this.syncSessionsFromRemote();
   }
 };

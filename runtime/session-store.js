@@ -5,9 +5,47 @@ class SessionStore {
 
   state() {
     if (!this.plugin.runtimeState) {
-      this.plugin.runtimeState = { sessions: [], activeSessionId: "", messagesBySession: {} };
+      this.plugin.runtimeState = { sessions: [], activeSessionId: "", messagesBySession: {}, deletedSessionIds: [] };
+    }
+    if (!Array.isArray(this.plugin.runtimeState.deletedSessionIds)) {
+      this.plugin.runtimeState.deletedSessionIds = [];
     }
     return this.plugin.runtimeState;
+  }
+
+  static normalizeSessionTitleInput(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  static isPlaceholderTitle(title) {
+    const normalized = SessionStore.normalizeSessionTitleInput(title).toLowerCase();
+    if (!normalized) return true;
+    return normalized === "新会话"
+      || normalized === "未命名会话"
+      || normalized === "new session"
+      || normalized === "untitled"
+      || normalized === "untitled session";
+  }
+
+  static deriveTitleFromPrompt(prompt) {
+    let text = SessionStore.normalizeSessionTitleInput(prompt);
+    if (!text) return "";
+
+    if (text.startsWith("/")) {
+      const firstSpace = text.indexOf(" ");
+      if (firstSpace > 1) {
+        const rest = SessionStore.normalizeSessionTitleInput(text.slice(firstSpace + 1));
+        text = rest || text.slice(1);
+      } else {
+        text = text.slice(1);
+      }
+    }
+
+    text = text.replace(/^[\s:：\-—]+/, "");
+    if (!text) return "";
+
+    const maxLen = 28;
+    return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
   }
 
   upsertSession(session) {
@@ -23,6 +61,39 @@ class SessionStore {
     this.state().activeSessionId = id;
   }
 
+  renameSession(sessionId, title) {
+    const st = this.state();
+    const session = st.sessions.find((s) => s.id === sessionId);
+    if (!session) return false;
+
+    const normalized = SessionStore.normalizeSessionTitleInput(title);
+    if (!normalized) return false;
+
+    session.title = normalized;
+    session.updatedAt = Date.now();
+    return true;
+  }
+
+  removeSession(sessionId) {
+    const st = this.state();
+    const before = st.sessions.length;
+    st.sessions = st.sessions.filter((s) => s.id !== sessionId);
+    const removed = st.sessions.length !== before;
+    if (!removed) return false;
+
+    delete st.messagesBySession[sessionId];
+
+    if (!st.deletedSessionIds.includes(sessionId)) {
+      st.deletedSessionIds.push(sessionId);
+    }
+
+    if (st.activeSessionId === sessionId) {
+      st.activeSessionId = st.sessions.length ? st.sessions[0].id : "";
+    }
+
+    return true;
+  }
+
   appendMessage(sessionId, message) {
     const st = this.state();
     const list = st.messagesBySession[sessionId] || [];
@@ -32,7 +103,14 @@ class SessionStore {
     const session = st.sessions.find((s) => s.id === sessionId);
     if (session) {
       session.updatedAt = Date.now();
-      if (message.role === "user") session.lastUserPrompt = message.text;
+      if (message.role === "user") {
+        const promptText = typeof message.text === "string" ? message.text : "";
+        session.lastUserPrompt = promptText;
+        if (SessionStore.isPlaceholderTitle(session.title)) {
+          const nextTitle = SessionStore.deriveTitleFromPrompt(promptText);
+          if (nextTitle) session.title = nextTitle;
+        }
+      }
     }
   }
 

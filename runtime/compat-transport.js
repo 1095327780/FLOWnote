@@ -24,6 +24,7 @@ const {
   extractAssistantPayloadFromEnvelope,
   normalizedRenderableText,
   hasRenderablePayload,
+  formatSessionStatusText,
   isIntermediateToolCallPayload,
   payloadLooksInProgress,
   hasTerminalPayload,
@@ -187,7 +188,10 @@ class CompatTransport {
     if (!this.settings.customApiKey.trim()) throw new Error("当前是自定义 API Key 模式，但 API Key 为空");
 
     const providerId = this.settings.customProviderId.trim();
-    await this.request("PUT", `/auth/${encodeURIComponent(providerId)}`, { type: "api", key: this.settings.customApiKey.trim() }, { directory: this.vaultPath });
+    await this.setProviderApiKeyAuth({
+      providerID: providerId,
+      key: this.settings.customApiKey.trim(),
+    });
 
     if (this.settings.customBaseUrl.trim()) {
       await this.request(
@@ -241,6 +245,95 @@ class CompatTransport {
     }
   }
 
+  async listProviders() {
+    const res = await this.request("GET", "/provider", undefined, { directory: this.vaultPath });
+    const payload = res && res.data ? res.data : res || {};
+    const all = Array.isArray(payload.all) ? payload.all : [];
+    const connected = Array.isArray(payload.connected) ? payload.connected : [];
+    const defaults = payload && typeof payload.default === "object" && payload.default ? payload.default : {};
+    return {
+      all,
+      connected,
+      default: defaults,
+    };
+  }
+
+  async listProviderAuthMethods() {
+    const res = await this.request("GET", "/provider/auth", undefined, { directory: this.vaultPath });
+    const payload = res && res.data ? res.data : res || {};
+    return payload && typeof payload === "object" ? payload : {};
+  }
+
+  async authorizeProviderOauth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const method = Number(options.method);
+    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+
+    const res = await this.request(
+      "POST",
+      `/provider/${encodeURIComponent(providerID)}/oauth/authorize`,
+      { method: Number(method) },
+      { directory: this.vaultPath },
+      options.signal,
+    );
+    return res && res.data ? res.data : res;
+  }
+
+  async completeProviderOauth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const method = Number(options.method);
+    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+
+    const body = { method: Number(method) };
+    const code = String(options.code || "").trim();
+    if (code) body.code = code;
+
+    const res = await this.request(
+      "POST",
+      `/provider/${encodeURIComponent(providerID)}/oauth/callback`,
+      body,
+      { directory: this.vaultPath },
+      options.signal,
+    );
+    const payload = res && Object.prototype.hasOwnProperty.call(res, "data") ? res.data : res;
+    return payload === undefined ? true : Boolean(payload);
+  }
+
+  async setProviderApiKeyAuth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    const key = String(options.key || "").trim();
+    if (!key) throw new Error("API Key 不能为空");
+
+    await this.request(
+      "PUT",
+      `/auth/${encodeURIComponent(providerID)}`,
+      { type: "api", key },
+      undefined,
+      options.signal,
+    );
+    return true;
+  }
+
+  async clearProviderAuth(options = {}) {
+    const providerID = String(options.providerID || "").trim();
+    if (!providerID) throw new Error("providerID 不能为空");
+
+    await this.request(
+      "DELETE",
+      `/auth/${encodeURIComponent(providerID)}`,
+      undefined,
+      undefined,
+      options.signal,
+    );
+    return true;
+  }
+
   async listCommands() {
     const now = Date.now();
     if (now - this.commandCache.at < 30000 && this.commandCache.items.length) {
@@ -267,18 +360,26 @@ class CompatTransport {
     return resolveCommandFromSet(commandName, names);
   }
 
+  getFinalizeTimeoutConfig() {
+    const configured = Math.max(10000, Number(this.settings.requestTimeoutMs) || 120000);
+    const quietTimeoutMs = Math.min(configured, 30000);
+    const maxTotalMs = Math.min(Math.max(quietTimeoutMs * 2, 30000), 90000);
+    return { quietTimeoutMs, maxTotalMs };
+  }
+
   async finalizeAssistantResponse(sessionId, responsePayload, startedAt, signal, preferredMessageId = "") {
     const data = responsePayload && responsePayload.data ? responsePayload.data : responsePayload;
     const initialMessageId = preferredMessageId || (data && data.info ? data.info.id : "");
     const initialPayload = extractAssistantPayloadFromEnvelope(data);
-    const quietTimeoutMs = Math.max(10000, Number(this.settings.requestTimeoutMs) || 120000);
+    const timeoutCfg = this.getFinalizeTimeoutConfig();
+    const quietTimeoutMs = timeoutCfg.quietTimeoutMs;
 
     const polled = await pollAssistantPayload({
       initialMessageId,
       initialPayload,
       signal,
       quietTimeoutMs,
-      maxTotalMs: Math.max(quietTimeoutMs * 3, 10 * 60 * 1000),
+      maxTotalMs: timeoutCfg.maxTotalMs,
       sleep,
       getByMessageId: async (messageId, requestSignal) => {
         const msgRes = await this.request(
@@ -335,6 +436,14 @@ class CompatTransport {
       getSessionStatus: (requestSignal) => this.getSessionStatus(sessionId, requestSignal),
     });
 
+    const hadRenderablePayload = hasRenderablePayload(polled.payload);
+    if (polled.timedOut && !hadRenderablePayload) {
+      const statusText = formatSessionStatusText(polled.lastStatus);
+      const activeModel = String(this.settings && this.settings.defaultModel ? this.settings.defaultModel : "").trim();
+      const modelText = activeModel ? `模型 ${activeModel}` : "当前模型";
+      throw new Error(`${modelText} 长时间无响应，可能不受当前账号/API Key 支持（session.status=${statusText}）。请切换模型或检查登录配置。`);
+    }
+
     let payload = await ensureRenderablePayload({
       payload: polled.payload,
       lastStatus: polled.lastStatus,
@@ -371,11 +480,12 @@ class CompatTransport {
   }
 
   async streamAssistantFromPolling(sessionId, startedAt, signal, handlers) {
-    const quietTimeoutMs = Math.max(10000, Number(this.settings.requestTimeoutMs) || 120000);
+    const timeoutCfg = this.getFinalizeTimeoutConfig();
+    const quietTimeoutMs = timeoutCfg.quietTimeoutMs;
     const polled = await pollAssistantPayload({
       signal,
       quietTimeoutMs,
-      maxTotalMs: Math.max(quietTimeoutMs * 3, 10 * 60 * 1000),
+      maxTotalMs: timeoutCfg.maxTotalMs,
       sleep,
       requireTerminal: false,
       onToken: handlers && handlers.onToken,
@@ -522,6 +632,15 @@ class CompatTransport {
         this.log(`event stream fallback: ${e instanceof Error ? e.message : String(e)}`);
         return null;
       });
+      const streamWaitMs = Math.max(8000, Math.min(45000, Number(this.settings.requestTimeoutMs) || 120000));
+      let streamTimeoutHandle = null;
+      const streamTimeoutPromise = new Promise((resolve) => {
+        streamTimeoutHandle = setTimeout(() => {
+          this.log(`event stream soft-timeout (${streamWaitMs}ms), fallback to polling`);
+          linked.controller.abort();
+          resolve(null);
+        }, streamWaitMs);
+      });
 
       try {
         if (isCommandRequest) {
@@ -542,8 +661,10 @@ class CompatTransport {
             options.signal,
           );
         }
-        streamed = await eventStreamPromise;
+        streamed = await Promise.race([eventStreamPromise, streamTimeoutPromise]);
+        if (streamTimeoutHandle) clearTimeout(streamTimeoutHandle);
       } finally {
+        if (streamTimeoutHandle) clearTimeout(streamTimeoutHandle);
         linked.detach();
         linked.controller.abort();
       }
@@ -590,14 +711,15 @@ class CompatTransport {
           startedAt,
           options.signal,
           streamedMessageId,
-        ).catch((e) => {
-          this.log(`finalize after stream failed: ${e instanceof Error ? e.message : String(e)}`);
-          return null;
-        });
+        );
         finalized = chooseRicherResponse(finalized, fetchedFinal);
       }
     } else {
       finalized = await this.finalizeAssistantResponse(options.sessionId, res, startedAt, options.signal);
+    }
+
+    if (payloadLooksInProgress(finalized)) {
+      throw new Error("模型响应未完成且已超时，请切换模型或检查该 Provider 鉴权。");
     }
 
     const messageId = finalized.messageId;
