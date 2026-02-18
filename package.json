@@ -5,6 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "check": "node --check main.js"
+    "check": "node --check main.js",
+    "check:runtime": "find runtime -type f -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test": "node --test tests/runtime/*.test.js"
   }
 }
