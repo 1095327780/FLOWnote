@@ -70,6 +70,7 @@ class OpenCodeAssistantView extends ItemView {
     this.currentAbort = null;
     this.selectedModel = "";
     this.isSidebarCollapsed = false;
+    this.runtimeStatusState = { text: "", tone: "info" };
   }
 
   getViewType() {
@@ -526,7 +527,6 @@ class OpenCodeAssistantView extends ItemView {
       cls: "oc-hint",
       text: "支持会话切换、技能命令、模型切换、连接诊断和错误恢复。可通过技能下拉或 /skills 快速填入命令。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
     });
-    this.elements.runtimeStatus = composer.createDiv({ cls: "oc-runtime-status is-hidden", text: "" });
 
     this.plugin.diagnosticsService.run().then((result) => this.applyStatus(result));
   }
@@ -552,23 +552,10 @@ class OpenCodeAssistantView extends ItemView {
   }
 
   setRuntimeStatus(text, tone = "info") {
-    if (!this.elements.runtimeStatus) return;
-    const statusEl = this.elements.runtimeStatus;
-    statusEl.removeClass("is-hidden", "is-info", "is-working", "is-error");
-    if (!String(text || "").trim()) {
-      statusEl.setText("");
-      statusEl.addClass("is-hidden");
-      return;
-    }
-
-    statusEl.setText(String(text || "").trim());
-    if (tone === "error") {
-      statusEl.addClass("is-error");
-    } else if (tone === "working") {
-      statusEl.addClass("is-working");
-    } else {
-      statusEl.addClass("is-info");
-    }
+    const normalizedText = String(text || "").trim();
+    const normalizedTone = tone === "error" || tone === "working" ? tone : "info";
+    this.runtimeStatusState = { text: normalizedText, tone: normalizedTone };
+    this.syncRuntimeStatusToPendingTail();
   }
 
   renderMessages() {
@@ -585,6 +572,7 @@ class OpenCodeAssistantView extends ItemView {
     }
 
     messages.forEach((message) => this.renderMessageItem(container, message));
+    this.syncRuntimeStatusToPendingTail();
     container.scrollTop = container.scrollHeight;
   }
 
@@ -643,6 +631,7 @@ class OpenCodeAssistantView extends ItemView {
 
   renderMessageItem(parent, message) {
     const row = parent.createDiv({ cls: ["oc-message", `oc-message-${message.role}`] });
+    row.dataset.messageId = message.id || "";
     if (message.pending) row.addClass("is-pending");
 
     const head = row.createDiv({ cls: "oc-msg-head" });
@@ -654,7 +643,20 @@ class OpenCodeAssistantView extends ItemView {
     const body = row.createDiv({ cls: "oc-message-content" });
 
     if (message.pending) {
-      body.setText(message.text || "...");
+      let pendingText = typeof message.text === "string" ? message.text : "";
+      const hasPendingText = Boolean(String(pendingText || "").trim());
+      const runtimeText = String((this.runtimeStatusState && this.runtimeStatusState.text) || "").trim();
+      const runtimeTone = String((this.runtimeStatusState && this.runtimeStatusState.tone) || "info");
+      const canShowRuntimeStatus = message.role === "assistant" && !hasPendingText && Boolean(runtimeText);
+      body.removeClass("oc-runtime-tail", "is-info", "is-working", "is-error");
+      if (canShowRuntimeStatus) {
+        pendingText = runtimeText;
+        body.addClass("oc-runtime-tail");
+        if (runtimeTone === "error") body.addClass("is-error");
+        else if (runtimeTone === "working") body.addClass("is-working");
+        else body.addClass("is-info");
+      }
+      body.setText(pendingText);
       return;
     }
 
@@ -791,6 +793,37 @@ class OpenCodeAssistantView extends ItemView {
     if (!isBusy) {
       this.setRuntimeStatus("", "info");
     }
+  }
+
+  syncRuntimeStatusToPendingTail() {
+    const container = this.elements.messages;
+    if (!container) return;
+    const rows = container.querySelectorAll(".oc-message-assistant.is-pending");
+    if (!rows || !rows.length) return;
+    const row = rows[rows.length - 1];
+    if (!row) return;
+
+    const body = row.querySelector(".oc-message-content");
+    if (!body) return;
+
+    const messageId = String((row.dataset && row.dataset.messageId) || "").trim();
+    const draft = messageId
+      ? this.plugin.sessionStore.getActiveMessages().find((msg) => msg && msg.id === messageId)
+      : null;
+    const draftText = draft && typeof draft.text === "string" ? draft.text.trim() : "";
+
+    body.removeClass("oc-runtime-tail", "is-info", "is-working", "is-error");
+    if (draftText) return;
+
+    const statusText = String((this.runtimeStatusState && this.runtimeStatusState.text) || "").trim();
+    body.setText(statusText);
+    if (!statusText) return;
+
+    body.addClass("oc-runtime-tail");
+    const tone = String((this.runtimeStatusState && this.runtimeStatusState.tone) || "info");
+    if (tone === "error") body.addClass("is-error");
+    else if (tone === "working") body.addClass("is-working");
+    else body.addClass("is-info");
   }
 }
 

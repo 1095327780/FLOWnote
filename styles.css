@@ -310,6 +310,7 @@ body.theme-dark .oc-surface {
   padding: 12px;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   gap: 10px;
   background: var(--oc-surface-raised);
@@ -410,6 +411,7 @@ body.theme-dark .oc-surface {
 .oc-messages-wrapper {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -421,6 +423,7 @@ body.theme-dark .oc-surface {
 
 .oc-messages {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   padding: 12px;
@@ -453,6 +456,7 @@ body.theme-dark .oc-surface {
 
 .oc-message {
   position: relative;
+  min-width: 0;
   border-radius: 8px;
   padding: 10px 12px;
   max-width: 95%;
@@ -477,7 +481,7 @@ body.theme-dark .oc-surface {
   border-color: color-mix(in srgb, var(--text-warning) 22%, transparent);
 }
 
-.oc-message.is-pending .oc-message-content::after {
+.oc-message.is-pending .oc-message-content:empty::after {
   content: "…";
   animation: oc-pulse 1s infinite;
 }
@@ -516,14 +520,55 @@ body.theme-dark .oc-surface {
 
 .oc-message-content {
   line-height: 1.45;
+  min-width: 0;
+  max-width: 100%;
   user-select: text;
   -webkit-user-select: text;
   white-space: normal;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .oc-message.is-pending .oc-message-content {
   white-space: pre-wrap;
+}
+
+.oc-message-content.oc-runtime-tail {
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.oc-message-content.oc-runtime-tail::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.oc-message-content.oc-runtime-tail.is-info::before {
+  background: var(--text-muted);
+}
+
+.oc-message-content.oc-runtime-tail.is-working {
+  color: var(--text-normal);
+}
+
+.oc-message-content.oc-runtime-tail.is-working::before {
+  background: var(--oc-brand-strong);
+  animation: oc-pulse 1s infinite;
+}
+
+.oc-message-content.oc-runtime-tail.is-error {
+  color: var(--text-error);
+}
+
+.oc-message-content.oc-runtime-tail.is-error::before {
+  background: var(--text-error);
 }
 
 .oc-message-content p {
@@ -549,9 +594,12 @@ body.theme-dark .oc-surface {
 }
 
 .oc-message-content table {
+  display: block;
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 6px 0;
+  overflow-x: auto;
 }
 
 .oc-message-content h1,
@@ -573,6 +621,8 @@ body.theme-dark .oc-surface {
   border: 1px solid var(--oc-border);
   padding: 6px 10px;
   text-align: start;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .oc-message-content th {
@@ -621,11 +671,65 @@ body.theme-dark .oc-surface {
   border-bottom: 1px solid var(--oc-border);
 }
 
+.oc-part-reasoning > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.oc-part-reasoning {
+  margin-top: 0;
+}
+
+.oc-part-reasoning-title {
+  color: var(--text-muted);
+}
+
+.oc-part-reasoning-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--oc-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.oc-part-reasoning.is-running {
+  border-color: color-mix(in srgb, var(--oc-brand-strong) 55%, var(--oc-border));
+}
+
+.oc-part-reasoning.is-running .oc-part-reasoning-status {
+  color: var(--oc-brand-strong);
+  border-color: color-mix(in srgb, var(--oc-brand-strong) 58%, var(--oc-border));
+}
+
+.oc-part-reasoning.is-completed {
+  border-color: color-mix(in srgb, var(--text-success) 40%, var(--oc-border));
+}
+
+.oc-part-reasoning.is-completed .oc-part-reasoning-status {
+  color: var(--text-success);
+  border-color: color-mix(in srgb, var(--text-success) 55%, var(--oc-border));
+}
+
+.oc-part-reasoning.is-error {
+  border-color: color-mix(in srgb, var(--text-error) 45%, var(--oc-border));
+  background: color-mix(in srgb, var(--text-error) 8%, transparent);
+}
+
+.oc-part-reasoning.is-error .oc-part-reasoning-status {
+  color: var(--text-error);
+  border-color: color-mix(in srgb, var(--text-error) 62%, var(--oc-border));
+}
+
 .oc-message-reasoning-body {
   padding: 8px 10px 10px;
   color: var(--text-faint);
   font-size: 13px;
   line-height: 1.4;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .oc-message-reasoning-body p {
@@ -641,6 +745,7 @@ body.theme-dark .oc-surface {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .oc-part-list.is-empty {
@@ -652,6 +757,8 @@ body.theme-dark .oc-surface {
   border-radius: 8px;
   padding: 8px 10px;
   background: color-mix(in srgb, var(--oc-brand-faint) 32%, var(--background-secondary) 68%);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .oc-part-card.is-running {
@@ -728,6 +835,7 @@ body.theme-dark .oc-surface {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   background: color-mix(in srgb, var(--background-primary) 82%, transparent);
 }
 
@@ -736,6 +844,8 @@ body.theme-dark .oc-surface {
   border: 1px solid var(--oc-border);
   border-radius: 6px;
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .oc-part-details > summary {
@@ -761,6 +871,9 @@ body.theme-dark .oc-surface {
   font-family: var(--font-monospace);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .oc-question-inline-note {
@@ -1021,6 +1134,23 @@ body.theme-dark .oc-surface {
   position: relative;
   margin-top: 10px;
   padding-top: 28px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
+  box-sizing: border-box;
+}
+
+.oc-message pre code {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.oc-message :not(pre) > code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .oc-copy-btn {
@@ -1297,50 +1427,6 @@ body.theme-dark .oc-surface {
 
 .oc-hint {
   margin-top: 8px;
-}
-
-.oc-runtime-status {
-  margin-top: 8px;
-  min-height: 18px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 2px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.oc-runtime-status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--text-muted);
-}
-
-.oc-runtime-status.is-hidden {
-  display: none;
-}
-
-.oc-runtime-status.is-info::before {
-  background: var(--text-muted);
-}
-
-.oc-runtime-status.is-working {
-  color: var(--text-normal);
-}
-
-.oc-runtime-status.is-working::before {
-  background: var(--oc-brand-strong);
-  animation: oc-pulse 1s infinite;
-}
-
-.oc-runtime-status.is-error {
-  color: var(--text-error);
-}
-
-.oc-runtime-status.is-error::before {
-  background: var(--text-error);
 }
 
 .oc-root.is-busy .oc-input-wrapper {

@@ -1,0 +1,57 @@
+const DEFAULT_SETTINGS = {
+  transportMode: "sdk",
+  cliPath: "",
+  autoDetectCli: true,
+  skillsDir: ".opencode/skills",
+  skillInjectMode: "summary",
+  defaultModel: "",
+  authMode: "opencode-default",
+  customProviderId: "openai",
+  customApiKey: "",
+  customBaseUrl: "",
+  requestTimeoutMs: 120000,
+  enableStreaming: true,
+  debugLogs: false,
+  opencodeHomeDir: ".opencode-runtime",
+};
+
+function migrateLegacySettings(raw) {
+  const data = raw || {};
+
+  if (typeof data.useCustomApiKey === "boolean") {
+    data.authMode = data.useCustomApiKey ? "custom-api-key" : "opencode-default";
+    delete data.useCustomApiKey;
+  }
+
+  if (!data.transportMode) data.transportMode = "sdk";
+
+  if (data.prependSkillPrompt === false && !data.skillInjectMode) data.skillInjectMode = "off";
+  if (data.prependSkillPrompt === true && !data.skillInjectMode) data.skillInjectMode = "summary";
+  delete data.prependSkillPrompt;
+
+  return data;
+}
+
+function normalizeSettings(raw) {
+  const merged = Object.assign({}, DEFAULT_SETTINGS, migrateLegacySettings(raw));
+
+  if (!["sdk", "compat"].includes(merged.transportMode)) merged.transportMode = "sdk";
+  if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
+  if (!["opencode-default", "custom-api-key"].includes(merged.authMode)) merged.authMode = "opencode-default";
+
+  merged.requestTimeoutMs = Math.max(10000, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
+  merged.cliPath = String(merged.cliPath || "").trim();
+  merged.skillsDir = String(merged.skillsDir || DEFAULT_SETTINGS.skillsDir).trim();
+  merged.defaultModel = String(merged.defaultModel || "").trim();
+  merged.customProviderId = String(merged.customProviderId || "openai").trim();
+  merged.customApiKey = String(merged.customApiKey || "").trim();
+  merged.customBaseUrl = String(merged.customBaseUrl || "").trim();
+
+  return merged;
+}
+
+module.exports = {
+  DEFAULT_SETTINGS,
+  migrateLegacySettings,
+  normalizeSettings,
+};
