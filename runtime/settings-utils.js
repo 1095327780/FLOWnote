@@ -13,6 +13,8 @@ const DEFAULT_SETTINGS = {
   enableStreaming: true,
   debugLogs: false,
   opencodeHomeDir: ".opencode-runtime",
+  launchStrategy: "auto",
+  wslDistro: "",
 };
 
 function migrateLegacySettings(raw) {
@@ -38,6 +40,9 @@ function normalizeSettings(raw) {
   if (!["sdk", "compat"].includes(merged.transportMode)) merged.transportMode = "sdk";
   if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
   if (!["opencode-default", "custom-api-key"].includes(merged.authMode)) merged.authMode = "opencode-default";
+  if (!["auto", "native", "wsl"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
+    merged.launchStrategy = "auto";
+  }
 
   merged.requestTimeoutMs = Math.max(10000, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
   merged.cliPath = String(merged.cliPath || "").trim();
@@ -46,6 +51,8 @@ function normalizeSettings(raw) {
   merged.customProviderId = String(merged.customProviderId || "openai").trim();
   merged.customApiKey = String(merged.customApiKey || "").trim();
   merged.customBaseUrl = String(merged.customBaseUrl || "").trim();
+  merged.launchStrategy = String(merged.launchStrategy || "auto").trim().toLowerCase();
+  merged.wslDistro = String(merged.wslDistro || "").trim();
 
   return merged;
 }

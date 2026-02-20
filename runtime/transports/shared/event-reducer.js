@@ -6,6 +6,15 @@ const {
   payloadLooksInProgress,
 } = require("../../assistant-payload-utils");
 
+function normalizeTimestampMs(value) {
+  const raw = Number(value || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  if (raw >= 1e14) return Math.floor(raw / 1000);
+  if (raw >= 1e12) return Math.floor(raw);
+  if (raw >= 1e9) return Math.floor(raw * 1000);
+  return Math.floor(raw);
+}
+
 function createTransportEventReducer(options) {
   const cfg = options && typeof options === "object" ? options : {};
   const sessionId = String(cfg.sessionId || "").trim();
@@ -31,6 +40,8 @@ function createTransportEventReducer(options) {
   let blocks = [];
   let blocksKey = blocksFingerprint(blocks);
   let done = false;
+  let completionSeen = false;
+  let idleSeen = false;
 
   const call = (fn, ...args) => {
     if (typeof fn !== "function") return;
@@ -76,6 +87,8 @@ function createTransportEventReducer(options) {
     reasoningByPart.clear();
     blockPartById.clear();
     partKindById.clear();
+    completionSeen = false;
+    idleSeen = false;
     text = "";
     reasoning = "";
     blocks = [];
@@ -159,6 +172,7 @@ function createTransportEventReducer(options) {
         call(cfg.onToken, text);
       }
     }
+    completionSeen = true;
     done = true;
   };
 
@@ -170,7 +184,7 @@ function createTransportEventReducer(options) {
     if (info.role !== "assistant") return;
     if (typeof info.id !== "string" || !info.id) return;
 
-    const created = info.time ? Number(info.time.created || 0) : 0;
+    const created = info.time ? normalizeTimestampMs(info.time.created || 0) : 0;
     if (created > 0 && created < startedAt - 1000) return;
 
     if (!messageId || created >= activeMessageCreatedAt) {
@@ -192,9 +206,10 @@ function createTransportEventReducer(options) {
     }
 
     if (info.time && Number(info.time.completed || 0) > 0) {
-      const snapshot = { text, reasoning, meta, blocks };
-      if (hasTerminalPayload(snapshot) && !payloadLooksInProgress(snapshot)) {
-        done = true;
+      completionSeen = true;
+      if (idleSeen) {
+        const snapshot = { text, reasoning, meta, blocks };
+        if (hasTerminalPayload(snapshot) && !payloadLooksInProgress(snapshot)) done = true;
       }
     }
   };
@@ -203,7 +218,10 @@ function createTransportEventReducer(options) {
     const props = event.properties && typeof event.properties === "object" ? event.properties : {};
     const part = props.part && typeof props.part === "object" ? props.part : null;
     if (!part || typeof part.sessionID !== "string" || part.sessionID !== sessionId) return;
-    if (part.time && Number(part.time.start || 0) > 0 && Number(part.time.start || 0) < startedAt - 1000) return;
+    if (part.time) {
+      const partStart = normalizeTimestampMs(part.time.start || 0);
+      if (partStart > 0 && partStart < startedAt - 1000) return;
+    }
     if (!messageId) return;
     if (typeof part.messageID !== "string" || part.messageID !== messageId) return;
 
@@ -212,6 +230,7 @@ function createTransportEventReducer(options) {
     partKindById.set(partId, String(part.type || ""));
 
     if (part.type === "text") {
+      idleSeen = false;
       if (part.ignored === true) {
         textByPart.delete(partId);
       } else {
@@ -224,6 +243,7 @@ function createTransportEventReducer(options) {
     }
 
     if (part.type === "reasoning") {
+      idleSeen = false;
       const current = reasoningByPart.get(partId) || "";
       const next = delta ? current + delta : typeof part.text === "string" ? part.text : current;
       reasoningByPart.set(partId, next);
@@ -233,6 +253,7 @@ function createTransportEventReducer(options) {
       return;
     }
 
+    idleSeen = false;
     blockPartById.set(partId, part);
     updateBlocks();
   };
@@ -307,21 +328,48 @@ function createTransportEventReducer(options) {
 
     if (event.type === "session.idle") {
       const sid = event.properties && event.properties.sessionID;
-      if (sid === sessionId) done = true;
+      if (sid === sessionId) {
+        const hasAnyPayload = Boolean(String(text || "").trim()
+          || String(reasoning || "").trim()
+          || String(meta || "").trim()
+          || (Array.isArray(blocks) && blocks.length > 0));
+        if (completionSeen || (!hasAnyPayload && !messageId)) {
+          done = true;
+        } else {
+          idleSeen = true;
+        }
+      }
       return done;
     }
 
     if (event.type === "session.status") {
       const sid = event.properties && event.properties.sessionID;
       const status = event.properties && event.properties.status && event.properties.status.type;
-      if (sid === sessionId && status === "idle") done = true;
+      if (sid === sessionId && status === "idle") {
+        const hasAnyPayload = Boolean(String(text || "").trim()
+          || String(reasoning || "").trim()
+          || String(meta || "").trim()
+          || (Array.isArray(blocks) && blocks.length > 0));
+        if (completionSeen || (!hasAnyPayload && !messageId)) {
+          done = true;
+        } else {
+          idleSeen = true;
+        }
+      }
     }
 
     return done;
   }
 
   function snapshot() {
-    return { messageId, text, reasoning, meta, blocks };
+    return {
+      messageId,
+      text,
+      reasoning,
+      meta,
+      blocks,
+      completed: Boolean(done && completionSeen),
+    };
   }
 
   function isDone() {

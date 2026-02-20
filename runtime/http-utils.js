@@ -1,10 +1,11 @@
 const http = require("http");
 const https = require("https");
 
-function nodeHttpRequestJson(url, method, body, timeoutMs, signal) {
+function nodeHttpRequestJson(url, method, body, timeoutMs, signal, options = {}) {
   const parsed = new URL(url);
   const isHttps = parsed.protocol === "https:";
   const client = isHttps ? https : http;
+  const trace = options && typeof options.trace === "function" ? options.trace : null;
 
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const headers = {
@@ -26,7 +27,7 @@ function nodeHttpRequestJson(url, method, body, timeoutMs, signal) {
 
     let onAbort = null;
 
-    console.log(`[opencode-assistant] HTTP ${method} ${parsed.pathname}${parsed.search}`);
+    if (trace) trace(`HTTP ${method} ${parsed.pathname}${parsed.search}`);
     const req = client.request(
       {
         protocol: parsed.protocol,
@@ -41,7 +42,7 @@ function nodeHttpRequestJson(url, method, body, timeoutMs, signal) {
         res.on("data", (chunk) => chunks.push(chunk));
         res.on("end", () => {
           const text = Buffer.concat(chunks).toString("utf8");
-          console.log(`[opencode-assistant] HTTP ${method} ${parsed.pathname} -> ${res.statusCode}`);
+          if (trace) trace(`HTTP ${method} ${parsed.pathname} -> ${res.statusCode}`);
           finish(resolve, {
             status: Number(res.statusCode || 0),
             text,
@@ -69,10 +70,12 @@ function nodeHttpRequestJson(url, method, body, timeoutMs, signal) {
   });
 }
 
-function nodeHttpRequestSse(url, timeoutMs, signal, handlers) {
+function nodeHttpRequestSse(url, timeoutMs, signal, handlers, options = {}) {
   const parsed = new URL(url);
   const isHttps = parsed.protocol === "https:";
   const client = isHttps ? https : http;
+  const maxBufferChars = 2 * 1024 * 1024;
+  const trace = options && typeof options.trace === "function" ? options.trace : null;
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -89,6 +92,11 @@ function nodeHttpRequestSse(url, timeoutMs, signal, handlers) {
       const textChunk = String(chunk || "").replace(/\r/g, "");
       if (!textChunk) return;
       buffer += textChunk;
+      if (buffer.length > maxBufferChars) {
+        finish(reject, new Error(`SSE 缓冲区超限 (${maxBufferChars})`));
+        req.destroy();
+        return;
+      }
 
       let splitIndex = buffer.indexOf("\n\n");
       while (splitIndex >= 0) {
@@ -160,6 +168,7 @@ function nodeHttpRequestSse(url, timeoutMs, signal, handlers) {
           return;
         }
 
+        if (trace) trace(`HTTP GET ${parsed.pathname} -> ${status} (sse)`);
         res.on("data", consumeSseChunk);
         res.on("end", () => finish(resolve));
         res.on("error", (err) => finish(reject, err));

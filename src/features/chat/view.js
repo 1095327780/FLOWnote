@@ -249,6 +249,32 @@ class OpenCodeAssistantView extends ItemView {
     return lines[0] || "暂无技能说明";
   }
 
+  getSkillBriefDescription(skill) {
+    const primary = String(this.getSkillPrimaryDescription(skill) || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!primary || primary === "暂无技能说明") return "";
+
+    let brief = primary;
+    const namePrefix = String(skill && skill.name ? skill.name : "").trim();
+    if (namePrefix && brief.toLowerCase().startsWith(namePrefix.toLowerCase())) {
+      brief = brief.slice(namePrefix.length).trim();
+      brief = brief.replace(/^[(（][^)）]+[)）]\s*[-—:：]?\s*/, "");
+      brief = brief.replace(/^[-—:：\s]+/, "");
+    }
+
+    if (!brief) brief = primary;
+    const delimiters = ["：", ":", "。", "；", ";", "，", ",", "（", "("];
+    let cutIndex = brief.length;
+    delimiters.forEach((delimiter) => {
+      const index = brief.indexOf(delimiter);
+      if (index > 0 && index < cutIndex) cutIndex = index;
+    });
+    brief = brief.slice(0, cutIndex).trim();
+    if (brief.length > 24) brief = `${brief.slice(0, 24)}…`;
+    return brief;
+  }
+
   openSettings() {
     this.plugin.app.setting.open();
     this.plugin.app.setting.openTabById(this.plugin.manifest.id);
@@ -389,7 +415,15 @@ class OpenCodeAssistantView extends ItemView {
       return;
     }
 
-    const addBtn = sideActions.createEl("button", { cls: "oc-side-add", text: "新建" });
+    const addBtn = sideActions.createEl("button", { cls: "oc-side-add" });
+    addBtn.setAttr("type", "button");
+    addBtn.setAttr("aria-label", "新建会话");
+    addBtn.setAttr("title", "新建会话");
+    try {
+      setIcon(addBtn, "plus");
+    } catch {
+      addBtn.setText("+");
+    }
     addBtn.addEventListener("click", async () => {
       try {
         const session = await this.plugin.createSession("新会话");
@@ -408,7 +442,7 @@ class OpenCodeAssistantView extends ItemView {
     const list = side.createDiv({ cls: "oc-session-list" });
 
     if (!sessions.length) {
-      list.createDiv({ cls: "oc-empty", text: "暂无会话，点击“新建”开始。" });
+      list.createDiv({ cls: "oc-empty", text: "暂无会话，点击“+”开始。" });
       return;
     }
 
@@ -461,10 +495,24 @@ class OpenCodeAssistantView extends ItemView {
 
     const navSidebar = messagesWrapper.createDiv({ cls: "oc-nav-sidebar visible" });
     const topBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-top" });
-    setIcon(topBtn, "chevrons-up");
+    topBtn.setAttr("type", "button");
+    topBtn.setAttr("aria-label", "滚动到顶部");
+    topBtn.setAttr("title", "回到顶部");
+    try {
+      setIcon(topBtn, "chevron-up");
+    } catch {
+      topBtn.setText("↑");
+    }
     topBtn.addEventListener("click", () => this.scrollMessagesTo("top"));
     const bottomBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-bottom" });
-    setIcon(bottomBtn, "chevrons-down");
+    bottomBtn.setAttr("type", "button");
+    bottomBtn.setAttr("aria-label", "滚动到底部");
+    bottomBtn.setAttr("title", "到底部");
+    try {
+      setIcon(bottomBtn, "chevron-down");
+    } catch {
+      bottomBtn.setText("↓");
+    }
     bottomBtn.addEventListener("click", () => this.scrollMessagesTo("bottom"));
 
     const contextFooter = main.createDiv({ cls: "oc-context-footer" });
@@ -490,36 +538,45 @@ class OpenCodeAssistantView extends ItemView {
     const skillPicker = quick.createDiv({ cls: "oc-skill-picker" });
     const skillSelect = skillPicker.createEl("select", { cls: "oc-skill-select" });
     this.elements.skillSelect = skillSelect;
+    skillSelect.setAttr("title", "选择技能");
     skillSelect.createEl("option", { value: "", text: "技能 /skills" });
 
-    const skillDescription = skillPicker.createDiv({
-      cls: "oc-skill-select-desc",
-      text: "选择技能后会显示主要功能说明。",
-    });
-    this.elements.skillDescription = skillDescription;
+    const setSkillSelectTitle = (skill) => {
+      if (!skill) {
+        skillSelect.setAttr("title", "选择技能");
+        return;
+      }
+      const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
+      const mainFeature = this.getSkillPrimaryDescription(skill);
+      const detail = [label, `/${skill.id}`, mainFeature].filter(Boolean).join(" - ");
+      skillSelect.setAttr("title", detail || "选择技能");
+    };
 
     const skills = this.plugin.skillService.getSkills();
     skills.forEach((skill) => {
+      const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
       const mainFeature = this.getSkillPrimaryDescription(skill);
+      const briefFeature = this.getSkillBriefDescription(skill);
       skillSelect.createEl("option", {
         value: skill.id,
-        text: `${skill.name || skill.id} (/${skill.id}) - ${mainFeature}`,
+        text: briefFeature ? `${label} - ${briefFeature}` : label,
+        attr: { title: [label, `/${skill.id}`, mainFeature].filter(Boolean).join(" - ") },
       });
     });
 
     if (!skills.length) {
       skillSelect.disabled = true;
-      skillDescription.setText("当前未发现可用技能，请检查 Skills 目录设置。");
+      skillSelect.setAttr("title", "当前未发现可用技能，请检查 Skills 目录设置。");
     } else {
       skillSelect.addEventListener("change", () => {
         const selectedId = String(skillSelect.value || "");
         const picked = skills.find((skill) => String(skill.id) === selectedId);
         if (!picked) {
-          skillDescription.setText("选择技能后会显示主要功能说明。");
+          setSkillSelectTitle(null);
           return;
         }
 
-        skillDescription.setText(this.getSkillPrimaryDescription(picked));
+        setSkillSelectTitle(picked);
         if (this.elements.input) {
           this.elements.input.value = `/${picked.id} `;
           this.elements.input.focus();
@@ -554,7 +611,7 @@ class OpenCodeAssistantView extends ItemView {
 
     composer.createDiv({
       cls: "oc-hint",
-      text: "支持会话切换、技能命令、模型切换和错误恢复。可通过下拉列表或 /skills、/model 快速切换。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
+      text: "支持会话切换、技能/模型下拉、Provider 登录管理与错误恢复。可通过 /skills、/model 快速切换；模型无响应时会给出报错并自动隐藏不可用项。",
     });
 
     this.plugin.diagnosticsService.run().then((result) => this.applyStatus(result));

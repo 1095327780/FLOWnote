@@ -50,16 +50,23 @@ function hasTerminalStepFinish(payload) {
 function payloadLooksInProgress(payload) {
   const p = payload && typeof payload === "object" ? payload : {};
   const blocks = Array.isArray(p.blocks) ? p.blocks : [];
-  const hasTool = blocks.some((b) => b && b.type === "tool");
+  const hasRenderableText = normalizedRenderableText(p.text || "").length > 1;
+  const hasReasoningText = String(p.reasoning || "").trim().length > 0;
+  const hasToolInFlight = blocks.some((b) => {
+    if (!b || b.type !== "tool") return false;
+    const status = String(b.status || "").trim().toLowerCase();
+    if (!status) return true;
+    return status !== "completed" && status !== "error";
+  });
   const hasStepStart = blocks.some((b) => b && b.type === "step-start");
   const hasTerminalFinish = hasTerminalStepFinish(payload);
   const hasToolCallsFinish = blocks.some(
     (b) => b && b.type === "step-finish" && String(b.summary || "").trim().toLowerCase() === "tool-calls",
   );
   if (hasTerminalFinish) return false;
-  if (hasToolCallsFinish) return true;
-  if (hasTool) return true;
-  if (hasStepStart) return true;
+  if (hasToolCallsFinish && !hasRenderableText) return true;
+  if (hasToolInFlight) return true;
+  if (hasStepStart && !hasRenderableText && !hasReasoningText) return true;
   return false;
 }
 
@@ -148,6 +155,7 @@ function mergeAssistantPayload(preferred, fallback) {
     reasoning: String(p.reasoning || "").trim() ? String(p.reasoning || "") : String(f.reasoning || ""),
     meta: String(p.meta || "").trim() ? String(p.meta || "") : String(f.meta || ""),
     blocks: mergeBlockLists(p.blocks, f.blocks),
+    completed: Boolean(p.completed) || Boolean(f.completed),
   };
 }
 

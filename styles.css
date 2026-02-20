@@ -217,7 +217,8 @@ body.theme-dark .oc-surface {
   margin-inline-start: auto;
 }
 
-.oc-side-toggle {
+.oc-side-toggle,
+.oc-side-add {
   all: unset;
   box-sizing: border-box;
   width: 24px;
@@ -233,7 +234,8 @@ body.theme-dark .oc-surface {
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
-.oc-side-toggle:hover {
+.oc-side-toggle:hover,
+.oc-side-add:hover {
   border-color: var(--oc-border-hover);
   background: var(--oc-brand-faint);
   color: var(--oc-brand-strong);
@@ -245,7 +247,8 @@ body.theme-dark .oc-surface {
 }
 
 .oc-side-toggle svg,
-.oc-side-toggle .oc-side-toggle-icon {
+.oc-side-toggle .oc-side-toggle-icon,
+.oc-side-add svg {
   width: 15px;
   height: 15px;
   display: block;
@@ -256,18 +259,9 @@ body.theme-dark .oc-surface {
 }
 
 .oc-side-add {
-  border-radius: 6px;
-  font-size: 12px;
-  padding: 4px 9px;
-  border: 1px solid var(--oc-border);
-  background: var(--background-primary);
-  color: var(--text-muted);
-}
-
-.oc-side-add:hover {
-  color: var(--text-normal);
-  border-color: var(--oc-border-hover);
-  background: var(--oc-brand-faint);
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 600;
 }
 
 .oc-side.is-collapsed {
@@ -1386,7 +1380,7 @@ body.theme-dark .oc-surface {
 }
 
 .oc-nav-sidebar.visible {
-  opacity: 0.14;
+  opacity: 0.42;
   pointer-events: auto;
 }
 
@@ -1395,6 +1389,8 @@ body.theme-dark .oc-surface {
 }
 
 .oc-nav-btn {
+  all: unset;
+  box-sizing: border-box;
   width: 30px;
   height: 30px;
   border-radius: 15px;
@@ -1419,6 +1415,12 @@ body.theme-dark .oc-surface {
 .oc-nav-btn svg {
   width: 14px;
   height: 14px;
+}
+
+.oc-nav-btn span,
+.oc-nav-btn {
+  font-size: 15px;
+  line-height: 1;
 }
 
 .oc-nav-btn-top {

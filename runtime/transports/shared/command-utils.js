@@ -60,20 +60,74 @@ function parseSlashCommand(prompt) {
   };
 }
 
+function normalizeTimestampMs(value) {
+  const raw = Number(value || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  if (raw >= 1e14) return Math.floor(raw / 1000);
+  if (raw >= 1e12) return Math.floor(raw);
+  if (raw >= 1e9) return Math.floor(raw * 1000);
+  return Math.floor(raw);
+}
+
+function messageInfo(item) {
+  if (!item || typeof item !== "object") return null;
+  if (item.info && typeof item.info === "object") return item.info;
+  if (item.message && typeof item.message === "object") {
+    if (item.message.info && typeof item.message.info === "object") return item.message.info;
+    return item.message;
+  }
+  return item;
+}
+
+function messageRole(item) {
+  const info = messageInfo(item);
+  if (!info || typeof info !== "object") return "";
+  if (typeof info.role === "string" && info.role.trim()) return info.role.trim().toLowerCase();
+  if (typeof info.type === "string" && info.type.trim()) return info.type.trim().toLowerCase();
+  return "";
+}
+
+function messageHasError(item) {
+  const info = messageInfo(item);
+  if (!info || typeof info !== "object") return false;
+  if (typeof info.error === "string" && info.error.trim()) return true;
+  if (info.error && typeof info.error === "object") return true;
+  return false;
+}
+
+function messageCreatedAt(item) {
+  const info = messageInfo(item);
+  if (!info || typeof info !== "object") return 0;
+  const time = info.time && typeof info.time === "object" ? info.time : {};
+  const created = normalizeTimestampMs(
+    time.created || time.updated || info.created || info.updated || 0,
+  );
+  return created;
+}
+
 function findLatestAssistantMessage(messages, startedAt) {
   const list = Array.isArray(messages) ? messages : [];
   const candidates = list
-    .filter((item) => item && item.info && item.info.role === "assistant")
+    .filter((item) => messageRole(item) === "assistant")
     .filter((item) => {
-      const created = item && item.info && item.info.time ? Number(item.info.time.created || 0) : 0;
-      return !startedAt || created >= startedAt - 1000;
+      const created = messageCreatedAt(item);
+      return !startedAt || created === 0 || created >= startedAt - 1000;
     })
     .sort((a, b) => {
-      const ta = a && a.info && a.info.time ? Number(a.info.time.created || 0) : 0;
-      const tb = b && b.info && b.info.time ? Number(b.info.time.created || 0) : 0;
+      const ta = messageCreatedAt(a);
+      const tb = messageCreatedAt(b);
       return tb - ta;
     });
-  return candidates[0] || null;
+  if (candidates.length) return candidates[0];
+
+  const errorCandidates = list
+    .filter((item) => messageHasError(item))
+    .sort((a, b) => {
+      const ta = messageCreatedAt(a);
+      const tb = messageCreatedAt(b);
+      return tb - ta;
+    });
+  return errorCandidates[0] || null;
 }
 
 module.exports = {

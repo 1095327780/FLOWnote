@@ -68,6 +68,23 @@ function appendGroupedModelOptions(selectEl, models) {
     });
 }
 
+function updateModelSelectOptions() {
+  const modelSelect = this.elements && this.elements.modelSelect;
+  if (!modelSelect) return;
+
+  const selectedBefore = String(this.selectedModel || modelSelect.value || "");
+  const models = Array.isArray(this.plugin && this.plugin.cachedModels) ? this.plugin.cachedModels : [];
+  const normalizedModels = [...new Set(models.map((model) => String(model || "").trim()).filter(Boolean))];
+
+  modelSelect.empty();
+  modelSelect.createEl("option", { value: "", text: "模型 /models" });
+  appendGroupedModelOptions(modelSelect, normalizedModels);
+
+  const canRestoreSelection = selectedBefore && normalizedModels.includes(selectedBefore);
+  modelSelect.value = canRestoreSelection ? selectedBefore : "";
+  this.selectedModel = modelSelect.value;
+}
+
 function renderSidebarToggleIcon(button) {
   if (!button) return;
   button.empty();
@@ -194,7 +211,15 @@ function renderSidebar(side) {
     return;
   }
 
-  const addBtn = sideActions.createEl("button", { cls: "oc-side-add", text: "新建" });
+  const addBtn = sideActions.createEl("button", { cls: "oc-side-add" });
+  addBtn.setAttr("type", "button");
+  addBtn.setAttr("aria-label", "新建会话");
+  addBtn.setAttr("title", "新建会话");
+  try {
+    setIcon(addBtn, "plus");
+  } catch {
+    addBtn.setText("+");
+  }
   addBtn.addEventListener("click", async () => {
     try {
       const session = await this.plugin.createSession("");
@@ -212,7 +237,7 @@ function renderSidebar(side) {
   const list = side.createDiv({ cls: "oc-session-list" });
 
   if (!sessions.length) {
-    list.createDiv({ cls: "oc-empty", text: "暂无会话，点击“新建”开始。" });
+    list.createDiv({ cls: "oc-empty", text: "暂无会话，点击“+”开始。" });
     return;
   }
 
@@ -311,10 +336,24 @@ function renderMain(main) {
 
   const navSidebar = messagesWrapper.createDiv({ cls: "oc-nav-sidebar visible" });
   const topBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-top" });
-  setIcon(topBtn, "chevrons-up");
+  topBtn.setAttr("type", "button");
+  topBtn.setAttr("aria-label", "滚动到顶部");
+  topBtn.setAttr("title", "回到顶部");
+  try {
+    setIcon(topBtn, "chevron-up");
+  } catch {
+    topBtn.setText("↑");
+  }
   topBtn.addEventListener("click", () => this.scrollMessagesTo("top"));
   const bottomBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-bottom" });
-  setIcon(bottomBtn, "chevrons-down");
+  bottomBtn.setAttr("type", "button");
+  bottomBtn.setAttr("aria-label", "滚动到底部");
+  bottomBtn.setAttr("title", "到底部");
+  try {
+    setIcon(bottomBtn, "chevron-down");
+  } catch {
+    bottomBtn.setText("↓");
+  }
   bottomBtn.addEventListener("click", () => this.scrollMessagesTo("bottom"));
 
   const contextFooter = main.createDiv({ cls: "oc-context-footer" });
@@ -328,10 +367,7 @@ function renderMain(main) {
   const modelPicker = quick.createDiv({ cls: "oc-model-picker" });
   const modelSelect = modelPicker.createEl("select", { cls: "oc-model-select" });
   this.elements.modelSelect = modelSelect;
-  modelSelect.createEl("option", { value: "", text: "模型 /models" });
-  appendGroupedModelOptions(modelSelect, this.plugin.cachedModels || []);
-  if (this.selectedModel) modelSelect.value = this.selectedModel;
-  if (modelSelect.value !== this.selectedModel) this.selectedModel = modelSelect.value;
+  this.updateModelSelectOptions();
   modelSelect.addEventListener("change", async () => {
     try {
       await this.applyModelSelection(modelSelect.value);
@@ -345,36 +381,45 @@ function renderMain(main) {
   const skillPicker = quick.createDiv({ cls: "oc-skill-picker" });
   const skillSelect = skillPicker.createEl("select", { cls: "oc-skill-select" });
   this.elements.skillSelect = skillSelect;
+  skillSelect.setAttr("title", "选择技能");
   skillSelect.createEl("option", { value: "", text: "技能 /skills" });
 
-  const skillDescription = skillPicker.createDiv({
-    cls: "oc-skill-select-desc",
-    text: "选择技能后会显示主要功能说明。",
-  });
-  this.elements.skillDescription = skillDescription;
-
   const skills = this.plugin.skillService.getSkills();
-  skills.forEach((skill) => {
+  const setSkillSelectTitle = (skill) => {
+    if (!skill) {
+      skillSelect.setAttr("title", "选择技能");
+      return;
+    }
+    const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
     const mainFeature = this.getSkillPrimaryDescription(skill);
+    const detail = [label, `/${skill.id}`, mainFeature].filter(Boolean).join(" - ");
+    skillSelect.setAttr("title", detail || "选择技能");
+  };
+
+  skills.forEach((skill) => {
+    const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
+    const mainFeature = this.getSkillPrimaryDescription(skill);
+    const briefFeature = this.getSkillBriefDescription(skill);
     skillSelect.createEl("option", {
       value: skill.id,
-      text: `${skill.name || skill.id} (/${skill.id}) - ${mainFeature}`,
+      text: briefFeature ? `${label} - ${briefFeature}` : label,
+      attr: { title: [label, `/${skill.id}`, mainFeature].filter(Boolean).join(" - ") },
     });
   });
 
   if (!skills.length) {
     skillSelect.disabled = true;
-    skillDescription.setText("当前未发现可用技能，请检查 Skills 目录设置。");
+    skillSelect.setAttr("title", "当前未发现可用技能，请检查 Skills 目录设置。");
   } else {
     skillSelect.addEventListener("change", () => {
       const selectedId = String(skillSelect.value || "");
       const picked = skills.find((skill) => String(skill.id) === selectedId);
       if (!picked) {
-        skillDescription.setText("选择技能后会显示主要功能说明。");
+        setSkillSelectTitle(null);
         return;
       }
 
-      skillDescription.setText(this.getSkillPrimaryDescription(picked));
+      setSkillSelectTitle(picked);
       if (this.elements.input) {
         this.elements.input.value = `/${picked.id} `;
         this.elements.input.focus();
@@ -424,11 +469,20 @@ function renderMain(main) {
 
   composer.createDiv({
     cls: "oc-hint",
-    text: "支持会话切换、技能命令、模型切换和错误恢复。可通过下拉列表或 /skills、/model 快速切换。若看到 ENOENT，请在设置页填入 OpenCode 绝对路径。",
+    text: "支持会话切换、技能/模型下拉、Provider 登录管理与错误恢复。可通过 /skills、/model 快速切换；模型无响应时会给出报错并自动隐藏不可用项。",
   });
 
   this.renderInlineQuestionPanel(this.plugin.sessionStore.getActiveMessages());
-  this.plugin.diagnosticsService.run().then((r) => this.applyStatus(r));
+  const diagnosticsService = this.plugin && this.plugin.diagnosticsService;
+  if (diagnosticsService) {
+    const cached = diagnosticsService.getLastResult();
+    if (cached) this.applyStatus(cached);
+    diagnosticsService
+      .runCached(15000, false)
+      .then((r) => this.applyStatus(r))
+      .catch(() => {
+      });
+  }
 }
 
 function applyStatus(result) {
@@ -470,6 +524,7 @@ module.exports = { layoutRendererMethods: {
   deriveSessionTitleFromPrompt,
   sessionDisplayTitle,
   activeSessionLabel,
+  updateModelSelectOptions,
   render,
   renderHeader,
   renderSidebar,

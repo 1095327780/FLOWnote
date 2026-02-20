@@ -272,7 +272,36 @@ class SdkTransport {
       const res = await client.session.status({ directory: this.vaultPath }, { signal });
       const payload = res && res.data ? res.data : res;
       if (!payload || typeof payload !== "object") return null;
-      return payload[sessionId] || null;
+      if (payload[sessionId] && typeof payload[sessionId] === "object") return payload[sessionId];
+      if (payload.sessions && typeof payload.sessions === "object" && payload.sessions[sessionId]) {
+        return payload.sessions[sessionId];
+      }
+      if (Array.isArray(payload)) {
+        const row = payload.find((item) => {
+          if (!item || typeof item !== "object") return false;
+          return item.id === sessionId || item.sessionID === sessionId || item.sessionId === sessionId;
+        });
+        if (row && typeof row === "object") {
+          if (row.status && typeof row.status === "object") return row.status;
+          if (row.state && typeof row.state === "object") return row.state;
+          return row;
+        }
+      }
+      if (payload.sessionID === sessionId || payload.sessionId === sessionId || payload.id === sessionId) {
+        if (payload.status && typeof payload.status === "object") return payload.status;
+        if (payload.state && typeof payload.state === "object") return payload.state;
+        return payload;
+      }
+      if (
+        typeof payload.type === "string" ||
+        typeof payload.status === "string" ||
+        typeof payload.state === "string" ||
+        (payload.status && typeof payload.status === "object") ||
+        (payload.state && typeof payload.state === "object")
+      ) {
+        return payload;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -353,6 +382,7 @@ class SdkTransport {
       reasoning: payload.reasoning || "",
       meta: payload.meta || "",
       blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+      completed: Boolean(polled.completed) || (hasTerminalPayload(payload) && !payloadLooksInProgress(payload)),
     };
   }
 
@@ -486,6 +516,7 @@ class SdkTransport {
         reasoning: payload.reasoning || "",
         meta: payload.meta || "",
         blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+        completed: true,
       };
     } else {
       const promptRes = await client.session.prompt(
@@ -506,6 +537,7 @@ class SdkTransport {
         reasoning: payload.reasoning || "",
         meta: payload.meta || "",
         blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+        completed: true,
       };
     }
 
@@ -513,7 +545,7 @@ class SdkTransport {
     if (
       !finalized ||
       !hasRenderablePayload(finalized) ||
-      (usedRealStreaming && !hasTerminalPayload(finalized))
+      (usedRealStreaming && (!hasTerminalPayload(finalized) || !Boolean(finalized && finalized.completed)))
     ) {
       const preferredMessageId = finalized && typeof finalized.messageId === "string" ? finalized.messageId : "";
       const polled = await this.pollAssistantResult(

@@ -144,7 +144,25 @@ class SessionStore {
     if (incoming === existing) return existing;
     if (incoming.includes(existing)) return incoming;
     if (existing.includes(incoming)) return existing;
-    return `${existing}\n\n${incoming}`;
+    if (incomingTrimmed.startsWith(existingTrimmed) || incomingTrimmed.endsWith(existingTrimmed)) return incoming;
+    if (existingTrimmed.startsWith(incomingTrimmed) || existingTrimmed.endsWith(incomingTrimmed)) return existing;
+
+    const overlapSuffixPrefix = (leftText, rightText) => {
+      const left = String(leftText || "");
+      const right = String(rightText || "");
+      const max = Math.min(left.length, right.length, 2048);
+      for (let len = max; len >= 16; len -= 1) {
+        if (left.slice(left.length - len) === right.slice(0, len)) return len;
+      }
+      return 0;
+    };
+
+    const overlap = overlapSuffixPrefix(existing, incoming);
+    if (overlap > 0) return `${existing}${incoming.slice(overlap)}`;
+    const reverseOverlap = overlapSuffixPrefix(incoming, existing);
+    if (reverseOverlap > 0) return `${incoming}${existing.slice(reverseOverlap)}`;
+
+    return incoming.length >= existing.length ? incoming : `${existing}\n\n${incoming}`;
   }
 
   mergeBlocks(previousBlocks, nextBlocks) {

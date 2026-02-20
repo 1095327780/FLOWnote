@@ -53,6 +53,32 @@ function getSkillPrimaryDescription(skill) {
   return lines[0] || "暂无技能说明";
 }
 
+function getSkillBriefDescription(skill) {
+  const primary = String(this.getSkillPrimaryDescription(skill) || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!primary || primary === "暂无技能说明") return "";
+
+  let brief = primary;
+  const namePrefix = String(skill && skill.name ? skill.name : "").trim();
+  if (namePrefix && brief.toLowerCase().startsWith(namePrefix.toLowerCase())) {
+    brief = brief.slice(namePrefix.length).trim();
+    brief = brief.replace(/^[(（][^)）]+[)）]\s*[-—:：]?\s*/, "");
+    brief = brief.replace(/^[-—:：\s]+/, "");
+  }
+
+  if (!brief) brief = primary;
+  const delimiters = ["：", ":", "。", "；", ";", "，", ",", "（", "("];
+  let cutIndex = brief.length;
+  delimiters.forEach((delimiter) => {
+    const index = brief.indexOf(delimiter);
+    if (index > 0 && index < cutIndex) cutIndex = index;
+  });
+  brief = brief.slice(0, cutIndex).trim();
+  if (brief.length > 24) brief = `${brief.slice(0, 24)}…`;
+  return brief;
+}
+
 function parseModelSlashCommand(text) {
   const input = String(text || "").trim();
   if (!input.startsWith("/")) return null;
@@ -133,11 +159,19 @@ function openSkillSelector() {
 }
 
 async function refreshModelList() {
+  if (this.plugin && typeof this.plugin.loadModelCatalogFromTerminalOutput === "function") {
+    const cachedModels = this.plugin.loadModelCatalogFromTerminalOutput();
+    if (Array.isArray(cachedModels) && cachedModels.length && typeof this.updateModelSelectOptions === "function") {
+      this.updateModelSelectOptions();
+    }
+  }
+
   if (this.plugin && typeof this.plugin.refreshModelCatalog === "function") {
     return this.plugin.refreshModelCatalog();
   }
   const models = await this.plugin.opencodeClient.listModels();
   this.plugin.cachedModels = Array.isArray(models) ? models : [];
+  if (typeof this.updateModelSelectOptions === "function") this.updateModelSelectOptions();
   return this.plugin.cachedModels;
 }
 
@@ -189,15 +223,20 @@ async function applyModelSelection(modelID, options = {}) {
 async function openModelSelector(sessionId) {
   let select = this.elements.modelSelect;
   if (!select) {
-    await this.refreshModelList();
     this.render();
     select = this.elements.modelSelect;
   }
+  if (typeof this.updateModelSelectOptions === "function") this.updateModelSelectOptions();
 
   if (!select || select.disabled) {
     new Notice("模型下拉尚未初始化，请稍后再试。");
     return;
   }
+
+  void this.refreshModelList().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (typeof this.plugin.log === "function") this.plugin.log(`refresh model list failed: ${message}`);
+  });
 
   select.focus();
   if (typeof select.showPicker === "function") {
@@ -244,6 +283,7 @@ async function handleModelSlashCommand(userText, parsed) {
 
 module.exports = { commandRouterMethods: {
   getSkillPrimaryDescription,
+  getSkillBriefDescription,
   parseModelSlashCommand,
   parseSkillSelectorSlashCommand,
   resolveSkillFromPrompt,

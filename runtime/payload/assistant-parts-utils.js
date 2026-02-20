@@ -13,6 +13,69 @@ function joinUniqueTextChunks(chunks) {
   return unique.join("\n\n");
 }
 
+function stablePartKey(part, index) {
+  if (!part || typeof part !== "object") return `invalid:${index}`;
+  if (typeof part.id === "string" && part.id.trim()) return `id:${part.id.trim()}`;
+  const type = typeof part.type === "string" && part.type.trim() ? part.type.trim() : "part";
+  const messageId = typeof part.messageID === "string" && part.messageID.trim() ? part.messageID.trim() : "";
+  const time = part.time && typeof part.time === "object" ? part.time : null;
+  const startAt = time ? Number(time.start || time.created || 0) : 0;
+  if (startAt > 0) return `${type}:${messageId}:${startAt}`;
+  const textPreview = normalizedRenderableText(typeof part.text === "string" ? part.text : "").slice(0, 48);
+  return `${type}:${messageId}:${textPreview}:${index}`;
+}
+
+function overlapSuffixPrefix(left, right, maxWindow = 2048) {
+  const a = String(left || "");
+  const b = String(right || "");
+  const max = Math.min(a.length, b.length, Math.max(32, Number(maxWindow) || 2048));
+  for (let len = max; len >= 16; len -= 1) {
+    if (a.slice(a.length - len) === b.slice(0, len)) return len;
+  }
+  return 0;
+}
+
+function mergeSnapshotText(existingText, incomingText) {
+  const existing = String(existingText || "");
+  const incoming = String(incomingText || "");
+  if (!incoming.trim()) return existing;
+  if (!existing.trim()) return incoming;
+  if (existing === incoming) return existing;
+  if (incoming.includes(existing)) return incoming;
+  if (existing.includes(incoming)) return existing;
+
+  const existingTrimmed = existing.trim();
+  const incomingTrimmed = incoming.trim();
+  if (incomingTrimmed.startsWith(existingTrimmed) || incomingTrimmed.endsWith(existingTrimmed)) return incoming;
+  if (existingTrimmed.startsWith(incomingTrimmed) || existingTrimmed.endsWith(incomingTrimmed)) return existing;
+
+  const overlap = overlapSuffixPrefix(existing, incoming);
+  if (overlap > 0) return `${existing}${incoming.slice(overlap)}`;
+  const reverseOverlap = overlapSuffixPrefix(incoming, existing);
+  if (reverseOverlap > 0) return `${incoming}${existing.slice(reverseOverlap)}`;
+
+  return incoming.length >= existing.length ? incoming : existing;
+}
+
+function collectPartText(chunksByPart, part, index, text) {
+  const value = String(text || "");
+  if (!value.trim()) return;
+  const key = stablePartKey(part, index);
+  if (!chunksByPart.has(key)) {
+    chunksByPart.set(key, value);
+    return;
+  }
+  const existing = String(chunksByPart.get(key) || "");
+  chunksByPart.set(key, mergeSnapshotText(existing, value));
+}
+
+function joinPartTextChunks(chunksByPart) {
+  return Array.from(chunksByPart.values())
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function stringifyForDisplay(value, maxLen = 2200) {
   if (value === undefined || value === null) return "";
   let out = "";
@@ -263,16 +326,21 @@ function toPartBlock(part, index) {
 function blocksFingerprint(blocks) {
   const list = Array.isArray(blocks) ? blocks : [];
   try {
-    return JSON.stringify(
-      list.map((b) => ({
-        id: b.id,
-        type: b.type,
-        title: b.title,
-        status: b.status,
-        summary: b.summary,
-        detail: b.detail,
-      })),
-    );
+    return list
+      .map((b) => {
+        const detail = String(b && b.detail ? b.detail : "");
+        const summary = String(b && b.summary ? b.summary : "").replace(/\s+/g, " ").trim();
+        const title = String(b && b.title ? b.title : "").replace(/\s+/g, " ").trim();
+        return [
+          String((b && b.id) || ""),
+          String((b && b.type) || ""),
+          String((b && b.status) || ""),
+          title.slice(0, 64),
+          summary.slice(0, 96),
+          String(detail.length),
+        ].join("|");
+      })
+      .join("||");
   } catch {
     return String(list.length);
   }
@@ -281,8 +349,8 @@ function blocksFingerprint(blocks) {
 function extractAssistantParts(parts) {
   if (!Array.isArray(parts)) return { text: "", reasoning: "", meta: "", blocks: [] };
 
-  const textChunks = [];
-  const reasoningChunks = [];
+  const textChunks = new Map();
+  const reasoningChunks = new Map();
   const metaChunks = [];
   const blocks = [];
 
@@ -293,12 +361,12 @@ function extractAssistantParts(parts) {
 
     if (type === "text") {
       if (part.ignored === true) continue;
-      if (typeof part.text === "string") textChunks.push(part.text);
+      if (typeof part.text === "string") collectPartText(textChunks, part, i, part.text);
       continue;
     }
 
     if (type === "reasoning") {
-      if (typeof part.text === "string") reasoningChunks.push(part.text);
+      if (typeof part.text === "string") collectPartText(reasoningChunks, part, i, part.text);
       const reasoningBlock = toPartBlock(part, i);
       if (reasoningBlock) blocks.push(reasoningBlock);
       continue;
@@ -318,7 +386,7 @@ function extractAssistantParts(parts) {
     }
 
     if (!type && typeof part.text === "string") {
-      textChunks.push(part.text);
+      collectPartText(textChunks, part, i, part.text);
       continue;
     }
 
@@ -329,31 +397,55 @@ function extractAssistantParts(parts) {
   }
 
   return {
-    text: joinUniqueTextChunks(textChunks),
-    reasoning: joinUniqueTextChunks(reasoningChunks),
+    text: joinPartTextChunks(textChunks),
+    reasoning: joinPartTextChunks(reasoningChunks),
     meta: joinUniqueTextChunks(metaChunks),
     blocks,
   };
 }
 
 function extractErrorText(error) {
+  const appendHint = (message) => {
+    const msg = String(message || "").trim();
+    if (!msg) return "";
+    if (/OAuth authentication is currently not allowed/i.test(msg)) {
+      return `${msg}（可输入 /models 或通过模型下拉选择官方模型；也可在设置里切到 custom-api-key 并填写 Provider/API Key）`;
+    }
+    if (/(status\s*=\s*401|code['"]?\s*[:=]\s*401|unauthorized|user not found)/i.test(msg)) {
+      return `${msg}（鉴权失败：请在设置 → Provider 登录管理里重新登录当前 Provider。若在 Windows WSL 运行，请确认在同一 WSL 发行版下完成登录后再刷新 Provider 状态）`;
+    }
+    return msg;
+  };
+
+  if (typeof error === "string") {
+    return appendHint(error);
+  }
   if (!error || typeof error !== "object") return "";
+
   const name = typeof error.name === "string" ? error.name : "AssistantError";
   const data = error.data && typeof error.data === "object" ? error.data : {};
+  const root = error && typeof error === "object" ? error : {};
 
   const message =
     (typeof data.message === "string" && data.message.trim()) ||
+    (typeof root.message === "string" && root.message.trim()) ||
     (typeof data.responseBody === "string" && data.responseBody.trim()) ||
+    (typeof root.responseBody === "string" && root.responseBody.trim()) ||
     "";
-  const provider = typeof data.providerID === "string" && data.providerID ? ` provider=${data.providerID}` : "";
-  const status = Number.isFinite(data.statusCode) ? ` status=${data.statusCode}` : "";
+  const providerId =
+    (typeof data.providerID === "string" && data.providerID.trim()) ||
+    (typeof root.providerID === "string" && root.providerID.trim()) ||
+    "";
+  const provider = providerId ? ` provider=${providerId}` : "";
+  const statusCode =
+    (Number.isFinite(data.statusCode) && Number(data.statusCode)) ||
+    (Number.isFinite(root.statusCode) && Number(root.statusCode)) ||
+    (Number.isFinite(root.status) && Number(root.status)) ||
+    0;
+  const status = statusCode ? ` status=${statusCode}` : "";
 
   if (message) {
-    let hint = "";
-    if (/OAuth authentication is currently not allowed/i.test(message)) {
-      hint = "（可输入 /models 或通过模型下拉选择官方模型；也可在设置里切到 custom-api-key 并填写 Provider/API Key）";
-    }
-    return `${name}${status}${provider}: ${message}${hint}`;
+    return `${name}${status}${provider}: ${appendHint(message)}`;
   }
   try {
     return `${name}${status}${provider}: ${JSON.stringify(error)}`;
@@ -374,8 +466,12 @@ function extractAssistantPayloadFromEnvelope(envelope) {
   if (!envelope || typeof envelope !== "object") return { text: "", reasoning: "", meta: "", blocks: [] };
 
   const info = envelope.info && typeof envelope.info === "object" ? envelope.info : {};
-  const role = typeof info.role === "string" ? info.role : "";
+  const role = typeof info.role === "string" ? info.role.trim().toLowerCase() : "";
+  const errorText = extractErrorText(info.error);
   if (role && role !== "assistant") {
+    if (errorText) {
+      return { text: `模型返回错误：${errorText}`, reasoning: "", meta: errorText, blocks: [] };
+    }
     return { text: "", reasoning: "", meta: "", blocks: [] };
   }
 
@@ -385,7 +481,6 @@ function extractAssistantPayloadFromEnvelope(envelope) {
   const meta = extracted.meta;
   const blocks = extracted.blocks || [];
 
-  const errorText = extractErrorText(info.error);
   if (!text && errorText) {
     text = `模型返回错误：${errorText}`;
   }
@@ -406,13 +501,41 @@ function extractAssistantPayloadFromEnvelope(envelope) {
 
 function formatSessionStatusText(status) {
   if (!status || typeof status !== "object") return "unknown";
-  if (status.type === "idle") return "idle";
-  if (status.type === "busy") return "busy";
-  if (status.type === "retry") {
-    const attempt = Number.isFinite(status.attempt) ? status.attempt : "?";
-    const message = typeof status.message === "string" ? status.message : "";
+  const nested = status.status && typeof status.status === "object"
+    ? status.status
+    : status.state && typeof status.state === "object"
+      ? status.state
+      : null;
+  const typeRaw =
+    (typeof status.type === "string" && status.type.trim()) ||
+    (typeof status.status === "string" && status.status.trim()) ||
+    (typeof status.state === "string" && status.state.trim()) ||
+    (nested && typeof nested.type === "string" && nested.type.trim()) ||
+    (nested && typeof nested.status === "string" && nested.status.trim()) ||
+    (nested && typeof nested.state === "string" && nested.state.trim()) ||
+    "";
+  const type = String(typeRaw || "").toLowerCase();
+  const messageRaw =
+    (typeof status.message === "string" && status.message.trim()) ||
+    (typeof status.error === "string" && status.error.trim()) ||
+    (typeof status.reason === "string" && status.reason.trim()) ||
+    (nested && typeof nested.message === "string" && nested.message.trim()) ||
+    (nested && typeof nested.error === "string" && nested.error.trim()) ||
+    (nested && typeof nested.reason === "string" && nested.reason.trim()) ||
+    "";
+  const message = String(messageRaw || "").replace(/\s+/g, " ").trim();
+  if (type === "idle") return "idle";
+  if (type === "busy") return "busy";
+  if (type === "retry") {
+    const attempt = Number.isFinite(status.attempt)
+      ? status.attempt
+      : nested && Number.isFinite(nested.attempt)
+        ? nested.attempt
+        : "?";
     return `retry(attempt=${attempt}${message ? `, message=${message}` : ""})`;
   }
+  if (type) return message ? `${type}(message=${message})` : type;
+  if (message) return `unknown(message=${message})`;
   return "unknown";
 }
 

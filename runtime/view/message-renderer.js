@@ -15,6 +15,31 @@ const TOOL_ICON_MAP = {
   question: "circle-help",
   todo_write: "list-checks",
 };
+const MARKDOWN_RENDER_STATE = new WeakMap();
+
+function setNodeText(node, text) {
+  if (!node) return;
+  const value = String(text || "");
+  if (typeof node.setText === "function") {
+    node.setText(value);
+  } else {
+    node.textContent = value;
+  }
+}
+
+function emptyNode(node) {
+  if (!node) return;
+  if (typeof node.empty === "function") {
+    node.empty();
+  } else {
+    node.innerHTML = "";
+  }
+}
+
+function markdownRenderKey(text) {
+  const raw = String(text || "");
+  return `${raw.length}:${raw.slice(0, 120)}`;
+}
 
 function safeSetIcon(el, iconName) {
   if (!el) return;
@@ -261,6 +286,55 @@ function attachCodeCopyButtons(container) {
   this.enhanceCodeBlocks(container);
 }
 
+function renderMarkdownSafely(container, markdownText, onRendered) {
+  if (!container) return;
+  const text = String(markdownText || "");
+  if (!text.trim()) {
+    MARKDOWN_RENDER_STATE.delete(container);
+    emptyNode(container);
+    return;
+  }
+
+  const key = markdownRenderKey(text);
+  const previous = MARKDOWN_RENDER_STATE.get(container);
+  if (previous && previous.rendered && previous.key === key) return;
+
+  const version = Number(previous && previous.version ? previous.version : 0) + 1;
+  MARKDOWN_RENDER_STATE.set(container, {
+    key,
+    version,
+    rendered: false,
+  });
+
+  const staging = document.createElement("div");
+  MarkdownRenderer.render(this.app, text, staging, "", this.plugin)
+    .then(() => {
+      const latest = MARKDOWN_RENDER_STATE.get(container);
+      if (!latest || latest.version !== version) return;
+      emptyNode(container);
+      while (staging.firstChild) {
+        container.appendChild(staging.firstChild);
+      }
+      MARKDOWN_RENDER_STATE.set(container, {
+        key,
+        version,
+        rendered: true,
+      });
+      if (typeof onRendered === "function") onRendered();
+    })
+    .catch(() => {
+      const latest = MARKDOWN_RENDER_STATE.get(container);
+      if (!latest || latest.version !== version) return;
+      emptyNode(container);
+      setNodeText(container, text);
+      MARKDOWN_RENDER_STATE.set(container, {
+        key,
+        version,
+        rendered: true,
+      });
+    });
+}
+
 function ensureReasoningContainer(row, openByDefault) {
   let details = row.querySelector(".oc-message-reasoning");
   if (!details) {
@@ -314,6 +388,13 @@ function normalizeBlockStatus(status) {
   const value = String(status || "").trim().toLowerCase();
   if (["completed", "running", "pending", "error"].includes(value)) return value;
   return "pending";
+}
+
+function resolveDisplayBlockStatus(block, messagePending) {
+  const status = this.normalizeBlockStatus(block && block.status);
+  if (status === "error" || status === "completed") return status;
+  if (messagePending) return status;
+  return "completed";
 }
 
 function blockTypeLabel(type) {
@@ -473,7 +554,7 @@ function findMessageRow(messageId) {
 
 function renderReasoningPart(container, block, messagePending) {
   const details = container.createEl("details", { cls: "oc-thinking-block oc-part-reasoning" });
-  const status = this.normalizeBlockStatus(block && block.status);
+  const status = this.resolveDisplayBlockStatus(block, messagePending);
   details.addClass(`is-${status}`);
   details.setAttr("data-part-type", "reasoning");
 
@@ -488,18 +569,24 @@ function renderReasoningPart(container, block, messagePending) {
   const detailText = typeof block.detail === "string" ? block.detail : "";
   const content = normalizeMarkdownForDisplay(detailText);
   if (content) {
-    MarkdownRenderer.render(this.app, content, body, "", this.plugin).then(() => {
-      this.enhanceCodeBlocks(body);
-    });
+    if (messagePending) {
+      MARKDOWN_RENDER_STATE.delete(body);
+      setNodeText(body, content);
+    } else {
+      this.renderMarkdownSafely(body, content, () => {
+        this.enhanceCodeBlocks(body);
+      });
+    }
   } else {
-    body.setText("...");
+    MARKDOWN_RENDER_STATE.delete(body);
+    setNodeText(body, "...");
   }
 
-  details.open = Boolean(messagePending || status === "running" || status === "pending");
+  details.open = Boolean(messagePending && (status === "running" || status === "pending"));
 }
 
-function renderToolPart(container, block) {
-  const status = this.normalizeBlockStatus(block && block.status);
+function renderToolPart(container, block, messagePending) {
+  const status = this.resolveDisplayBlockStatus(block, messagePending);
   const toolName = this.toolDisplayName(block) || "tool";
   const normalizedToolName = String((block && block.tool) || toolName || "tool").trim().toLowerCase();
   let summaryText = inferToolSummary(block, normalizedToolName || toolName);
@@ -517,7 +604,7 @@ function renderToolPart(container, block) {
   details.addClass(`is-${status}`);
   details.setAttr("data-part-type", "tool");
   details.setAttr("data-tool-name", normalizedToolName || "tool");
-  details.open = status === "running" || status === "error";
+  details.open = messagePending ? (status === "running" || status === "error") : status === "error";
 
   const header = details.createEl("summary", { cls: "oc-tool-header" });
   const iconEl = header.createSpan({ cls: "oc-tool-icon" });
@@ -557,8 +644,8 @@ function renderToolPart(container, block) {
   }
 }
 
-function renderPatchPart(container, block) {
-  const status = this.normalizeBlockStatus(block && block.status);
+function renderPatchPart(container, block, messagePending) {
+  const status = this.resolveDisplayBlockStatus(block, messagePending);
   const detailText = String((block && block.detail) || "").trim();
   const files = extractPatchFiles(block, detailText);
   const hash = patchHash(block);
@@ -573,7 +660,7 @@ function renderPatchPart(container, block) {
   details.addClass(`is-${status}`);
   details.setAttr("data-part-type", "patch");
   details.setAttr("data-tool-name", "patch");
-  details.open = status === "running" || status === "error";
+  details.open = messagePending ? (status === "running" || status === "error") : status === "error";
 
   const header = details.createEl("summary", { cls: "oc-tool-header" });
   const iconEl = header.createSpan({ cls: "oc-tool-icon" });
@@ -602,9 +689,9 @@ function renderPatchPart(container, block) {
   }
 }
 
-function renderGenericPart(container, block) {
+function renderGenericPart(container, block, messagePending) {
   const card = container.createDiv({ cls: "oc-part-card" });
-  const status = this.normalizeBlockStatus(block && block.status);
+  const status = this.resolveDisplayBlockStatus(block, messagePending);
   card.addClass(`is-${status}`);
   card.setAttr("data-part-type", String((block && block.type) || ""));
 
@@ -637,6 +724,7 @@ function renderGenericPart(container, block) {
 
 function renderAssistantBlocks(row, message) {
   const blocks = this.visibleAssistantBlocks(message.blocks);
+  const messagePending = Boolean(message && message.pending);
   const container = this.ensureBlocksContainer(row);
   container.empty();
   if (!blocks.length) {
@@ -648,19 +736,19 @@ function renderAssistantBlocks(row, message) {
   blocks.forEach((block) => {
     const type = String((block && block.type) || "").trim().toLowerCase();
     if (type === "reasoning") {
-      this.renderReasoningPart(container, block, Boolean(message && message.pending));
+      this.renderReasoningPart(container, block, messagePending);
       return;
     }
     if (type === "tool") {
-      this.renderToolPart(container, block);
+      this.renderToolPart(container, block, messagePending);
       return;
     }
     if (type === "patch") {
-      this.renderPatchPart(container, block);
+      this.renderPatchPart(container, block, messagePending);
       return;
     }
 
-    this.renderGenericPart(container, block);
+    this.renderGenericPart(container, block, messagePending);
   });
 }
 
@@ -725,7 +813,7 @@ function renderMessageItem(parent, message) {
 
   if (finalText) {
     const textBlock = body.createDiv({ cls: "oc-text-block" });
-    MarkdownRenderer.render(this.app, finalText, textBlock, "", this.plugin).then(() => {
+    this.renderMarkdownSafely(textBlock, finalText, () => {
       this.enhanceCodeBlocks(textBlock);
       if (message.role === "assistant") {
         this.addTextCopyButton(textBlock, finalText);
@@ -737,7 +825,7 @@ function renderMessageItem(parent, message) {
     const reasoningBody = this.ensureReasoningContainer(row, !textForRender);
     if (reasoningBody) {
       const reasoningText = normalizeMarkdownForDisplay(message.reasoning || "");
-      MarkdownRenderer.render(this.app, reasoningText, reasoningBody, "", this.plugin).then(() => {
+      this.renderMarkdownSafely(reasoningBody, reasoningText, () => {
         this.enhanceCodeBlocks(reasoningBody);
       });
     }
@@ -761,11 +849,13 @@ module.exports = { messageRendererMethods: {
   renderUserActions,
   addTextCopyButton,
   attachCodeCopyButtons,
+  renderMarkdownSafely,
   enhanceCodeBlocks,
   ensureReasoningContainer,
   ensureBlocksContainer,
   reorderAssistantMessageLayout,
   normalizeBlockStatus,
+  resolveDisplayBlockStatus,
   blockTypeLabel,
   blockStatusLabel,
   inferToolSummary,

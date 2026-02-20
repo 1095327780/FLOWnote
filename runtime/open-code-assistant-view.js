@@ -55,7 +55,7 @@ class OpenCodeAssistantView extends ItemView {
   async onOpen() {
     this.selectedModel = this.plugin.settings.defaultModel || "";
     try {
-      await this.plugin.bootstrapData();
+      await this.plugin.bootstrapData({ waitRemote: false });
     } catch (e) {
       new Notice(`初始化失败: ${e instanceof Error ? e.message : String(e)}`);
     }

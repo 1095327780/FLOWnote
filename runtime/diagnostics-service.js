@@ -13,9 +13,10 @@ class DiagnosticsService {
         }),
       };
     this.lastResult = null;
+    this.inflight = null;
   }
 
-  async run() {
+  async runFresh() {
     const executable = await this.resolver.resolve(this.plugin.settings.cliPath);
 
     let connection = { ok: false, mode: this.plugin.settings.transportMode, error: "" };
@@ -28,6 +29,27 @@ class DiagnosticsService {
 
     this.lastResult = { at: Date.now(), executable, connection };
     return this.lastResult;
+  }
+
+  async runCached(ttlMs = 10000, force = false) {
+    const ttl = Math.max(0, Number(ttlMs) || 0);
+    const now = Date.now();
+    if (!force && this.lastResult && now - Number(this.lastResult.at || 0) <= ttl) {
+      return this.lastResult;
+    }
+
+    if (this.inflight) return this.inflight;
+
+    this.inflight = this.runFresh()
+      .finally(() => {
+        this.inflight = null;
+      });
+
+    return this.inflight;
+  }
+
+  async run() {
+    return this.runCached(0, true);
   }
 
   getLastResult() {

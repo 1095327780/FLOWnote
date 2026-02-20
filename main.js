@@ -9,6 +9,8 @@ const path = require("path");
 const vm = require("vm");
 
 const DEFAULT_VIEW_TYPE = "opencode-assistant-view";
+const MODEL_CACHE_BLOCK_START = "<!-- opencode-assistant-model-cache:start -->";
+const MODEL_CACHE_BLOCK_END = "<!-- opencode-assistant-model-cache:end -->";
 
 module.exports = class OpenCodeAssistantPlugin extends Plugin {
   getViewType() {
@@ -177,6 +179,11 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
 
   async onload() {
     try {
+      this.bootstrapInflight = null;
+      this.bootstrapLocalDone = false;
+      this.bootstrapRemoteDone = false;
+      this.bootstrapRemoteAt = 0;
+
       const runtime = this.ensureRuntimeModules();
       await this.loadPersistedData();
 
@@ -188,6 +195,8 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
         vaultPath,
         settings: this.settings,
         logger: (line) => this.log(line),
+        getPreferredLaunch: () => this.getPreferredLaunchProfile(),
+        onLaunchSuccess: (profile) => this.rememberLaunchProfile(profile),
         SdkTransport: runtime.SdkTransport,
         CompatTransport: runtime.CompatTransport,
       });
@@ -229,7 +238,7 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
       });
 
       this.addSettingTab(new runtime.OpenCodeSettingsTab(this.app, this));
-      await this.bootstrapData();
+      await this.bootstrapData({ waitRemote: false });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[opencode-assistant] load failed", e);
@@ -245,6 +254,75 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
   log(line) {
     if (!this.settings || !this.settings.debugLogs) return;
     console.log("[opencode-assistant]", line);
+  }
+
+  ensureRuntimeStateShape() {
+    if (!this.runtimeState || typeof this.runtimeState !== "object") {
+      this.runtimeState = {};
+    }
+    if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+    this.runtimeState.lastLaunchProfile = this.normalizeLaunchProfile(this.runtimeState.lastLaunchProfile);
+  }
+
+  normalizeLaunchProfile(profile) {
+    if (!profile || typeof profile !== "object") return null;
+    const mode = String(profile.mode || "").trim().toLowerCase() === "wsl" ? "wsl" : "native";
+    const command = String(profile.command || "").trim();
+    const shell = Boolean(profile.shell);
+    const distro = String(profile.distro || "").trim();
+    const args = Array.isArray(profile.args)
+      ? profile.args.map((item) => String(item || ""))
+      : [];
+    if (mode === "native" && !command) return null;
+    return {
+      mode,
+      command,
+      args,
+      shell,
+      distro,
+      at: Number(profile.at || Date.now()),
+    };
+  }
+
+  getPreferredLaunchProfile() {
+    if (String(this.settings && this.settings.launchStrategy ? this.settings.launchStrategy : "auto") !== "auto") {
+      return null;
+    }
+    this.ensureRuntimeStateShape();
+    return this.normalizeLaunchProfile(this.runtimeState.lastLaunchProfile);
+  }
+
+  rememberLaunchProfile(profile) {
+    const normalized = this.normalizeLaunchProfile(profile);
+    if (!normalized) return;
+    this.ensureRuntimeStateShape();
+
+    const current = this.normalizeLaunchProfile(this.runtimeState.lastLaunchProfile);
+    if (
+      current &&
+      current.mode === normalized.mode &&
+      current.command === normalized.command &&
+      JSON.stringify(current.args || []) === JSON.stringify(normalized.args || []) &&
+      Boolean(current.shell) === Boolean(normalized.shell) &&
+      current.distro === normalized.distro
+    ) {
+      return;
+    }
+
+    this.runtimeState.lastLaunchProfile = {
+      ...normalized,
+      at: Date.now(),
+    };
+    void this.persistState().catch((e) => {
+      this.log(`persist launch profile failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }
+
+  async clearRememberedLaunchProfile() {
+    this.ensureRuntimeStateShape();
+    if (!this.runtimeState.lastLaunchProfile) return;
+    this.runtimeState.lastLaunchProfile = null;
+    await this.persistState();
   }
 
   normalizeModelID(modelID) {
@@ -403,6 +481,153 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     return visible;
   }
 
+  getTerminalOutputModelCachePath() {
+    return path.join(this.getVaultPath(), "终端输出.md");
+  }
+
+  normalizeModelCachePayload(payload) {
+    const raw = payload && typeof payload === "object" ? payload : {};
+    const models = [...new Set(
+      (Array.isArray(raw.models) ? raw.models : [])
+        .map((model) => this.normalizeModelID(model))
+        .filter(Boolean),
+    )];
+    models.sort((a, b) => a.localeCompare(b));
+
+    const connectedProviders = [...new Set(
+      (Array.isArray(raw.connectedProviders) ? raw.connectedProviders : [])
+        .map((id) => String(id || "").trim().toLowerCase())
+        .filter(Boolean),
+    )];
+
+    return {
+      models,
+      connectedProviders,
+      updatedAt: Number(raw.updatedAt || 0),
+    };
+  }
+
+  readModelCacheFromTerminalOutput() {
+    const filePath = this.getTerminalOutputModelCachePath();
+    if (!fs.existsSync(filePath)) return null;
+
+    let text = "";
+    try {
+      text = fs.readFileSync(filePath, "utf8");
+    } catch {
+      return null;
+    }
+    if (!text) return null;
+
+    const startIndex = text.indexOf(MODEL_CACHE_BLOCK_START);
+    if (startIndex < 0) return null;
+    const endIndex = text.indexOf(MODEL_CACHE_BLOCK_END, startIndex);
+    if (endIndex < 0) return null;
+
+    const section = text.slice(startIndex + MODEL_CACHE_BLOCK_START.length, endIndex);
+    const codeStart = section.indexOf("```json");
+    if (codeStart < 0) return null;
+    const afterCodeStart = section.slice(codeStart + "```json".length);
+    const codeEnd = afterCodeStart.indexOf("```");
+    if (codeEnd < 0) return null;
+
+    const jsonText = afterCodeStart.slice(0, codeEnd).trim();
+    if (!jsonText) return null;
+
+    try {
+      return this.normalizeModelCachePayload(JSON.parse(jsonText));
+    } catch {
+      return null;
+    }
+  }
+
+  writeModelCacheToTerminalOutput(models, connectedProviders = []) {
+    const normalizedModels = [...new Set(
+      (Array.isArray(models) ? models : [])
+        .map((model) => this.normalizeModelID(model))
+        .filter(Boolean),
+    )];
+    if (!normalizedModels.length) return false;
+    normalizedModels.sort((a, b) => a.localeCompare(b));
+
+    const normalizedProviders = [...new Set(
+      (Array.isArray(connectedProviders) ? connectedProviders : [])
+        .map((id) => String(id || "").trim().toLowerCase())
+        .filter(Boolean),
+    )];
+    normalizedProviders.sort((a, b) => a.localeCompare(b));
+
+    const payload = {
+      updatedAt: Date.now(),
+      models: normalizedModels,
+      connectedProviders: normalizedProviders,
+    };
+    const block = [
+      MODEL_CACHE_BLOCK_START,
+      "```json",
+      JSON.stringify(payload, null, 2),
+      "```",
+      MODEL_CACHE_BLOCK_END,
+    ].join("\n");
+
+    const filePath = this.getTerminalOutputModelCachePath();
+    let text = "";
+    if (fs.existsSync(filePath)) {
+      try {
+        text = fs.readFileSync(filePath, "utf8");
+      } catch {
+        text = "";
+      }
+    }
+
+    const startIndex = text.indexOf(MODEL_CACHE_BLOCK_START);
+    const endIndex = startIndex >= 0 ? text.indexOf(MODEL_CACHE_BLOCK_END, startIndex) : -1;
+
+    let nextText = "";
+    if (startIndex >= 0 && endIndex >= 0) {
+      nextText = `${text.slice(0, startIndex)}${block}${text.slice(endIndex + MODEL_CACHE_BLOCK_END.length)}`;
+    } else if (text.trim().length > 0) {
+      nextText = `${text.replace(/\s*$/, "")}\n\n${block}\n`;
+    } else {
+      nextText = `${block}\n`;
+    }
+
+    try {
+      fs.writeFileSync(filePath, nextText, "utf8");
+      return true;
+    } catch (e) {
+      this.log(`write model cache failed: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  }
+
+  loadModelCatalogFromTerminalOutput() {
+    const cache = this.readModelCacheFromTerminalOutput();
+    if (!cache || !Array.isArray(cache.models) || !cache.models.length) return [];
+
+    const state = this.ensureModelCatalogState();
+    state.allModels = cache.models.slice();
+    const connected = Array.isArray(cache.connectedProviders) && cache.connectedProviders.length
+      ? cache.connectedProviders
+      : null;
+    state.connectedProviders = this.normalizeConnectedProviders(connected);
+    return this.rebuildVisibleModelCache();
+  }
+
+  notifyModelCatalogUpdated() {
+    const view = this.getAssistantView();
+    if (!view) return;
+    try {
+      if (typeof view.updateModelSelectOptions === "function") {
+        view.updateModelSelectOptions();
+        return;
+      }
+      if (typeof view.render === "function") view.render();
+    } catch (e) {
+      this.log(`notify model catalog failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async refreshModelCatalog(options = {}) {
     const state = this.ensureModelCatalogState();
     const cfg = options && typeof options === "object" ? options : {};
@@ -445,6 +670,15 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     if (currentDefaultModel && !visible.includes(currentDefaultModel)) {
       this.settings.defaultModel = "";
     }
+
+    if (cfg.cacheToTerminalOutput !== false && Array.isArray(state.allModels) && state.allModels.length) {
+      const connectedForCache = state.connectedProviders instanceof Set
+        ? [...state.connectedProviders]
+        : [];
+      this.writeModelCacheToTerminalOutput(state.allModels, connectedForCache);
+    }
+
+    if (cfg.notifyView !== false) this.notifyModelCatalogUpdated();
     return visible;
   }
 
@@ -481,6 +715,30 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     return path.join(this.getPluginRootDir(), "bundled-skills");
   }
 
+  getBundledSkillsStamp(skillIds = []) {
+    const version = this.manifest && this.manifest.version ? String(this.manifest.version) : "0";
+    const ids = [...new Set(
+      (Array.isArray(skillIds) ? skillIds : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    )].sort((a, b) => a.localeCompare(b));
+    return `${version}:${ids.join(",")}`;
+  }
+
+  hasSyncedBundledSkills(targetRoot, bundledIds) {
+    if (!targetRoot || !fs.existsSync(targetRoot)) return false;
+    return bundledIds.every((skillId) =>
+      fs.existsSync(path.join(targetRoot, skillId, "SKILL.md")));
+  }
+
+  shouldSyncBundledSkills(targetRoot, bundledIds, stamp, force = false) {
+    if (force) return true;
+    const st = this.runtimeState && typeof this.runtimeState === "object" ? this.runtimeState : {};
+    const previousStamp = String(st.bundledSkillsStamp || "");
+    if (!previousStamp || previousStamp !== String(stamp || "")) return true;
+    return !this.hasSyncedBundledSkills(targetRoot, bundledIds);
+  }
+
   listBundledSkillIds(rootDir = this.getBundledSkillsRoot()) {
     if (!fs.existsSync(rootDir)) return [];
 
@@ -492,10 +750,12 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  syncBundledSkills(vaultPath) {
+  syncBundledSkills(vaultPath, options = {}) {
     const runtime = this.ensureRuntimeModules();
+    const force = Boolean(options && options.force);
     const bundledRoot = this.getBundledSkillsRoot();
     const bundledIds = this.listBundledSkillIds(bundledRoot);
+    const stamp = this.getBundledSkillsStamp(bundledIds);
 
     if (this.skillService) this.skillService.setAllowedSkillIds(bundledIds);
     if (!bundledIds.length) {
@@ -504,12 +764,28 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
         total: 0,
         targetRoot: path.join(vaultPath, this.settings.skillsDir),
         bundledRoot,
+        stamp,
+        skipped: false,
+        stampUpdated: false,
         errors: [`未找到内置 skills 源目录或目录为空：${bundledRoot}`],
       };
     }
 
     const targetRoot = path.join(vaultPath, this.settings.skillsDir);
     fs.mkdirSync(targetRoot, { recursive: true });
+    const shouldSync = this.shouldSyncBundledSkills(targetRoot, bundledIds, stamp, force);
+    if (!shouldSync) {
+      return {
+        synced: 0,
+        total: bundledIds.length,
+        targetRoot,
+        bundledRoot,
+        stamp,
+        skipped: true,
+        stampUpdated: false,
+        errors: [],
+      };
+    }
 
     const errors = [];
     for (const skillId of bundledIds) {
@@ -523,11 +799,21 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
       }
     }
 
+    const hasRuntimeState = this.runtimeState && typeof this.runtimeState === "object";
+    let stampUpdated = false;
+    if (!errors.length && hasRuntimeState) {
+      this.runtimeState.bundledSkillsStamp = stamp;
+      stampUpdated = true;
+    }
+
     return {
       synced: bundledIds.length - errors.length,
       total: bundledIds.length,
       targetRoot,
       bundledRoot,
+      stamp,
+      skipped: false,
+      stampUpdated,
       errors,
     };
   }
@@ -557,14 +843,14 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     if (raw.settings || raw.runtimeState) {
       this.settings = runtime.normalizeSettings(raw.settings || {});
       this.runtimeState = runtime.migrateLegacyMessages(raw.runtimeState || { sessions: [], activeSessionId: "", messagesBySession: {} });
-      if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+      this.ensureRuntimeStateShape();
       this.ensureModelCatalogState();
       return;
     }
 
     this.settings = runtime.normalizeSettings(raw);
     this.runtimeState = runtime.migrateLegacyMessages({ sessions: [], activeSessionId: "", messagesBySession: {} });
-    if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+    this.ensureRuntimeStateShape();
     this.ensureModelCatalogState();
   }
 
@@ -583,13 +869,20 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
   async reloadSkills() {
     if (!this.skillService) return;
     const vaultPath = this.getVaultPath();
-    const syncResult = this.syncBundledSkills(vaultPath);
+    const syncResult = this.syncBundledSkills(vaultPath, { force: true });
     console.log(
       `[opencode-assistant] bundled skills reload: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
       `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
     );
     if (syncResult.errors.length) this.log(`bundled skills sync: ${syncResult.errors.join("; ")}`);
     this.skillService.loadSkills();
+    if (syncResult.stampUpdated) {
+      try {
+        await this.persistState();
+      } catch (e) {
+        this.log(`persist bundled skills stamp failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     const view = this.getAssistantView();
     if (view) view.render();
     return syncResult;
@@ -622,33 +915,59 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
 
   async syncSessionsFromRemote() {
     try {
+      const st = this.sessionStore.state();
       const remote = await this.opencodeClient.listSessions();
       const deletedSet = new Set(
         Array.isArray(this.runtimeState && this.runtimeState.deletedSessionIds)
           ? this.runtimeState.deletedSessionIds
           : [],
       );
+      let changed = false;
       remote.forEach((s) => {
         if (!s || deletedSet.has(s.id)) return;
-        this.sessionStore.upsertSession({
+        const nextSession = {
           id: s.id,
           title: s.title || "未命名会话",
           updatedAt: (s.time && s.time.updated) || Date.now(),
+        };
+        const existing = st.sessions.find((row) => row.id === nextSession.id);
+        if (!existing) {
+          changed = true;
+        } else if (
+          String(existing.title || "") !== String(nextSession.title || "")
+          || Number(existing.updatedAt || 0) !== Number(nextSession.updatedAt || 0)
+        ) {
+          changed = true;
+        }
+        this.sessionStore.upsertSession({
+          id: nextSession.id,
+          title: nextSession.title,
+          updatedAt: nextSession.updatedAt,
         });
       });
 
-      const st = this.sessionStore.state();
-      if (!st.activeSessionId && st.sessions.length) st.activeSessionId = st.sessions[0].id;
-      await this.persistState();
+      if (!st.activeSessionId && st.sessions.length) {
+        st.activeSessionId = st.sessions[0].id;
+        changed = true;
+      }
+      if (changed) await this.persistState();
     } catch {
       // ignore bootstrap sync failure
     }
   }
 
-  async bootstrapData() {
+  async bootstrapLocalData(options = {}) {
+    if (this.bootstrapLocalDone && !options.force) return;
+
+    try {
+      this.loadModelCatalogFromTerminalOutput();
+    } catch (e) {
+      this.log(`load model cache failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     const vaultPath = this.getVaultPath();
-    const syncResult = this.syncBundledSkills(vaultPath);
-    if (!syncResult.errors.length) {
+    const syncResult = this.syncBundledSkills(vaultPath, { force: Boolean(options.force) });
+    if (!syncResult.errors.length && !syncResult.skipped) {
       console.log(
         `[opencode-assistant] bundled skills bootstrap: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
         `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
@@ -656,7 +975,61 @@ module.exports = class OpenCodeAssistantPlugin extends Plugin {
     }
     if (syncResult.errors.length) this.log(`bundled skills bootstrap sync: ${syncResult.errors.join("; ")}`);
     this.skillService.loadSkills();
+    this.bootstrapLocalDone = true;
+
+    if (syncResult.stampUpdated) {
+      try {
+        await this.persistState();
+      } catch (e) {
+        this.log(`persist bundled skills stamp failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  async runBootstrapRemote() {
     await this.refreshModelCatalog();
     await this.syncSessionsFromRemote();
+    this.bootstrapRemoteDone = true;
+    this.bootstrapRemoteAt = Date.now();
+  }
+
+  async bootstrapData(options = {}) {
+    const force = Boolean(options && options.force);
+    const waitRemote = Boolean(options && options.waitRemote);
+
+    if (force) {
+      this.bootstrapLocalDone = false;
+      this.bootstrapRemoteDone = false;
+    }
+
+    await this.bootstrapLocalData({ force });
+
+    const shouldStartRemote = force || !this.bootstrapRemoteDone;
+    if (shouldStartRemote && !this.bootstrapInflight) {
+      this.bootstrapInflight = (async () => {
+        try {
+          await this.runBootstrapRemote();
+        } catch (e) {
+          this.bootstrapRemoteDone = false;
+          throw e;
+        } finally {
+          this.bootstrapInflight = null;
+        }
+      })().catch((e) => {
+        this.log(`bootstrap remote failed: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
+      });
+    }
+
+    if (waitRemote && this.bootstrapInflight) {
+      await this.bootstrapInflight;
+    }
+
+    return {
+      localDone: Boolean(this.bootstrapLocalDone),
+      remoteDone: Boolean(this.bootstrapRemoteDone),
+      remoteAt: Number(this.bootstrapRemoteAt || 0),
+      remoteInflight: Boolean(this.bootstrapInflight),
+    };
   }
 };

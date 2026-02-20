@@ -178,9 +178,12 @@ class OpenCodeSettingsTab extends PluginSettingTab {
       text: "常用情况下只需要确认鉴权方式和连接状态。其余高级项一般保持默认即可。",
     });
 
+    const isWindows = typeof process !== "undefined" && process.platform === "win32";
+    const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
+    const launchStrategyForUi = !isWindows && launchStrategyValue === "wsl" ? "auto" : launchStrategyValue;
     new Setting(containerEl)
       .setName("OpenCode CLI 路径（可选）")
-      .setDesc("通常留空。插件会自动探测；只有诊断提示“找不到 opencode”时再填写绝对路径。")
+      .setDesc("通常留空。插件会自动探测。Windows 本机请优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd）；Windows + WSL 可填 wsl、wsl.exe 或 wsl:发行版名（例如 wsl:Ubuntu）。")
       .addText((text) => {
         text
           .setPlaceholder("/Users/xxx/.opencode/bin/opencode")
@@ -190,6 +193,43 @@ class OpenCodeSettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(containerEl)
+      .setName("连接启动方式")
+      .setDesc(
+        isWindows
+          ? "自动（推荐）：按系统自动检测并记忆成功方式。手动模式下按你选择的安装方式连接。"
+          : "自动（推荐）：优先使用上次成功方式；失败时自动回退到其他方式。",
+      )
+      .addDropdown((d) => {
+        d.addOption("auto", "自动（推荐）");
+        if (isWindows) {
+          d.addOption("native", "Windows 本机安装")
+            .addOption("wsl", "Windows WSL 安装");
+        } else {
+          d.addOption("native", "Mac 本机安装");
+        }
+        d.setValue(launchStrategyForUi).onChange(async (v) => {
+          this.plugin.settings.launchStrategy = v;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
+    if (isWindows && this.plugin.settings.launchStrategy !== "native") {
+      new Setting(containerEl)
+        .setName("WSL 发行版（可选）")
+        .setDesc("留空表示 WSL 默认发行版。可填 Ubuntu / Debian 等。填写后自动模式会优先尝试 WSL。")
+        .addText((text) => {
+          text
+            .setPlaceholder("Ubuntu")
+            .setValue(String(this.plugin.settings.wslDistro || ""))
+            .onChange(async (v) => {
+              this.plugin.settings.wslDistro = v.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+    }
 
     new Setting(containerEl)
       .setName("鉴权方式")
@@ -314,6 +354,38 @@ class OpenCodeSettingsTab extends PluginSettingTab {
           }
         });
       });
+
+    if (this.plugin.settings.launchStrategy === "auto") {
+      const remembered = typeof this.plugin.getPreferredLaunchProfile === "function"
+        ? this.plugin.getPreferredLaunchProfile()
+        : null;
+      const rememberedText = remembered
+        ? remembered.mode === "wsl"
+          ? `已记忆：WSL${remembered.distro ? ` (${remembered.distro})` : ""}`
+          : `已记忆：本机 ${remembered.command || "opencode"}`
+        : "当前未记忆成功连接方式。";
+
+      new Setting(containerEl)
+        .setName("自动连接记忆")
+        .setDesc(`${rememberedText} 成功连接后会自动更新。`)
+        .addButton((b) => {
+          b.setButtonText("重置记忆").onClick(async () => {
+            b.setDisabled(true);
+            try {
+              if (typeof this.plugin.clearRememberedLaunchProfile === "function") {
+                await this.plugin.clearRememberedLaunchProfile();
+              }
+              new Notice("已清除记忆的连接方式。");
+              this.display();
+            } catch (e) {
+              new Notice(`重置失败: ${e instanceof Error ? e.message : String(e)}`);
+            } finally {
+              b.setDisabled(false);
+            }
+          });
+        });
+    }
+
   }
 
   renderProviderAuthSection(containerEl) {
@@ -440,10 +512,8 @@ class OpenCodeSettingsTab extends PluginSettingTab {
       listEl.empty();
 
       try {
-        const [providerResult, authMapResult] = await Promise.all([
-          this.plugin.opencodeClient.listProviders(),
-          this.plugin.opencodeClient.listProviderAuthMethods(),
-        ]);
+        const providerResult = await this.plugin.opencodeClient.listProviders();
+        const authMapResult = await this.plugin.opencodeClient.listProviderAuthMethods();
 
         const providers = Array.isArray(providerResult && providerResult.all) ? [...providerResult.all] : [];
         const connectedSet = new Set(

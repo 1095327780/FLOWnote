@@ -1,7 +1,21 @@
 function runtimeStatusFromBlocks(rawBlocks) {
   const blocks = this.visibleAssistantBlocks(rawBlocks);
+  const reasoningBlocks = blocks.filter((block) => block && String(block.type || "").trim().toLowerCase() === "reasoning");
+  const reasoningRunning = reasoningBlocks.some((block) => {
+    const status = this.normalizeBlockStatus(block && block.status);
+    return status === "running" || status === "pending";
+  });
+  if (reasoningRunning) {
+    return { tone: "working", text: "模型思考中…" };
+  }
+
   const tools = blocks.filter((block) => block && String(block.type || "").trim().toLowerCase() === "tool");
-  if (!tools.length) return null;
+  if (!tools.length) {
+    if (reasoningBlocks.length) {
+      return { tone: "info", text: "思考完成，正在整理回复…" };
+    }
+    return null;
+  }
 
   const names = [...new Set(tools.map((block) => this.toolDisplayName(block)).filter(Boolean))];
   const shortNames = names.slice(0, 3).join(", ");
@@ -20,7 +34,7 @@ function runtimeStatusFromBlocks(rawBlocks) {
     return { tone: "error", text: `工具执行失败：${statusText}${suffix}` };
   }
 
-  return { tone: "working", text: "工具调用完成，正在整理回复…" };
+  return { tone: "info", text: "工具调用完成，正在整理回复…" };
 }
 
 function syncRuntimeStatusToPendingTail() {
