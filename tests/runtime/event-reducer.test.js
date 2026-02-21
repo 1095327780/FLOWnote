@@ -194,3 +194,72 @@ test("event reducer should reset completion state when newer assistant message s
   const snap = reducer.snapshot();
   assert.equal(Boolean(snap.completed), true);
 });
+
+test("event reducer should merge snapshot-like deltas without quadratic duplication", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      delta: "I need to ",
+      part: {
+        id: "prt_r1",
+        type: "reasoning",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "I need to ",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      // Some providers emit snapshot-like delta instead of strict append-only delta.
+      delta: "I need to analyze the request.",
+      part: {
+        id: "prt_r1",
+        type: "reasoning",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "I need to analyze the request.",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      delta: "I need to analyze the request.\nThen implement the fix.",
+      part: {
+        id: "prt_r1",
+        type: "reasoning",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "I need to analyze the request.\nThen implement the fix.",
+      },
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.equal(
+    snap.reasoning,
+    "I need to analyze the request.\nThen implement the fix.",
+  );
+});

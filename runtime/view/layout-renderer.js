@@ -99,8 +99,13 @@ function renderSidebarToggleIcon(button) {
 function scrollMessagesTo(target) {
   const messages = this.elements.messages;
   if (!messages) return;
-  if (target === "top") messages.scrollTop = 0;
-  else messages.scrollTop = messages.scrollHeight;
+  if (target === "top") {
+    this.autoScrollEnabled = false;
+    messages.scrollTop = 0;
+    return;
+  }
+  this.autoScrollEnabled = true;
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function toggleSidebarCollapsed() {
@@ -331,8 +336,10 @@ function renderMain(main) {
 
   const messagesWrapper = main.createDiv({ cls: "oc-messages-wrapper" });
   this.elements.messages = messagesWrapper.createDiv({ cls: "oc-messages oc-messages-focusable", attr: { tabindex: "0" } });
+  this.bindMessagesScrollTracking();
   this.elements.inlineQuestionHost = messagesWrapper.createDiv({ cls: "oc-inline-question-host" });
   this.renderMessages();
+  void this.refreshPendingQuestionRequests({ silent: true }).catch(() => {});
 
   const navSidebar = messagesWrapper.createDiv({ cls: "oc-nav-sidebar visible" });
   const topBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-top" });

@@ -112,6 +112,97 @@ function makePreviewText(raw, maxLen = 320) {
   return `${normalized.slice(0, maxLen)}...`;
 }
 
+function clampText(value, maxLen = 1200) {
+  const raw = String(value || "");
+  const limit = Math.max(64, Number(maxLen) || 1200);
+  if (raw.length <= limit) return raw;
+  return `${raw.slice(0, limit)}...(${raw.length - limit} chars truncated)`;
+}
+
+function compactJsonValue(value, depth = 0) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return clampText(value, 800);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value !== "object") return String(value);
+  if (depth >= 3) {
+    if (Array.isArray(value)) return `Array(${value.length})`;
+    return "Object(...)";
+  }
+  if (Array.isArray(value)) {
+    const arr = value.slice(0, 24).map((item) => compactJsonValue(item, depth + 1));
+    if (value.length > arr.length) arr.push(`...(${value.length - arr.length} more)`);
+    return arr;
+  }
+  const out = {};
+  const keys = Object.keys(value).slice(0, 40);
+  for (const key of keys) {
+    out[key] = compactJsonValue(value[key], depth + 1);
+  }
+  if (Object.keys(value).length > keys.length) {
+    out.__truncated__ = `${Object.keys(value).length - keys.length} keys omitted`;
+  }
+  return out;
+}
+
+function compactPartRaw(part, type) {
+  if (!part || typeof part !== "object") return null;
+  const base = {
+    id: typeof part.id === "string" ? part.id : "",
+    type: typeof type === "string" ? type : (typeof part.type === "string" ? part.type : ""),
+    messageID: typeof part.messageID === "string" ? part.messageID : "",
+    sessionID: typeof part.sessionID === "string" ? part.sessionID : "",
+  };
+  const time = part.time && typeof part.time === "object" ? part.time : null;
+  if (time) {
+    base.time = {
+      start: Number(time.start || 0) || undefined,
+      end: Number(time.end || 0) || undefined,
+      created: Number(time.created || 0) || undefined,
+      completed: Number(time.completed || 0) || undefined,
+    };
+  }
+
+  if (base.type === "tool") {
+    const state = part.state && typeof part.state === "object" ? part.state : {};
+    const input = state.input && typeof state.input === "object" ? state.input : {};
+    base.tool = typeof part.tool === "string" ? part.tool : "";
+    base.state = {
+      status: typeof state.status === "string" ? state.status : "",
+      input: compactJsonValue(input, 0),
+      error: clampText(state.error || "", 1200),
+    };
+    return base;
+  }
+
+  if (base.type === "patch") {
+    base.hash = typeof part.hash === "string" ? part.hash : "";
+    base.files = Array.isArray(part.files)
+      ? part.files.slice(0, 200).map((item) => clampText(item, 240))
+      : [];
+    return base;
+  }
+
+  if (base.type === "file") {
+    base.filename = typeof part.filename === "string" ? part.filename : "";
+    base.url = typeof part.url === "string" ? clampText(part.url, 400) : "";
+    base.mime = typeof part.mime === "string" ? part.mime : "";
+    return base;
+  }
+
+  if (base.type === "retry") {
+    base.attempt = Number.isFinite(part.attempt) ? Number(part.attempt) : undefined;
+    base.error = clampText(extractErrorText(part.error), 1200);
+    return base;
+  }
+
+  if (base.type === "reasoning") {
+    // Reasoning text is stored in block.detail/reasoning field; avoid duplicating large snapshots in raw.
+    return base;
+  }
+
+  return base;
+}
+
 function toPartBlock(part, index) {
   if (!part || typeof part !== "object") return null;
   const type = typeof part.type === "string" ? part.type : "";
@@ -126,7 +217,7 @@ function toPartBlock(part, index) {
     detail: "",
     status: "",
     metadata: null,
-    raw: part,
+    raw: compactPartRaw(part, type),
     preview: "",
   };
 
@@ -158,8 +249,8 @@ function toPartBlock(part, index) {
     block.metadata = state.metadata || null;
     block.tool = toolName;
     block.toolInput = input;
-    block.toolOutput = typeof state.output === "string" ? state.output : "";
-    block.toolError = typeof state.error === "string" ? state.error : "";
+    block.toolOutput = typeof state.output === "string" ? clampText(state.output, 4000) : "";
+    block.toolError = typeof state.error === "string" ? clampText(state.error, 1200) : "";
     block.attachments = Array.isArray(state.attachments) ? state.attachments : [];
 
     const chunks = [];
@@ -346,6 +437,82 @@ function blocksFingerprint(blocks) {
   }
 }
 
+function normalizeToolTargetKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/\\/g, "/").toLowerCase();
+}
+
+function resolveToolTargetKey(input) {
+  if (!input || typeof input !== "object") return "";
+
+  const directCandidates = [
+    input.filePath,
+    input.file_path,
+    input.filepath,
+    input.path,
+    input.target,
+    input.url,
+    input.command,
+  ];
+  for (const value of directCandidates) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    return normalizeToolTargetKey(value);
+  }
+
+  if (Array.isArray(input.paths) && input.paths.length) {
+    const firstPath = input.paths.find((item) => typeof item === "string" && item.trim());
+    if (firstPath) return normalizeToolTargetKey(firstPath);
+  }
+
+  return "";
+}
+
+function toolMetaKeyForPart(part, index) {
+  const toolName = typeof part.tool === "string" && part.tool.trim()
+    ? part.tool.trim().toLowerCase()
+    : "tool";
+  const state = part.state && typeof part.state === "object" ? part.state : {};
+  const input = state.input && typeof state.input === "object" ? state.input : {};
+  const targetKey = resolveToolTargetKey(input);
+  if (targetKey) return `${toolName}:${targetKey}`;
+
+  const fallbackId = typeof part.id === "string" && part.id.trim() ? part.id.trim() : `${index}`;
+  return `${toolName}:id:${fallbackId}`;
+}
+
+function collectLatestToolErrorMeta(parts) {
+  const latestByTarget = new Map();
+
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part || typeof part !== "object" || part.type !== "tool") continue;
+
+    const state = part.state && typeof part.state === "object" ? part.state : {};
+    const status = typeof state.status === "string" ? state.status.trim().toLowerCase() : "";
+    const toolName = typeof part.tool === "string" && part.tool.trim() ? part.tool.trim() : "tool";
+    const key = toolMetaKeyForPart(part, i);
+
+    if (status === "completed") {
+      latestByTarget.set(key, { status: "completed", toolName, error: "" });
+      continue;
+    }
+
+    const isErrorStatus = status === "error" || status === "blocked";
+    const errorText = typeof state.error === "string" ? state.error.trim() : "";
+    if (!isErrorStatus || !errorText) continue;
+
+    latestByTarget.set(key, { status: "error", toolName, error: errorText });
+  }
+
+  const chunks = [];
+  for (const row of latestByTarget.values()) {
+    if (!row || row.status !== "error") continue;
+    chunks.push(`${row.toolName}: ${row.error}`);
+  }
+  return chunks;
+}
+
 function extractAssistantParts(parts) {
   if (!Array.isArray(parts)) return { text: "", reasoning: "", meta: "", blocks: [] };
 
@@ -372,14 +539,6 @@ function extractAssistantParts(parts) {
       continue;
     }
 
-    if (type === "tool") {
-      const state = part.state && typeof part.state === "object" ? part.state : null;
-      if (state && state.status === "error" && typeof state.error === "string" && state.error.trim()) {
-        const toolName = typeof part.tool === "string" ? part.tool : "tool";
-        metaChunks.push(`${toolName}: ${state.error.trim()}`);
-      }
-    }
-
     if (type === "retry") {
       const retryError = extractErrorText(part.error);
       if (retryError) metaChunks.push(`retry: ${retryError}`);
@@ -399,7 +558,7 @@ function extractAssistantParts(parts) {
   return {
     text: joinPartTextChunks(textChunks),
     reasoning: joinPartTextChunks(reasoningChunks),
-    meta: joinUniqueTextChunks(metaChunks),
+    meta: joinUniqueTextChunks([...metaChunks, ...collectLatestToolErrorMeta(parts)]),
     blocks,
   };
 }
@@ -541,6 +700,7 @@ function formatSessionStatusText(status) {
 
 module.exports = {
   joinUniqueTextChunks,
+  mergeSnapshotText,
   stringifyForDisplay,
   parseJsonObject,
   makePreviewText,

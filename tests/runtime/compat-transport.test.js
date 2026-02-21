@@ -171,6 +171,25 @@ test("buildLaunchProfileFromAttempt should skip non-rememberable attempts", () =
   assert.equal(profile, null);
 });
 
+test("buildEventStreamUrlCandidates should include legacy and global endpoints", () => {
+  const transport = createTransport();
+  const urls = transport.buildEventStreamUrlCandidates(
+    "http://127.0.0.1:38080",
+    "/home/me/.opencode-assistant-workspace",
+  );
+
+  assert.deepEqual(urls, [
+    {
+      path: "/event",
+      url: "http://127.0.0.1:38080/event?directory=%2Fhome%2Fme%2F.opencode-assistant-workspace",
+    },
+    {
+      path: "/global/event",
+      url: "http://127.0.0.1:38080/global/event?directory=%2Fhome%2Fme%2F.opencode-assistant-workspace",
+    },
+  ]);
+});
+
 test("buildLaunchAttempts should include WSL fallback on windows arm64 even in native mode", () => {
   const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
   const archDesc = Object.getOwnPropertyDescriptor(process, "arch");
@@ -689,6 +708,47 @@ test("sendMessage should finalize when streamed payload is not marked completed"
   assert.equal(result.messageId, "msg_final");
 });
 
+test("sendMessage should still finalize when streamed payload is marked completed", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+  let finalizeCalls = 0;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => null;
+  transport.streamAssistantFromPolling = async () => ({
+    messageId: "msg_stream",
+    text: "partial by stream",
+    reasoning: "",
+    meta: "",
+    blocks: [],
+    completed: true,
+  });
+  transport.finalizeAssistantResponse = async () => {
+    finalizeCalls += 1;
+    return {
+      messageId: "msg_final",
+      text: "final authoritative answer",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: true,
+    };
+  };
+  transport.trySyncMessageRecovery = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(finalizeCalls, 1);
+  assert.equal(result.text, "final authoritative answer");
+  assert.equal(result.messageId, "msg_final");
+});
+
 test("reconcileAssistantResponseQuick should promote latest completed assistant message", async () => {
   const transport = createTransport();
   const startedAt = 1000;
@@ -733,9 +793,10 @@ test("reconcileAssistantResponseQuick should promote latest completed assistant 
   assert.equal(Boolean(reconciled.completed), true);
 });
 
-test("sendMessage should keep streamed payload when non-strict finalize reconcile fails", async () => {
+test("sendMessage should keep streamed payload when finalize reconcile fails", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
+  let finalizeCalls = 0;
 
   transport.request = async (method, endpoint) => {
     if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
@@ -751,6 +812,7 @@ test("sendMessage should keep streamed payload when non-strict finalize reconcil
     completed: true,
   });
   transport.finalizeAssistantResponse = async () => {
+    finalizeCalls += 1;
     throw new Error("reconcile failed");
   };
   transport.trySyncMessageRecovery = async () => null;
@@ -760,6 +822,7 @@ test("sendMessage should keep streamed payload when non-strict finalize reconcil
     prompt: "hello",
   });
 
+  assert.equal(finalizeCalls, 1);
   assert.equal(result.text, "final by stream");
   assert.equal(result.messageId, "msg_stream");
 });

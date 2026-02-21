@@ -124,6 +124,36 @@ test("extractAssistantPayloadFromEnvelope should append auth hint for 401 model 
   assert.match(payload.text, /WSL/);
 });
 
+test("extractAssistantPayloadFromEnvelope should compact large raw tool payloads", () => {
+  const hugeOutput = "x".repeat(20000);
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        id: "prt_tool_1",
+        type: "tool",
+        tool: "read",
+        state: {
+          status: "completed",
+          input: { filePath: "/tmp/huge.txt" },
+          output: hugeOutput,
+        },
+      },
+    ],
+  });
+
+  assert.equal(Array.isArray(payload.blocks), true);
+  assert.equal(payload.blocks.length, 1);
+  const block = payload.blocks[0];
+  assert.equal(block.type, "tool");
+  assert.ok(String(block.toolOutput || "").length < hugeOutput.length);
+  assert.ok(block.raw && block.raw.state && typeof block.raw.state === "object");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(block.raw.state, "output"),
+    false,
+  );
+});
+
 test("extractAssistantPayloadFromEnvelope should surface info.error even when role is non-assistant", () => {
   const payload = extractAssistantPayloadFromEnvelope({
     info: {
@@ -138,6 +168,90 @@ test("extractAssistantPayloadFromEnvelope should surface info.error even when ro
   assert.match(payload.text, /鉴权失败/);
   assert.equal(payload.reasoning, "");
   assert.equal(Array.isArray(payload.blocks), true);
+});
+
+test("extractAssistantPayloadFromEnvelope should suppress stale tool error when later edit succeeds on same file", () => {
+  const filePath = "/Users/demo/notes/today.md";
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        type: "tool",
+        tool: "edit",
+        state: {
+          status: "error",
+          input: {
+            filePath,
+            oldString: "- old line",
+            newString: "- new line",
+          },
+          error: `Error: You must read file ${filePath} before overwriting it. Use the Read tool first`,
+        },
+      },
+      {
+        type: "tool",
+        tool: "read",
+        state: {
+          status: "completed",
+          input: { filePath },
+          output: "line 1",
+        },
+      },
+      {
+        type: "tool",
+        tool: "edit",
+        state: {
+          status: "completed",
+          input: {
+            filePath,
+            oldString: "- old line",
+            newString: "- new line",
+          },
+          output: "Edit applied successfully.",
+        },
+      },
+    ],
+  });
+
+  assert.equal(payload.meta, "");
+});
+
+test("extractAssistantPayloadFromEnvelope should keep unresolved tool error for different target", () => {
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        type: "tool",
+        tool: "edit",
+        state: {
+          status: "error",
+          input: { filePath: "/tmp/a.md" },
+          error: "Error A",
+        },
+      },
+      {
+        type: "tool",
+        tool: "edit",
+        state: {
+          status: "completed",
+          input: { filePath: "/tmp/a.md" },
+          output: "ok",
+        },
+      },
+      {
+        type: "tool",
+        tool: "edit",
+        state: {
+          status: "error",
+          input: { filePath: "/tmp/b.md" },
+          error: "Error B",
+        },
+      },
+    ],
+  });
+
+  assert.match(payload.meta, /edit: Error B/);
+  assert.doesNotMatch(payload.meta, /Error A/);
 });
 
 test("formatSessionStatusText should support nested status payload shape", () => {

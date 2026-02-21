@@ -1,0 +1,163 @@
+const { Modal } = require("obsidian");
+
+class InputPromptModal extends Modal {
+  constructor(app, options, onResolve) {
+    super(app);
+    this.options = options || {};
+    this.onResolve = typeof onResolve === "function" ? onResolve : () => {};
+    this.resolved = false;
+  }
+
+  resolve(value) {
+    if (this.resolved) return;
+    this.resolved = true;
+    this.onResolve(value);
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: String(this.options.title || "请输入内容") });
+    if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
+
+    const input = contentEl.createEl("input", {
+      attr: {
+        type: this.options.password ? "password" : "text",
+        placeholder: String(this.options.placeholder || ""),
+      },
+    });
+    input.style.width = "100%";
+    input.value = String(this.options.value || "");
+
+    const actions = contentEl.createDiv();
+    actions.style.display = "flex";
+    actions.style.justifyContent = "flex-end";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "12px";
+
+    const cancelBtn = actions.createEl("button", { text: String(this.options.cancelText || "取消") });
+    const submitBtn = actions.createEl("button", { text: String(this.options.submitText || "确定"), cls: "mod-cta" });
+
+    cancelBtn.addEventListener("click", () => this.resolve(null));
+    submitBtn.addEventListener("click", () => this.resolve(String(input.value || "")));
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        this.resolve(String(input.value || ""));
+      }
+    });
+
+    setTimeout(() => input.focus(), 0);
+  }
+
+  onClose() {
+    if (!this.resolved) this.onResolve(null);
+    this.contentEl.empty();
+  }
+}
+
+class ConfirmModal extends Modal {
+  constructor(app, options, onResolve) {
+    super(app);
+    this.options = options || {};
+    this.onResolve = typeof onResolve === "function" ? onResolve : () => {};
+    this.resolved = false;
+  }
+
+  resolve(value) {
+    if (this.resolved) return;
+    this.resolved = true;
+    this.onResolve(Boolean(value));
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: String(this.options.title || "确认操作") });
+    if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
+
+    const actions = contentEl.createDiv();
+    actions.style.display = "flex";
+    actions.style.justifyContent = "flex-end";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "12px";
+
+    const cancelBtn = actions.createEl("button", { text: String(this.options.cancelText || "取消") });
+    const submitBtn = actions.createEl("button", { text: String(this.options.submitText || "确认"), cls: "mod-cta" });
+    cancelBtn.addEventListener("click", () => this.resolve(false));
+    submitBtn.addEventListener("click", () => this.resolve(true));
+  }
+
+  onClose() {
+    if (!this.resolved) this.onResolve(false);
+    this.contentEl.empty();
+  }
+}
+
+class SelectPromptModal extends Modal {
+  constructor(app, options, onResolve) {
+    super(app);
+    this.options = options || {};
+    this.onResolve = typeof onResolve === "function" ? onResolve : () => {};
+    this.resolved = false;
+  }
+
+  resolve(value) {
+    if (this.resolved) return;
+    this.resolved = true;
+    this.onResolve(value);
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    const options = Array.isArray(this.options.options) ? this.options.options : [];
+
+    contentEl.empty();
+    contentEl.createEl("h2", { text: String(this.options.title || "请选择") });
+    if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
+
+    const select = contentEl.createEl("select");
+    select.style.width = "100%";
+    select.style.marginTop = "8px";
+    options.forEach((item) => {
+      select.createEl("option", {
+        value: String(item.value),
+        text: String(item.label || item.value),
+      });
+    });
+    if (this.options.defaultValue !== undefined && this.options.defaultValue !== null) {
+      select.value = String(this.options.defaultValue);
+    }
+
+    const actions = contentEl.createDiv();
+    actions.style.display = "flex";
+    actions.style.justifyContent = "flex-end";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "12px";
+
+    const cancelBtn = actions.createEl("button", { text: String(this.options.cancelText || "取消") });
+    const submitBtn = actions.createEl("button", { text: String(this.options.submitText || "确定"), cls: "mod-cta" });
+    cancelBtn.addEventListener("click", () => this.resolve(null));
+    submitBtn.addEventListener("click", () => this.resolve(String(select.value || "")));
+    select.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        this.resolve(String(select.value || ""));
+      }
+    });
+  }
+
+  onClose() {
+    if (!this.resolved) this.onResolve(null);
+    this.contentEl.empty();
+  }
+}
+
+module.exports = {
+  InputPromptModal,
+  ConfirmModal,
+  SelectPromptModal,
+};

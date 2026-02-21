@@ -4,6 +4,7 @@ const {
   extractErrorText,
   hasTerminalPayload,
   payloadLooksInProgress,
+  mergeSnapshotText,
 } = require("../../assistant-payload-utils");
 
 function normalizeTimestampMs(value) {
@@ -235,8 +236,12 @@ function createTransportEventReducer(options) {
         textByPart.delete(partId);
       } else {
         const current = textByPart.get(partId) || "";
-        const next = delta ? current + delta : typeof part.text === "string" ? part.text : current;
-        textByPart.set(partId, next);
+        let next = current;
+        if (delta) next = mergeSnapshotText(next, delta);
+        if (typeof part.text === "string") next = mergeSnapshotText(next, part.text);
+        if (next !== current) {
+          textByPart.set(partId, next);
+        }
       }
       updateText();
       return;
@@ -245,9 +250,13 @@ function createTransportEventReducer(options) {
     if (part.type === "reasoning") {
       idleSeen = false;
       const current = reasoningByPart.get(partId) || "";
-      const next = delta ? current + delta : typeof part.text === "string" ? part.text : current;
-      reasoningByPart.set(partId, next);
-      blockPartById.set(partId, Object.assign({}, part, { text: next }));
+      let next = current;
+      if (delta) next = mergeSnapshotText(next, delta);
+      if (typeof part.text === "string") next = mergeSnapshotText(next, part.text);
+      if (next !== current) {
+        reasoningByPart.set(partId, next);
+      }
+      blockPartById.set(partId, Object.assign({}, part, { text: next || current }));
       updateReasoning();
       updateBlocks();
       return;

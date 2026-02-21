@@ -28,5 +28,5 @@
 
 ## 开发说明
 
-当前运行时由 `main.js -> src/main.js` 直接加载 CommonJS 模块。
+当前运行时由 `main.js` 入口动态加载 `runtime/` 下的 CommonJS 模块。
 已预留 `esbuild.config.mjs` 与 `tsconfig.json`，可后续迁移为 TypeScript 构建产物。

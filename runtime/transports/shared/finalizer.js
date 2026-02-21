@@ -126,6 +126,7 @@ async function pollAssistantPayload(options) {
   const cfg = options && typeof options === "object" ? options : {};
   const quietTimeoutMs = Math.max(10000, Number(cfg.quietTimeoutMs || 120000));
   const maxTotalMs = Math.max(quietTimeoutMs * 3, Number(cfg.maxTotalMs || 10 * 60 * 1000));
+  const latestIntervalMs = Math.max(220, Number(cfg.latestIntervalMs || 1100));
   const defaultNoMessageTimeoutMs = Math.max(
     12000,
     Math.min(45000, Math.floor(quietTimeoutMs * 0.5)),
@@ -149,6 +150,8 @@ async function pollAssistantPayload(options) {
   let lastMessageCreated = 0;
   let timedOut = false;
   let completionSeen = false;
+  let byIdSeen = false;
+  let lastLatestAt = 0;
 
   const emit = () => {
     if (typeof cfg.onToken === "function") cfg.onToken(String(payload.text || ""));
@@ -180,16 +183,23 @@ async function pollAssistantPayload(options) {
     if (cfg.signal && cfg.signal.aborted) {
       throw new Error("用户取消了请求");
     }
+    pollCount += 1;
+
+    let byIdUpdated = false;
 
     if (messageId && typeof cfg.getByMessageId === "function") {
       try {
         const byId = await cfg.getByMessageId(messageId, cfg.signal);
         if (byId && byId.payload) {
+          byIdSeen = true;
           const before = payload;
           payload = chooseRicherResponse(payload, byId.payload);
           if (byId.completed) completionSeen = true;
           if (byId.messageId) messageId = String(byId.messageId || messageId);
-          if (payload !== before) markProgress();
+          if (payload !== before) {
+            markProgress();
+            byIdUpdated = true;
+          }
           if (byId.completed && isComplete()) break;
         }
       } catch {
@@ -197,7 +207,16 @@ async function pollAssistantPayload(options) {
       }
     }
 
-    if (typeof cfg.getLatest === "function") {
+    const now = Date.now();
+    const shouldFetchLatest = typeof cfg.getLatest === "function" && (
+      !messageId
+      || !byIdSeen
+      || !hasRenderablePayload(payload)
+      || !byIdUpdated
+      || (now - lastLatestAt >= latestIntervalMs)
+    );
+    if (shouldFetchLatest) {
+      lastLatestAt = now;
       try {
         const latest = await cfg.getLatest(cfg.signal);
         if (latest && latest.payload) {
@@ -219,7 +238,6 @@ async function pollAssistantPayload(options) {
       }
     }
 
-    pollCount += 1;
     if (pollCount % 2 === 0 && typeof cfg.getSessionStatus === "function") {
       lastStatus = await cfg.getSessionStatus(cfg.signal);
       const statusHint = extractStatusHint(lastStatus);
@@ -251,7 +269,8 @@ async function pollAssistantPayload(options) {
         } else {
           const staleMs = Date.now() - lastProgressAt;
           if (requireTerminal) {
-            if (!payloadLooksInProgress(payload) || staleMs > 1800) break;
+            // Idle/done can appear transiently between tool steps; don't early-stop while payload still looks in-progress.
+            if (!payloadLooksInProgress(payload)) break;
           } else if (completionSeen || staleMs > 1800) {
             break;
           }

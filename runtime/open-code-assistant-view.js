@@ -35,9 +35,13 @@ class OpenCodeAssistantView extends ItemView {
     this.pendingQuestionRequests = new Map();
     this.inlineQuestionWidget = null;
     this.inlineQuestionKey = "";
-    this.lastQuestionResolveLogAt = 0;
     this.silentAbortBudget = 0;
     this.runtimeStatusState = { text: "", tone: "info" };
+    this.autoScrollEnabled = true;
+    this.autoScrollLock = false;
+    this.messagesScrollEl = null;
+    this.messagesScrollHandler = null;
+    this.pendingScrollRaf = 0;
   }
 
   getViewType() {
@@ -60,10 +64,12 @@ class OpenCodeAssistantView extends ItemView {
       new Notice(`初始化失败: ${e instanceof Error ? e.message : String(e)}`);
     }
     this.render();
+    void this.refreshPendingQuestionRequests({ force: true, silent: false }).catch(() => {});
   }
 
   onClose() {
     this.clearInlineQuestionWidget(true);
+    this.unbindMessagesScrollTracking();
     if (this.currentAbort) {
       this.currentAbort.abort();
       this.currentAbort = null;
@@ -171,8 +177,11 @@ class OpenCodeAssistantView extends ItemView {
       this.plugin.sessionStore.appendMessage(sessionId, userMessage);
     }
     this.plugin.sessionStore.appendMessage(sessionId, draft);
+    this.autoScrollLock = true;
+    this.autoScrollEnabled = true;
     this.renderMessages();
     this.renderSidebar(this.root.querySelector(".oc-side"));
+    this.scheduleScrollMessagesToBottom(true);
   
     this.currentAbort = new AbortController();
     this.setBusy(true);
@@ -202,7 +211,7 @@ class OpenCodeAssistantView extends ItemView {
             const body = target.querySelector(".oc-message-content");
             if (body) body.textContent = partial;
           }
-          messages.scrollTop = messages.scrollHeight;
+          this.scheduleScrollMessagesToBottom();
         },
         onReasoning: (partialReasoning) => {
           this.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, partialReasoning);
@@ -227,7 +236,7 @@ class OpenCodeAssistantView extends ItemView {
               if (reasoningBody) reasoningBody.textContent = partialReasoning || "...";
             }
           }
-          messages.scrollTop = messages.scrollHeight;
+          this.scheduleScrollMessagesToBottom();
         },
         onBlocks: (blocks) => {
           this.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, undefined, undefined, blocks);
@@ -251,7 +260,7 @@ class OpenCodeAssistantView extends ItemView {
           }
           // Question tool arrives through streaming block updates; keep inline panel in sync in real time.
           this.renderInlineQuestionPanel(this.plugin.sessionStore.getActiveMessages());
-          messages.scrollTop = messages.scrollHeight;
+          this.scheduleScrollMessagesToBottom();
         },
         onPermissionRequest: async (permission) => {
           this.setRuntimeStatus("等待权限确认…", "info");
@@ -348,12 +357,18 @@ class OpenCodeAssistantView extends ItemView {
       this.currentAbort = null;
       this.setBusy(false);
       await this.plugin.persistState();
-      if (shouldRerenderModelPicker) {
-        this.render();
-        return;
+      try {
+        this.autoScrollEnabled = true;
+        if (shouldRerenderModelPicker) {
+          this.render();
+          return;
+        }
+        this.renderMessages();
+        this.renderSidebar(this.root.querySelector(".oc-side"));
+        this.scheduleScrollMessagesToBottom(true);
+      } finally {
+        this.autoScrollLock = false;
       }
-      this.renderMessages();
-      this.renderSidebar(this.root.querySelector(".oc-side"));
     }
   }
 

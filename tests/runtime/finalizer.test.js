@@ -150,3 +150,63 @@ test("pollAssistantPayload should not stop on first partial text when requireTer
   assert.equal(String(result.payload && result.payload.text || ""), "hello world");
   assert.equal(result.timedOut, false);
 });
+
+test("pollAssistantPayload should not early-stop on transient idle while payload is still in progress", async () => {
+  let latestCalls = 0;
+  const originalNow = Date.now;
+  let fakeNow = originalNow();
+  Date.now = () => {
+    fakeNow += 1000;
+    return fakeNow;
+  };
+
+  try {
+    const result = await pollAssistantPayload({
+      quietTimeoutMs: 120000,
+      maxTotalMs: 240000,
+      noMessageTimeoutMs: 12000,
+      sleep: async () => {},
+      getLatest: async () => {
+        latestCalls += 1;
+        if (latestCalls < 4) {
+          return {
+            messageId: "msg_a1",
+            createdAt: Date.now(),
+            payload: {
+              text: "processing",
+              reasoning: "",
+              meta: "",
+              blocks: [
+                { id: "tool_1", type: "tool", status: "running", title: "tool", summary: "", detail: "" },
+                { id: "step_1", type: "step-start", status: "running", title: "step", summary: "", detail: "" },
+              ],
+            },
+            completed: false,
+          };
+        }
+        return {
+          messageId: "msg_a1",
+          createdAt: Date.now(),
+          payload: {
+            text: "final",
+            reasoning: "",
+            meta: "",
+            blocks: [
+              { id: "tool_1", type: "tool", status: "completed", title: "tool", summary: "", detail: "" },
+              { id: "finish_1", type: "step-finish", status: "completed", title: "finish", summary: "stop", detail: "" },
+            ],
+          },
+          completed: true,
+        };
+      },
+      getSessionStatus: async () => ({ type: "idle" }),
+    });
+
+    assert.ok(latestCalls >= 4);
+    assert.equal(result.messageId, "msg_a1");
+    assert.equal(String(result.payload && result.payload.text || ""), "final");
+    assert.equal(result.timedOut, false);
+  } finally {
+    Date.now = originalNow;
+  }
+});
