@@ -2,6 +2,8 @@ const {
   extractAssistantPayloadFromEnvelope,
 } = require("../assistant-payload-utils");
 
+const RUNTIME_SCHEMA_VERSION = 1;
+
 function normalizeTimestampMs(value) {
   const raw = Number(value || 0);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
@@ -123,6 +125,10 @@ const sessionBootstrapMethods = {
   async loadPersistedData() {
     const runtime = this.ensureRuntimeModules();
     const raw = (await this.loadData()) || {};
+    const rawSchemaVersion = Number(raw && raw.schemaVersion ? raw.schemaVersion : 0);
+    this.schemaVersion = Number.isFinite(rawSchemaVersion) && rawSchemaVersion > 0
+      ? Math.floor(rawSchemaVersion)
+      : RUNTIME_SCHEMA_VERSION;
     const extractRawTransportMode = (value) => String(value || "").trim().toLowerCase();
     const markTransportModeMigrationIfNeeded = (rawMode) => {
       const normalized = extractRawTransportMode(this.settings && this.settings.transportMode);
@@ -176,7 +182,12 @@ const sessionBootstrapMethods = {
   },
 
   async persistState() {
-    await this.saveData({ settings: this.settings, runtimeState: this.runtimeState });
+    this.schemaVersion = RUNTIME_SCHEMA_VERSION;
+    await this.saveData({
+      schemaVersion: this.schemaVersion,
+      settings: this.settings,
+      runtimeState: this.runtimeState,
+    });
   },
 
   async reloadSkills() {

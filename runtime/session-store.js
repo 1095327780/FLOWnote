@@ -1,3 +1,9 @@
+const {
+  normalizeSessionTitleInput,
+  isPlaceholderSessionTitle,
+  deriveSessionTitleFromPrompt,
+} = require("./domain/session-title");
+
 class SessionStore {
   constructor(plugin) {
     this.plugin = plugin;
@@ -14,43 +20,15 @@ class SessionStore {
   }
 
   static normalizeSessionTitleInput(value) {
-    return String(value || "").replace(/\s+/g, " ").trim();
+    return normalizeSessionTitleInput(value);
   }
 
   static isPlaceholderTitle(title) {
-    const normalized = SessionStore.normalizeSessionTitleInput(title).toLowerCase();
-    if (!normalized) return true;
-    if (
-      normalized === "新会话"
-      || normalized === "未命名会话"
-      || normalized === "new session"
-      || normalized === "untitled"
-      || normalized === "untitled session"
-    ) {
-      return true;
-    }
-    return /^(new session|untitled(?: session)?|新会话|未命名会话)(?:\s*[-:：].*)?$/.test(normalized);
+    return isPlaceholderSessionTitle(title);
   }
 
   static deriveTitleFromPrompt(prompt) {
-    let text = SessionStore.normalizeSessionTitleInput(prompt);
-    if (!text) return "";
-
-    if (text.startsWith("/")) {
-      const firstSpace = text.indexOf(" ");
-      if (firstSpace > 1) {
-        const rest = SessionStore.normalizeSessionTitleInput(text.slice(firstSpace + 1));
-        text = rest || text.slice(1);
-      } else {
-        text = text.slice(1);
-      }
-    }
-
-    text = text.replace(/^[\s:：\-—]+/, "");
-    if (!text) return "";
-
-    const maxLen = 28;
-    return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+    return deriveSessionTitleFromPrompt(prompt);
   }
 
   static normalizeTimestampMs(value) {
@@ -80,7 +58,7 @@ class SessionStore {
     const session = st.sessions.find((s) => s.id === sessionId);
     if (!session) return false;
 
-    const normalized = SessionStore.normalizeSessionTitleInput(title);
+    const normalized = normalizeSessionTitleInput(title);
     if (!normalized) return false;
 
     session.title = normalized;
@@ -149,8 +127,8 @@ class SessionStore {
         .find((row) => row && row.role === "user" && String(row.text || "").trim().length > 0);
       if (latestUserMessage) {
         session.lastUserPrompt = String(latestUserMessage.text || "");
-        if (SessionStore.isPlaceholderTitle(session.title)) {
-          const nextTitle = SessionStore.deriveTitleFromPrompt(session.lastUserPrompt);
+        if (isPlaceholderSessionTitle(session.title)) {
+          const nextTitle = deriveSessionTitleFromPrompt(session.lastUserPrompt);
           if (nextTitle) session.title = nextTitle;
         }
       }
@@ -171,8 +149,8 @@ class SessionStore {
       if (message.role === "user") {
         const promptText = typeof message.text === "string" ? message.text : "";
         session.lastUserPrompt = promptText;
-        if (SessionStore.isPlaceholderTitle(session.title)) {
-          const nextTitle = SessionStore.deriveTitleFromPrompt(promptText);
+        if (isPlaceholderSessionTitle(session.title)) {
+          const nextTitle = deriveSessionTitleFromPrompt(promptText);
           if (nextTitle) session.title = nextTitle;
         }
       }

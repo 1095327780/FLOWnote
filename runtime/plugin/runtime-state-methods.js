@@ -4,6 +4,14 @@ const runtimeStateMethods = {
       this.runtimeState = {};
     }
     if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+    if (
+      this.runtimeState.modelCatalogCache !== null
+      && this.runtimeState.modelCatalogCache !== undefined
+      && typeof this.runtimeState.modelCatalogCache !== "object"
+    ) {
+      this.runtimeState.modelCatalogCache = null;
+    }
+    if (this.runtimeState.modelCatalogCache === undefined) this.runtimeState.modelCatalogCache = null;
     if (!this.runtimeState.migrationFlags || typeof this.runtimeState.migrationFlags !== "object") {
       this.runtimeState.migrationFlags = {};
     }

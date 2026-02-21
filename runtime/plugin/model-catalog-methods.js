@@ -1,9 +1,3 @@
-const fs = require("fs");
-const path = require("path");
-
-const MODEL_CACHE_BLOCK_START = "<!-- opencode-assistant-model-cache:start -->";
-const MODEL_CACHE_BLOCK_END = "<!-- opencode-assistant-model-cache:end -->";
-
 const modelCatalogMethods = {
   normalizeModelID(modelID) {
     return String(modelID || "").trim();
@@ -153,10 +147,6 @@ const modelCatalogMethods = {
     return visible;
   },
 
-  getTerminalOutputModelCachePath() {
-    return path.join(this.getVaultPath(), "终端输出.md");
-  },
-
   normalizeModelCachePayload(payload) {
     const raw = payload && typeof payload === "object" ? payload : {};
     const models = [...new Set(
@@ -179,41 +169,25 @@ const modelCatalogMethods = {
     };
   },
 
-  readModelCacheFromTerminalOutput() {
-    const filePath = this.getTerminalOutputModelCachePath();
-    if (!fs.existsSync(filePath)) return null;
-
-    let text = "";
-    try {
-      text = fs.readFileSync(filePath, "utf8");
-    } catch {
+  ensureRuntimeStateModelCacheShape() {
+    if (!this.runtimeState || typeof this.runtimeState !== "object") {
+      this.runtimeState = {};
+    }
+    const cache = this.runtimeState.modelCatalogCache;
+    if (!cache || typeof cache !== "object") {
+      this.runtimeState.modelCatalogCache = null;
       return null;
     }
-    if (!text) return null;
-
-    const startIndex = text.indexOf(MODEL_CACHE_BLOCK_START);
-    if (startIndex < 0) return null;
-    const endIndex = text.indexOf(MODEL_CACHE_BLOCK_END, startIndex);
-    if (endIndex < 0) return null;
-
-    const section = text.slice(startIndex + MODEL_CACHE_BLOCK_START.length, endIndex);
-    const codeStart = section.indexOf("```json");
-    if (codeStart < 0) return null;
-    const afterCodeStart = section.slice(codeStart + "```json".length);
-    const codeEnd = afterCodeStart.indexOf("```");
-    if (codeEnd < 0) return null;
-
-    const jsonText = afterCodeStart.slice(0, codeEnd).trim();
-    if (!jsonText) return null;
-
-    try {
-      return this.normalizeModelCachePayload(JSON.parse(jsonText));
-    } catch {
-      return null;
-    }
+    return cache;
   },
 
-  writeModelCacheToTerminalOutput(models, connectedProviders = []) {
+  readModelCacheFromRuntimeState() {
+    const cache = this.ensureRuntimeStateModelCacheShape();
+    if (!cache) return null;
+    return this.normalizeModelCachePayload(cache);
+  },
+
+  writeModelCacheToRuntimeState(models, connectedProviders = []) {
     const normalizedModels = [...new Set(
       (Array.isArray(models) ? models : [])
         .map((model) => this.normalizeModelID(model))
@@ -234,47 +208,23 @@ const modelCatalogMethods = {
       models: normalizedModels,
       connectedProviders: normalizedProviders,
     };
-    const block = [
-      MODEL_CACHE_BLOCK_START,
-      "```json",
-      JSON.stringify(payload, null, 2),
-      "```",
-      MODEL_CACHE_BLOCK_END,
-    ].join("\n");
+    this.ensureRuntimeStateModelCacheShape();
+    this.runtimeState.modelCatalogCache = payload;
+    return true;
+  },
 
-    const filePath = this.getTerminalOutputModelCachePath();
-    let text = "";
-    if (fs.existsSync(filePath)) {
-      try {
-        text = fs.readFileSync(filePath, "utf8");
-      } catch {
-        text = "";
-      }
-    }
+  readModelCacheFromTerminalOutput() {
+    // Backward-compatible alias: cache source is now runtimeState instead of user notes.
+    return this.readModelCacheFromRuntimeState();
+  },
 
-    const startIndex = text.indexOf(MODEL_CACHE_BLOCK_START);
-    const endIndex = startIndex >= 0 ? text.indexOf(MODEL_CACHE_BLOCK_END, startIndex) : -1;
-
-    let nextText = "";
-    if (startIndex >= 0 && endIndex >= 0) {
-      nextText = `${text.slice(0, startIndex)}${block}${text.slice(endIndex + MODEL_CACHE_BLOCK_END.length)}`;
-    } else if (text.trim().length > 0) {
-      nextText = `${text.replace(/\s*$/, "")}\n\n${block}\n`;
-    } else {
-      nextText = `${block}\n`;
-    }
-
-    try {
-      fs.writeFileSync(filePath, nextText, "utf8");
-      return true;
-    } catch (e) {
-      this.log(`write model cache failed: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
+  writeModelCacheToTerminalOutput(models, connectedProviders = []) {
+    // Backward-compatible alias: cache sink is now runtimeState instead of user notes.
+    return this.writeModelCacheToRuntimeState(models, connectedProviders);
   },
 
   loadModelCatalogFromTerminalOutput() {
-    const cache = this.readModelCacheFromTerminalOutput();
+    const cache = this.readModelCacheFromRuntimeState();
     if (!cache || !Array.isArray(cache.models) || !cache.models.length) return [];
 
     const state = this.ensureModelCatalogState();
@@ -347,7 +297,7 @@ const modelCatalogMethods = {
       const connectedForCache = state.connectedProviders instanceof Set
         ? [...state.connectedProviders]
         : [];
-      this.writeModelCacheToTerminalOutput(state.allModels, connectedForCache);
+      this.writeModelCacheToRuntimeState(state.allModels, connectedForCache);
     }
 
     if (cfg.notifyView !== false) this.notifyModelCatalogUpdated();

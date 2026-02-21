@@ -53,3 +53,4 @@
 
 当前运行时由 `main.js` 入口静态装配 `runtime/` 下的 CommonJS 模块。
 发布构建不经过额外打包步骤，直接交付 `main.js + runtime/`。
+运行时状态统一以 `schemaVersion` 持久化；模型缓存写入插件 `runtimeState`，不再写入用户笔记文件。

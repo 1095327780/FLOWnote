@@ -1,4 +1,10 @@
 const { Notice, setIcon } = require("obsidian");
+const {
+  normalizeSessionTitleInput: normalizeSessionTitleFromDomain,
+  isPlaceholderSessionTitle: isPlaceholderSessionTitleFromDomain,
+  deriveSessionTitleFromPrompt: deriveSessionTitleFromPromptFromDomain,
+  resolveSessionDisplayTitle,
+} = require("../domain/session-title");
 
 function openSettings() {
   this.app.setting.open();
@@ -125,49 +131,19 @@ function toggleSidebarCollapsed() {
 }
 
 function normalizeSessionTitle(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return normalizeSessionTitleFromDomain(value);
 }
 
 function isPlaceholderSessionTitle(title) {
-  const normalized = normalizeSessionTitle(title).toLowerCase();
-  if (!normalized) return true;
-  if (
-    normalized === "新会话"
-    || normalized === "未命名会话"
-    || normalized === "new session"
-    || normalized === "untitled"
-    || normalized === "untitled session"
-  ) {
-    return true;
-  }
-  return /^(new session|untitled(?: session)?|新会话|未命名会话)(?:\s*[-:：].*)?$/.test(normalized);
+  return isPlaceholderSessionTitleFromDomain(title);
 }
 
 function deriveSessionTitleFromPrompt(prompt) {
-  let text = normalizeSessionTitle(prompt);
-  if (!text) return "";
-
-  if (text.startsWith("/")) {
-    const firstSpace = text.indexOf(" ");
-    if (firstSpace > 1) {
-      const rest = normalizeSessionTitle(text.slice(firstSpace + 1));
-      text = rest || text.slice(1);
-    } else {
-      text = text.slice(1);
-    }
-  }
-
-  text = text.replace(/^[\s:：\-—]+/, "");
-  if (!text) return "";
-  return text.length > 28 ? `${text.slice(0, 28)}…` : text;
+  return deriveSessionTitleFromPromptFromDomain(prompt);
 }
 
 function sessionDisplayTitle(session) {
-  if (!session || typeof session !== "object") return "未命名会话";
-  const current = normalizeSessionTitle(session.title);
-  if (current && !isPlaceholderSessionTitle(current)) return current;
-  const inferred = deriveSessionTitleFromPrompt(session.lastUserPrompt || "");
-  return inferred || current || "未命名会话";
+  return resolveSessionDisplayTitle(session, "未命名会话");
 }
 
 function activeSessionLabel() {
