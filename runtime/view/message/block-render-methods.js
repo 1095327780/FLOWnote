@@ -16,7 +16,10 @@ const {
 
 const {
   truncateSummaryText,
-  extractPatchFiles,
+  extractPatchFileEntries,
+  summarizePatchChanges,
+  patchChangeLabel,
+  patchFileDisplayPath,
   patchHash,
 } = blockUtilsInternal;
 
@@ -115,11 +118,12 @@ function renderToolPart(container, block, messagePending) {
 function renderPatchPart(container, block, messagePending) {
   const status = this.resolveDisplayBlockStatus(block, messagePending);
   const detailText = String((block && block.detail) || "").trim();
-  const files = extractPatchFiles(block, detailText);
+  const entries = extractPatchFileEntries(block, detailText);
   const hash = patchHash(block);
   const shortHash = hash ? hash.slice(0, 12) : "";
-  const summaryText = files.length
-    ? `${files.length} 个变更文件${shortHash ? ` · ${shortHash}` : ""}`
+  const changeSummary = summarizePatchChanges(entries);
+  const summaryText = changeSummary
+    ? `${changeSummary}${shortHash ? ` · ${shortHash}` : ""}`
     : shortHash
       ? `hash ${shortHash}`
       : "变更文件";
@@ -143,11 +147,15 @@ function renderPatchPart(container, block, messagePending) {
     content.createDiv({ cls: "oc-tool-result-text", text: `hash: ${shortHash}` });
   }
 
-  if (files.length) {
+  if (entries.length) {
     const list = content.createDiv({ cls: "oc-tool-file-list" });
-    files.forEach((file) => {
-      const item = list.createDiv({ cls: "oc-tool-file-item", text: file });
-      item.setAttr("title", file);
+    entries.forEach((entry) => {
+      const label = patchChangeLabel(entry && entry.action);
+      const displayPath = patchFileDisplayPath(entry) || "(未提供路径)";
+      const text = `[${label}] ${displayPath}`;
+      const item = list.createDiv({ cls: "oc-tool-file-item", text });
+      item.setAttr("title", text);
+      item.setAttr("data-change-type", String((entry && entry.action) || "unknown"));
     });
   } else if (detailText) {
     const pre = content.createEl("pre", { cls: "oc-tool-detail", text: detailText });

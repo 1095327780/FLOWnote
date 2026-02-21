@@ -130,6 +130,51 @@ function clampText(value, maxLen = 1200) {
   return `${raw.slice(0, limit)}...(${raw.length - limit} chars truncated)`;
 }
 
+function normalizePatchPath(pathLike) {
+  return String(pathLike || "").trim();
+}
+
+function normalizePatchAction(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (["a", "add", "added", "new", "create", "created"].includes(raw)) return "added";
+  if (["m", "mod", "modify", "modified", "update", "updated", "change", "changed", "edit", "edited"].includes(raw)) {
+    return "modified";
+  }
+  if (["d", "del", "delete", "deleted", "remove", "removed"].includes(raw)) return "deleted";
+  if (["r", "ren", "rename", "renamed", "move", "moved"].includes(raw)) return "renamed";
+  if (["c", "copy", "copied"].includes(raw)) return "copied";
+  return "";
+}
+
+function compactPatchFileEntry(entry) {
+  if (entry === null || entry === undefined) return null;
+  if (typeof entry === "string") {
+    const text = normalizePatchPath(entry);
+    if (!text) return null;
+    return { path: clampText(text, 400) };
+  }
+  if (typeof entry !== "object") {
+    const text = normalizePatchPath(entry);
+    return text ? { path: clampText(text, 400) } : null;
+  }
+
+  const action = normalizePatchAction(entry.action || entry.status || entry.changeType || entry.op || entry.kind || entry.type);
+  const from = normalizePatchPath(entry.from || entry.oldPath || entry.previousPath || entry.source || entry.src || "");
+  const to = normalizePatchPath(entry.to || entry.newPath || entry.target || entry.dest || entry.dst || "");
+  const path = normalizePatchPath(entry.path || entry.file || entry.filePath || entry.filename || entry.name || to || from || "");
+
+  if (!path && !from && !to) return null;
+
+  const out = {
+    path: clampText(path, 400),
+  };
+  if (action) out.action = action;
+  if (from) out.from = clampText(from, 400);
+  if (to) out.to = clampText(to, 400);
+  return out;
+}
+
 function compactJsonValue(value, depth = 0) {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return clampText(value, 800);
@@ -189,7 +234,10 @@ function compactBlockRaw(raw, type) {
   if (normalizedType === "patch") {
     base.hash = typeof raw.hash === "string" ? raw.hash : "";
     base.files = Array.isArray(raw.files)
-      ? raw.files.slice(0, 200).map((item) => clampText(item, 240))
+      ? raw.files
+        .slice(0, 200)
+        .map((item) => compactPatchFileEntry(item))
+        .filter(Boolean)
       : [];
     return base;
   }

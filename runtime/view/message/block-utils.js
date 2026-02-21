@@ -89,6 +89,33 @@ function truncateSummaryText(text, maxLength = 88) {
   return raw.length > maxLength ? `${raw.slice(0, maxLength)}...` : raw;
 }
 
+function normalizePatchChangeType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "unknown";
+  if (["a", "add", "added", "new", "create", "created"].includes(raw)) return "added";
+  if (["m", "mod", "modify", "modified", "update", "updated", "change", "changed", "edit", "edited"].includes(raw)) {
+    return "modified";
+  }
+  if (["d", "del", "delete", "deleted", "remove", "removed"].includes(raw)) return "deleted";
+  if (["r", "ren", "rename", "renamed", "move", "moved"].includes(raw)) return "renamed";
+  if (["c", "copy", "copied"].includes(raw)) return "copied";
+  return "unknown";
+}
+
+function patchChangeLabel(changeType) {
+  const normalized = normalizePatchChangeType(changeType);
+  if (normalized === "added") return "新增";
+  if (normalized === "modified") return "修改";
+  if (normalized === "deleted") return "删除";
+  if (normalized === "renamed") return "重命名";
+  if (normalized === "copied") return "复制";
+  return "未知";
+}
+
+function normalizePatchPath(pathLike) {
+  return String(pathLike || "").trim();
+}
+
 function fileNameOnly(pathLike) {
   const raw = String(pathLike || "").trim();
   if (!raw) return "";
@@ -149,18 +176,260 @@ function inferToolSummary(block, toolName) {
   return "";
 }
 
-function extractPatchFiles(block, detailText = "") {
-  if (block && block.raw && Array.isArray(block.raw.files)) {
-    return block.raw.files
-      .map((item) => String(item || "").trim())
-      .filter(Boolean);
+function parsePatchFromToPayload(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return null;
+
+  const arrow = text.match(/^(.+?)\s*->\s*(.+)$/);
+  if (arrow && arrow[1] && arrow[2]) {
+    return {
+      from: normalizePatchPath(arrow[1]),
+      to: normalizePatchPath(arrow[2]),
+    };
   }
 
-  const lines = String(detailText || "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*-\s*/, "").trim())
+  const tabParts = text.split(/\t+/).map((part) => normalizePatchPath(part)).filter(Boolean);
+  if (tabParts.length >= 2) {
+    return {
+      from: tabParts[0],
+      to: tabParts[tabParts.length - 1],
+    };
+  }
+
+  const spacedParts = text.split(/\s{2,}/).map((part) => normalizePatchPath(part)).filter(Boolean);
+  if (spacedParts.length >= 2) {
+    return {
+      from: spacedParts[0],
+      to: spacedParts[spacedParts.length - 1],
+    };
+  }
+
+  return null;
+}
+
+function normalizePatchFileEntry(entry) {
+  if (entry === null || entry === undefined) return null;
+
+  if (typeof entry === "string") {
+    const text = normalizePatchPath(entry);
+    if (!text) return null;
+
+    const statusMatch = text.match(/^([ACDMRTUXB\?])(?:\d+)?\s+(.+)$/i);
+    if (statusMatch) {
+      const code = String(statusMatch[1] || "").toUpperCase();
+      const payload = normalizePatchPath(statusMatch[2]);
+      const parsedPair = parsePatchFromToPayload(payload);
+      if (code === "R") {
+        if (parsedPair) {
+          return {
+            action: "renamed",
+            from: parsedPair.from,
+            to: parsedPair.to,
+            path: parsedPair.to || parsedPair.from,
+          };
+        }
+        return { action: "renamed", path: payload };
+      }
+      if (code === "C") {
+        if (parsedPair) {
+          return {
+            action: "copied",
+            from: parsedPair.from,
+            to: parsedPair.to,
+            path: parsedPair.to || parsedPair.from,
+          };
+        }
+        return { action: "copied", path: payload };
+      }
+
+      const actionMap = {
+        A: "added",
+        M: "modified",
+        D: "deleted",
+        T: "modified",
+        U: "modified",
+        X: "modified",
+        B: "modified",
+        "?": "unknown",
+      };
+      return {
+        action: actionMap[code] || "unknown",
+        path: payload,
+      };
+    }
+
+    const renameFrom = text.match(/^rename from\s+(.+)$/i);
+    if (renameFrom && renameFrom[1]) {
+      return {
+        action: "renamed",
+        from: normalizePatchPath(renameFrom[1]),
+      };
+    }
+    const renameTo = text.match(/^rename to\s+(.+)$/i);
+    if (renameTo && renameTo[1]) {
+      return {
+        action: "renamed",
+        to: normalizePatchPath(renameTo[1]),
+        path: normalizePatchPath(renameTo[1]),
+      };
+    }
+
+    const prefixed = text.match(/^\[?([a-zA-Z]+)\]?\s*:\s*(.+)$/);
+    if (prefixed && prefixed[1] && prefixed[2]) {
+      return {
+        action: normalizePatchChangeType(prefixed[1]),
+        path: normalizePatchPath(prefixed[2]),
+      };
+    }
+
+    const pair = parsePatchFromToPayload(text);
+    if (pair) {
+      return {
+        action: "renamed",
+        from: pair.from,
+        to: pair.to,
+        path: pair.to || pair.from,
+      };
+    }
+
+    return { action: "unknown", path: text };
+  }
+
+  if (typeof entry !== "object") {
+    const raw = normalizePatchPath(entry);
+    return raw ? { action: "unknown", path: raw } : null;
+  }
+
+  const rawAction = entry.action || entry.status || entry.changeType || entry.op || entry.kind || entry.type;
+  const from = normalizePatchPath(entry.from || entry.oldPath || entry.previousPath || entry.source || entry.src || "");
+  const to = normalizePatchPath(entry.to || entry.newPath || entry.target || entry.dest || entry.dst || "");
+  let pathValue = normalizePatchPath(
+    entry.path || entry.file || entry.filePath || entry.filename || entry.name || to || from || "",
+  );
+  let action = normalizePatchChangeType(rawAction);
+
+  if (action === "unknown" && from && to && from !== to) action = "renamed";
+  if (action === "renamed" && !pathValue) pathValue = to || from;
+  if (action === "deleted" && !pathValue) pathValue = from;
+  if (action === "added" && !pathValue) pathValue = to;
+  if (!pathValue && !from && !to) return null;
+
+  return {
+    action,
+    path: pathValue,
+    from: from || "",
+    to: to || "",
+  };
+}
+
+function patchFileDisplayPath(entry) {
+  const item = entry && typeof entry === "object" ? entry : {};
+  const action = normalizePatchChangeType(item.action);
+  const from = normalizePatchPath(item.from || "");
+  const to = normalizePatchPath(item.to || "");
+  const pathText = normalizePatchPath(item.path || "");
+
+  if ((action === "renamed" || action === "copied") && from && to) {
+    return `${from} -> ${to}`;
+  }
+  return pathText || to || from || "";
+}
+
+function extractPatchFileEntries(block, detailText = "") {
+  const fileEntries = [];
+  let pendingRenameFrom = "";
+
+  const inputEntries = (() => {
+    if (block && block.raw && Array.isArray(block.raw.files) && block.raw.files.length) {
+      return block.raw.files;
+    }
+    return String(detailText || "")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*-\s*/, "").trim())
+      .filter(Boolean);
+  })();
+
+  for (const sourceEntry of inputEntries) {
+    const normalized = normalizePatchFileEntry(sourceEntry);
+    if (!normalized) continue;
+
+    const from = normalizePatchPath(normalized.from || "");
+    const to = normalizePatchPath(normalized.to || "");
+    const pathText = normalizePatchPath(normalized.path || "");
+    const action = normalizePatchChangeType(normalized.action);
+
+    if (action === "renamed" && from && !to && !pathText) {
+      pendingRenameFrom = from;
+      continue;
+    }
+    if (action === "renamed" && !from && (to || pathText) && pendingRenameFrom) {
+      const resolvedTo = to || pathText;
+      fileEntries.push({
+        action: "renamed",
+        from: pendingRenameFrom,
+        to: resolvedTo,
+        path: resolvedTo,
+      });
+      pendingRenameFrom = "";
+      continue;
+    }
+
+    const entry = {
+      action,
+      from,
+      to,
+      path: pathText || to || from,
+    };
+    if (!entry.path && !entry.from && !entry.to) continue;
+    fileEntries.push(entry);
+  }
+
+  if (pendingRenameFrom) {
+    fileEntries.push({
+      action: "unknown",
+      path: pendingRenameFrom,
+      from: "",
+      to: "",
+    });
+  }
+
+  return fileEntries;
+}
+
+function summarizePatchChanges(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) return "";
+
+  const counter = {
+    added: 0,
+    modified: 0,
+    deleted: 0,
+    renamed: 0,
+    copied: 0,
+    unknown: 0,
+  };
+
+  for (const entry of list) {
+    const type = normalizePatchChangeType(entry && entry.action);
+    counter[type] += 1;
+  }
+
+  const parts = [];
+  if (counter.added) parts.push(`新增${counter.added}`);
+  if (counter.modified) parts.push(`修改${counter.modified}`);
+  if (counter.deleted) parts.push(`删除${counter.deleted}`);
+  if (counter.renamed) parts.push(`重命名${counter.renamed}`);
+  if (counter.copied) parts.push(`复制${counter.copied}`);
+  if (counter.unknown) parts.push(`未知${counter.unknown}`);
+
+  if (!parts.length) return `${list.length} 个变更文件`;
+  return parts.join(" · ");
+}
+
+function extractPatchFiles(block, detailText = "") {
+  return extractPatchFileEntries(block, detailText)
+    .map((entry) => patchFileDisplayPath(entry))
     .filter(Boolean);
-  return lines;
 }
 
 function patchHash(block) {
@@ -234,6 +503,12 @@ const blockUtilsMethods = {
 
 const blockUtilsInternal = {
   truncateSummaryText,
+  normalizePatchChangeType,
+  patchChangeLabel,
+  normalizePatchFileEntry,
+  patchFileDisplayPath,
+  extractPatchFileEntries,
+  summarizePatchChanges,
   extractPatchFiles,
   patchHash,
 };
