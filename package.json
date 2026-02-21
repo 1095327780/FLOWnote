@@ -4,7 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "node esbuild.config.mjs",
+    "build": "echo \"No build step. Runtime is shipped from main.js + runtime/.\"",
     "guard:repo-hygiene": "node scripts/guard-repo-hygiene.js",
     "guard:source-of-truth": "node scripts/guard-source-of-truth.js",
     "verify:version-sync": "node scripts/verify-version-sync.js",

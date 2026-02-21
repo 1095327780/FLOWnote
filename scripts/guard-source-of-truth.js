@@ -56,13 +56,9 @@ function readChangedSrcFiles(range) {
 function main() {
   const range = resolveDiffRange();
   const files = readChangedSrcFiles(range);
-  const allowList = new Set([
-    "src/LEGACY.md",
-  ]);
-
-  const blocked = files.filter((file) => !allowList.has(file));
+  const blocked = files;
   if (blocked.length) {
-    console.error("[guard-source-of-truth] 检查失败: src/ 为 legacy 只读目录。");
+    console.error("[guard-source-of-truth] 检查失败: src/ 目录已移除，禁止重新引入。");
     console.error(`比较范围: ${range || "工作区"}`);
     for (const file of blocked) {
       console.error(`- 禁止修改: ${file}`);

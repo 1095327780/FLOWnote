@@ -3,7 +3,7 @@
 ## Source Of Truth
 
 - 生产运行时代码唯一来源：`runtime/`
-- `src/` 为 legacy 目录（只读，不再承载功能开发）
+- `src/` 已移除，禁止重新引入历史代码树
 - `main.js` 作为插件入口，动态加载 `runtime/` 模块
 
 ## Repo Hygiene
@@ -52,4 +52,4 @@
 ## 开发说明
 
 当前运行时由 `main.js` 入口动态加载 `runtime/` 下的 CommonJS 模块。
-`esbuild.config.mjs` 与 `tsconfig.json` 当前保留为迁移期占位配置，不参与生产构建。
+发布构建不经过额外打包步骤，直接交付 `main.js + runtime/`。
