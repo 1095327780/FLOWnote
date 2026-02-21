@@ -1,5 +1,6 @@
 const obsidianModule = require("obsidian");
 const fs = require("fs");
+const Module = require("module");
 const path = require("path");
 const {
   Notice,
@@ -7,6 +8,20 @@ const {
 } = obsidianModule;
 
 const DEFAULT_VIEW_TYPE = "opencode-assistant-view";
+let obsidianRequireShimInstalled = false;
+
+function installObsidianRequireShim() {
+  if (obsidianRequireShimInstalled) return;
+  if (!Module || typeof Module._load !== "function") return;
+
+  const previousLoad = Module._load;
+  Module._load = function patchedModuleLoad(request, parent, isMain) {
+    if (request === "obsidian") return obsidianModule;
+    return previousLoad.call(this, request, parent, isMain);
+  };
+
+  obsidianRequireShimInstalled = true;
+}
 
 function resolvePluginRootDir(plugin) {
   const candidates = [];
@@ -50,6 +65,7 @@ class OpenCodeAssistantPlugin extends Plugin {
 
   ensureFacadeMethodsLoaded() {
     if (this.__pluginFacadeMethodsLoaded) return;
+    installObsidianRequireShim();
 
     const {
       createModuleLoaderMethods,
