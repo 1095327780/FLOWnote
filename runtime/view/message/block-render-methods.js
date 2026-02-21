@@ -139,7 +139,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   const header = details.createEl("summary", { cls: "oc-tool-header" });
   const iconEl = header.createSpan({ cls: "oc-tool-icon" });
   safeSetIcon(iconEl, "git-commit-horizontal");
-  header.createSpan({ cls: "oc-tool-name", text: "补丁" });
+  header.createSpan({ cls: "oc-tool-name", text: "文件变更" });
   header.createSpan({ cls: "oc-tool-summary", text: summaryText });
   const statusEl = header.createSpan({ cls: "oc-tool-status" });
   applyToolStatusIcon(statusEl, status);

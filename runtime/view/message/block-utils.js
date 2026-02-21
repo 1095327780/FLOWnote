@@ -67,7 +67,7 @@ function blockTypeLabel(type) {
     subtask: "子任务",
     agent: "子代理",
     file: "文件",
-    patch: "补丁",
+    patch: "文件变更",
     retry: "重试",
     compaction: "压缩",
     snapshot: "快照",

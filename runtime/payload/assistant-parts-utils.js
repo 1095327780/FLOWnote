@@ -438,7 +438,7 @@ function toPartBlock(part, index) {
   }
 
   if (type === "patch") {
-    block.title = "补丁";
+    block.title = "文件变更";
     block.status = "completed";
     const hash = typeof part.hash === "string" ? part.hash : "";
     const files = Array.isArray(part.files)
