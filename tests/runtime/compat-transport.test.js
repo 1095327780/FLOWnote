@@ -728,6 +728,35 @@ test("sendMessage should fallback to polling stream callbacks when event stream 
   assert.equal(tokenUpdates.includes("polling"), true);
 });
 
+test("sendMessage should recover from request timeout when streaming payload is complete", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      throw new Error("OpenCode 连接失败: 请求超时 (120000ms)");
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => ({
+    messageId: "msg_stream_ok",
+    text: "stream-complete",
+    reasoning: "",
+    meta: "",
+    blocks: [],
+    completed: true,
+  });
+  transport.trySyncMessageRecovery = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(result.text, "stream-complete");
+  assert.equal(result.messageId, "msg_stream_ok");
+});
+
 test("sendMessage should reject response without completion signal", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;

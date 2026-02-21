@@ -11,6 +11,11 @@ function createSendMessageMethods(deps = {}) {
     sessionStatusLooksAuthFailure,
   } = deps;
 
+  function isRecoverableRequestError(error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    return /请求超时|timeout|timed out|ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|connection reset/i.test(message);
+  }
+
   class SendMessageMethods {
   async sendMessage(options) {
     this.log(`sendMessage start ${JSON.stringify({
@@ -57,6 +62,7 @@ function createSendMessageMethods(deps = {}) {
     if (this.settings.enableStreaming) {
       const linked = createLinkedAbortController(options.signal);
       const eventSignal = linked.controller.signal;
+      let requestError = null;
       const streamHandlers = {
         onToken: options.onToken,
         onReasoning: options.onReasoning,
@@ -107,11 +113,26 @@ function createSendMessageMethods(deps = {}) {
             options.signal,
           );
         }
+      } catch (error) {
+        requestError = error;
       } finally {
         linked.detach();
         linked.controller.abort();
       }
       streamed = await eventStreamPromise;
+
+      if (requestError) {
+        const canRecoverFromStream = Boolean(
+          streamed
+          && hasRenderablePayload(streamed)
+          && !payloadLooksInProgress(streamed)
+          && Boolean(streamed.completed),
+        );
+        if (!(isRecoverableRequestError(requestError) && canRecoverFromStream)) {
+          throw requestError;
+        }
+        this.log(`request failed but recovered from stream payload: ${requestError instanceof Error ? requestError.message : String(requestError)}`);
+      }
     } else if (isCommandRequest) {
       res = await this.request(
         "POST",
