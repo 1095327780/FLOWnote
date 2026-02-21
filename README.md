@@ -21,8 +21,9 @@
 
 1. `npm run ci`
 2. `git ls-files -- data.json` 输出必须为空
-3. `data.example.json` 必须存在且为合法 JSON
-4. `main.js`、`manifest.json`、`package.json` 的版本信息保持一致
+3. `npm run guard:runtime-contract` 必须通过（禁止 legacy/占位/动态 loader 回流）
+4. `data.example.json` 必须存在且为合法 JSON
+5. `main.js`、`manifest.json`、`package.json` 的版本信息保持一致
 
 ## 功能
 
