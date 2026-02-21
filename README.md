@@ -15,6 +15,15 @@
   - `npm run guard:source-of-truth`
   - `npm run verify:version-sync`
 
+## 发布前检查清单
+
+每次推送发布相关改动前，按顺序执行：
+
+1. `npm run ci`
+2. `git ls-files -- data.json` 输出必须为空
+3. `data.example.json` 必须存在且为合法 JSON
+4. `main.js`、`manifest.json`、`package.json` 的版本信息保持一致
+
 ## 功能
 
 - 会话侧栏（新建/切换）

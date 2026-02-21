@@ -17,9 +17,21 @@ function readTracked(pathspec) {
   }
 }
 
+function isIgnored(pathspec) {
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", pathspec], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function main() {
   const blocked = [
     "data.json",
+  ];
+  const requiredTracked = [
+    "data.example.json",
   ];
   const problems = [];
 
@@ -28,6 +40,30 @@ function main() {
     if (tracked.length) {
       const existing = tracked.filter((file) => fs.existsSync(file));
       problems.push(...existing.map((file) => `禁止提交运行态文件: ${file}`));
+    }
+  }
+
+  if (!isIgnored("data.json")) {
+    problems.push("data.json 必须在 .gitignore 中被忽略");
+  }
+
+  for (const pathspec of requiredTracked) {
+    const tracked = readTracked(pathspec);
+    if (!tracked.length) {
+      problems.push(`必须保留示例文件并纳入版本控制: ${pathspec}`);
+      continue;
+    }
+    if (!fs.existsSync(pathspec)) {
+      problems.push(`示例文件缺失: ${pathspec}`);
+    }
+  }
+
+  if (fs.existsSync("data.example.json")) {
+    try {
+      JSON.parse(fs.readFileSync("data.example.json", "utf8"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      problems.push(`data.example.json 不是合法 JSON: ${message}`);
     }
   }
 
