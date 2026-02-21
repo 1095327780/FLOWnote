@@ -1,26 +1,46 @@
 const obsidianModule = require("obsidian");
+const fs = require("fs");
+const path = require("path");
 const {
   Notice,
   Plugin,
 } = obsidianModule;
 
-const {
-  createModuleLoaderMethods,
-} = require("./runtime/plugin/module-loader-methods");
-const {
-  runtimeStateMethods,
-} = require("./runtime/plugin/runtime-state-methods");
-const {
-  modelCatalogMethods,
-} = require("./runtime/plugin/model-catalog-methods");
-const {
-  createBundledSkillsMethods,
-} = require("./runtime/plugin/bundled-skills-methods");
-const {
-  sessionBootstrapMethods,
-} = require("./runtime/plugin/session-bootstrap-methods");
-
 const DEFAULT_VIEW_TYPE = "opencode-assistant-view";
+
+function resolvePluginRootDir(plugin) {
+  const candidates = [];
+  if (plugin && plugin.manifest && plugin.manifest.dir) {
+    candidates.push(String(plugin.manifest.dir));
+  }
+
+  const vaultPath = plugin && typeof plugin.getVaultPath === "function"
+    ? plugin.getVaultPath()
+    : "";
+  const configDir = plugin && plugin.app && plugin.app.vault && plugin.app.vault.configDir
+    ? String(plugin.app.vault.configDir)
+    : ".obsidian";
+  const pluginId = plugin && plugin.manifest && plugin.manifest.id
+    ? String(plugin.manifest.id)
+    : "opencode-assistant";
+  if (vaultPath) {
+    candidates.push(path.join(vaultPath, configDir, "plugins", pluginId));
+  }
+  if (typeof __dirname === "string" && __dirname) {
+    candidates.push(__dirname);
+  }
+
+  for (const candidate of candidates.map((item) => String(item || "").trim()).filter(Boolean)) {
+    if (fs.existsSync(path.join(candidate, "manifest.json"))) return candidate;
+  }
+  return candidates[0] || process.cwd();
+}
+
+function requireFromPluginRoot(plugin, relativePath) {
+  const pluginRoot = resolvePluginRootDir(plugin);
+  const absolutePath = path.join(pluginRoot, relativePath);
+  return require(absolutePath);
+}
 
 class OpenCodeAssistantPlugin extends Plugin {
   constructor(app, manifest) {
@@ -31,11 +51,27 @@ class OpenCodeAssistantPlugin extends Plugin {
   ensureFacadeMethodsLoaded() {
     if (this.__pluginFacadeMethodsLoaded) return;
 
+    const {
+      createModuleLoaderMethods,
+    } = requireFromPluginRoot(this, "runtime/plugin/module-loader-methods");
+    const {
+      runtimeStateMethods,
+    } = requireFromPluginRoot(this, "runtime/plugin/runtime-state-methods");
+    const {
+      modelCatalogMethods,
+    } = requireFromPluginRoot(this, "runtime/plugin/model-catalog-methods");
+    const {
+      createBundledSkillsMethods,
+    } = requireFromPluginRoot(this, "runtime/plugin/bundled-skills-methods");
+    const {
+      sessionBootstrapMethods,
+    } = requireFromPluginRoot(this, "runtime/plugin/session-bootstrap-methods");
+
     const moduleLoaderMethods = createModuleLoaderMethods({
       defaultViewType: DEFAULT_VIEW_TYPE,
     });
     const bundledSkillsMethods = createBundledSkillsMethods({
-      pluginDirname: __dirname,
+      pluginDirname: resolvePluginRootDir(this),
     });
 
     Object.assign(
