@@ -20,7 +20,6 @@ const {
   summarizePatchChanges,
   patchChangeLabel,
   patchFileDisplayPath,
-  withInferredPatchActions,
   patchHash,
 } = blockUtilsInternal;
 
@@ -117,10 +116,11 @@ function renderToolPart(container, block, messagePending) {
 }
 
 function renderPatchPart(container, block, messagePending, message, blockIndex) {
+  void message;
+  void blockIndex;
   const status = this.resolveDisplayBlockStatus(block, messagePending);
   const detailText = String((block && block.detail) || "").trim();
-  const rawEntries = extractPatchFileEntries(block, detailText);
-  const entries = withInferredPatchActions(rawEntries, message, blockIndex);
+  const entries = extractPatchFileEntries(block, detailText);
   const hash = patchHash(block);
   const shortHash = hash ? hash.slice(0, 12) : "";
   const changeSummary = summarizePatchChanges(entries);
@@ -128,7 +128,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
     ? `${changeSummary}${shortHash ? ` · ${shortHash}` : ""}`
     : shortHash
       ? `hash ${shortHash}`
-      : "变更文件";
+      : "文件变更";
 
   const details = container.createEl("details", { cls: "oc-tool-call oc-tool-patch" });
   details.addClass(`is-${status}`);
@@ -152,10 +152,9 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   if (entries.length) {
     const list = content.createDiv({ cls: "oc-tool-file-list" });
     entries.forEach((entry) => {
-      const label = patchChangeLabel(entry && entry.action);
+      const label = patchChangeLabel();
       const displayPath = patchFileDisplayPath(entry) || "(未提供路径)";
-      const isInferred = Boolean(entry && entry.inferred);
-      const text = `[${label}${isInferred ? "(推断)" : ""}] ${displayPath}`;
+      const text = `[${label}] ${displayPath}`;
       const item = list.createDiv({ cls: "oc-tool-file-item", text });
       item.setAttr("title", text);
       item.setAttr("data-change-type", String((entry && entry.action) || "unknown"));
