@@ -3,11 +3,14 @@ const {
   chooseRicherResponse,
   formatSessionStatusText,
   hasRenderablePayload,
-  hasTerminalPayload,
   normalizedRenderableText,
   payloadLooksInProgress,
   responseRichnessScore,
 } = require("../../assistant-payload-utils");
+const {
+  extractSessionStatusHint,
+  isSessionStatusTerminal,
+} = require("./completion-signals");
 
 function buildProgressKey(messageId, payload) {
   const p = payload && typeof payload === "object" ? payload : {};
@@ -39,74 +42,12 @@ function buildProgressKey(messageId, payload) {
   ].join("|");
 }
 
-function extractNestedStatusObject(status) {
-  if (!status || typeof status !== "object") return null;
-  if (status.status && typeof status.status === "object") return status.status;
-  if (status.state && typeof status.state === "object") return status.state;
-  return null;
-}
-
-function extractStatusType(status) {
-  if (!status || typeof status !== "object") return "";
-  if (typeof status.type === "string" && status.type.trim()) return status.type.trim().toLowerCase();
-  if (typeof status.status === "string" && status.status.trim()) return status.status.trim().toLowerCase();
-  if (typeof status.state === "string" && status.state.trim()) return status.state.trim().toLowerCase();
-  const nested = extractNestedStatusObject(status);
-  if (nested && typeof nested.type === "string" && nested.type.trim()) return nested.type.trim().toLowerCase();
-  if (nested && typeof nested.status === "string" && nested.status.trim()) return nested.status.trim().toLowerCase();
-  if (nested && typeof nested.state === "string" && nested.state.trim()) return nested.state.trim().toLowerCase();
-  return "";
-}
-
-function statusIndicatesActiveWork(status) {
-  const type = extractStatusType(status);
-  if (type && ["busy", "retry", "running", "queued", "in_progress", "in-progress", "processing"].includes(type)) {
-    return true;
-  }
-  const hint = extractStatusHint(status).toLowerCase();
-  if (!hint) return false;
-  return /(busy|retry|running|queued|in[ -]?progress|processing|thinking|generating|waiting)/i.test(hint);
-}
-
 function statusIndicatesTerminalNoWork(status) {
-  const type = extractStatusType(status);
-  if (
-    type
-    && [
-      "idle",
-      "done",
-      "completed",
-      "complete",
-      "failed",
-      "error",
-      "aborted",
-      "cancelled",
-      "timeout",
-      "stopped",
-    ].includes(type)
-  ) {
-    return true;
-  }
-  const hint = extractStatusHint(status).toLowerCase();
-  if (!hint) return false;
-  return /(idle|done|completed|complete|failed|error|aborted|cancelled|timeout|stopped|no pending)/i.test(hint);
+  return isSessionStatusTerminal(status);
 }
 
 function extractStatusHint(status) {
-  if (!status || typeof status !== "object") return "";
-  const nested = extractNestedStatusObject(status);
-  const text = [
-    extractStatusType(status),
-    typeof status.message === "string" ? status.message : "",
-    typeof status.error === "string" ? status.error : "",
-    typeof status.reason === "string" ? status.reason : "",
-    nested && typeof nested.message === "string" ? nested.message : "",
-    nested && typeof nested.error === "string" ? nested.error : "",
-    nested && typeof nested.reason === "string" ? nested.reason : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return String(text || "").trim();
+  return extractSessionStatusHint(status);
 }
 
 function buildStatusErrorPayload(statusHint, payload) {
@@ -136,8 +77,6 @@ async function pollAssistantPayload(options) {
     ? configuredNoMessageTimeoutMs
     : defaultNoMessageTimeoutMs;
   const terminalNoPayloadGraceMs = Math.max(2500, Math.min(noMessageTimeoutMs, 20000));
-  const requireTerminal = cfg.requireTerminal !== false;
-
   const startedAt = Date.now();
   let lastProgressAt = startedAt;
   let messageId = String(cfg.initialMessageId || "");
@@ -170,13 +109,8 @@ async function pollAssistantPayload(options) {
 
   const isComplete = () => {
     if (!hasRenderablePayload(payload)) return false;
-    if (!requireTerminal) {
-      if (payloadLooksInProgress(payload)) return false;
-      if (completionSeen) return true;
-      if (statusIndicatesTerminalNoWork(lastStatus)) return true;
-      return false;
-    }
-    return hasTerminalPayload(payload) && !payloadLooksInProgress(payload);
+    if (payloadLooksInProgress(payload)) return false;
+    return completionSeen;
   };
 
   while (Date.now() - startedAt < maxTotalMs && Date.now() - lastProgressAt < quietTimeoutMs) {
@@ -200,7 +134,6 @@ async function pollAssistantPayload(options) {
             markProgress();
             byIdUpdated = true;
           }
-          if (byId.completed && isComplete()) break;
         }
       } catch {
         // ignore by-id failure and continue with latest query
@@ -231,7 +164,6 @@ async function pollAssistantPayload(options) {
           payload = chooseRicherResponse(payload, latest.payload);
           if (latest.completed) completionSeen = true;
           if (payload !== before || latest.messageId) markProgress();
-          if (latest.completed && isComplete()) break;
         }
       } catch {
         // ignore and keep waiting
@@ -246,19 +178,7 @@ async function pollAssistantPayload(options) {
         markProgress();
         break;
       }
-      const statusType = extractStatusType(lastStatus);
-      if (
-        statusType === "idle"
-        || statusType === "done"
-        || statusType === "completed"
-        || statusType === "complete"
-        || statusType === "failed"
-        || statusType === "error"
-        || statusType === "aborted"
-        || statusType === "cancelled"
-        || statusType === "timeout"
-        || statusType === "stopped"
-      ) {
+      if (statusIndicatesTerminalNoWork(lastStatus)) {
         const hasRenderable = hasRenderablePayload(payload);
         if (!hasRenderable) {
           const elapsedMs = Date.now() - startedAt;
@@ -267,13 +187,7 @@ async function pollAssistantPayload(options) {
             break;
           }
         } else {
-          const staleMs = Date.now() - lastProgressAt;
-          if (requireTerminal) {
-            // Idle/done can appear transiently between tool steps; don't early-stop while payload still looks in-progress.
-            if (!payloadLooksInProgress(payload)) break;
-          } else if (completionSeen || staleMs > 1800) {
-            break;
-          }
+          // Keep waiting for explicit assistant completion signal.
         }
       }
     }

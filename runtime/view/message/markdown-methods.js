@@ -1,4 +1,4 @@
-const { Notice, MarkdownRenderer } = require("obsidian");
+const { Notice, MarkdownRenderer, Keymap } = require("obsidian");
 const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils");
 const { domUtils } = require("./dom-utils");
 
@@ -57,42 +57,6 @@ function ensureCodeCopyButton(wrapper, codeText) {
   };
 }
 
-function ensureCodeLanguageLabel(wrapper, codeEl, codeText) {
-  if (!wrapper || !codeEl) return;
-  const match = String(codeEl.className || "").match(/language-([A-Za-z0-9_+-]+)/);
-  const hasLanguage = Boolean(match && match[1]);
-  wrapper.classList.toggle("has-language", hasLanguage);
-
-  let labelBtn = wrapper.querySelector(".oc-code-lang-label");
-  if (!hasLanguage) {
-    if (labelBtn) labelBtn.remove();
-    return;
-  }
-
-  const language = String(match[1] || "").toLowerCase();
-  if (!labelBtn) {
-    labelBtn = document.createElement("button");
-    labelBtn.className = "oc-code-lang-label";
-    labelBtn.type = "button";
-    labelBtn.setAttribute("aria-label", `复制 ${language} 代码`);
-    wrapper.appendChild(labelBtn);
-  }
-
-  labelBtn.textContent = language;
-  labelBtn.onclick = async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    try {
-      await copyTextToClipboard(codeText || "");
-      showCopyFeedback(labelBtn, () => {
-        labelBtn.textContent = language;
-      });
-    } catch {
-      new Notice("复制失败");
-    }
-  };
-}
-
 function enhanceCodeBlocks(container) {
   if (!container) return;
   container.querySelectorAll("pre").forEach((pre) => {
@@ -102,7 +66,6 @@ function enhanceCodeBlocks(container) {
     const codeEl = pre.querySelector("code");
     const codeText = codeEl ? codeEl.innerText : pre.innerText;
 
-    ensureCodeLanguageLabel(wrapper, codeEl, codeText);
     ensureCodeCopyButton(wrapper, codeText);
 
     const obsidianCopy = wrapper.querySelector(".copy-code-button");
@@ -112,6 +75,91 @@ function enhanceCodeBlocks(container) {
 
 function attachCodeCopyButtons(container) {
   this.enhanceCodeBlocks(container);
+}
+
+function getMarkdownRenderSourcePath() {
+  const file = this.app
+    && this.app.workspace
+    && typeof this.app.workspace.getActiveFile === "function"
+    ? this.app.workspace.getActiveFile()
+    : null;
+  return file && typeof file.path === "string" ? file.path : "";
+}
+
+function decodeLinkText(value) {
+  const text = String(value || "");
+  if (!text) return "";
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+function resolveObsidianUriTarget(href) {
+  const raw = String(href || "").trim();
+  if (!raw) return "";
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return "";
+  }
+  if (String(url.protocol || "").toLowerCase() !== "obsidian:") return "";
+  const path = decodeLinkText(url.searchParams.get("path") || "");
+  if (path) return path;
+  const file = decodeLinkText(url.searchParams.get("file") || "");
+  return file;
+}
+
+function resolveInternalLinkText(anchorEl) {
+  if (!anchorEl) return "";
+
+  const dataHref = String(anchorEl.getAttribute("data-href") || "").trim();
+  if (dataHref) return decodeLinkText(dataHref);
+
+  const href = String(anchorEl.getAttribute("href") || "").trim();
+  if (!href) return "";
+  if (href.startsWith("#")) return "";
+
+  const obsidianTarget = resolveObsidianUriTarget(href);
+  if (obsidianTarget) return obsidianTarget;
+
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return "";
+  return decodeLinkText(href.replace(/^\.\//, ""));
+}
+
+function attachInternalLinkHandlers(container) {
+  if (!container || !this.app || !this.app.workspace) return;
+  const sourcePath = this.getMarkdownRenderSourcePath();
+  container.querySelectorAll("a").forEach((anchorEl) => {
+    if (!anchorEl || anchorEl.dataset.ocLinkBound === "1") return;
+    anchorEl.dataset.ocLinkBound = "1";
+
+    const linktext = this.resolveInternalLinkText(anchorEl);
+    if (!linktext) return;
+
+    anchorEl.addEventListener("click", (evt) => {
+      if (!evt || (evt.button !== 0 && evt.button !== 1)) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+      const modEvent = typeof Keymap !== "undefined" && Keymap && typeof Keymap.isModEvent === "function"
+        ? Keymap.isModEvent(evt)
+        : Boolean(evt.metaKey || evt.ctrlKey);
+      const openInNewLeaf = Boolean(modEvent || evt.button === 1);
+      void this.app.workspace.openLinkText(linktext, sourcePath, openInNewLeaf);
+    });
+
+    anchorEl.addEventListener("mouseover", (evt) => {
+      this.app.workspace.trigger("hover-link", {
+        event: evt,
+        source: "opencode-assistant",
+        hoverParent: this,
+        targetEl: anchorEl,
+        linktext,
+      });
+    });
+  });
 }
 
 function renderMarkdownSafely(container, markdownText, onRendered) {
@@ -135,7 +183,8 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
   });
 
   const staging = document.createElement("div");
-  MarkdownRenderer.render(this.app, text, staging, "", this.plugin)
+  const sourcePath = this.getMarkdownRenderSourcePath();
+  MarkdownRenderer.render(this.app, text, staging, sourcePath, this.plugin)
     .then(() => {
       const latest = MARKDOWN_RENDER_STATE.get(container);
       if (!latest || latest.version !== version) return;
@@ -148,8 +197,13 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
         version,
         rendered: true,
       });
+      this.attachInternalLinkHandlers(container);
       if (typeof onRendered === "function") onRendered();
-      this.scheduleScrollMessagesToBottom();
+      const shouldForceBottom = Boolean(
+        this.currentAbort
+        || (typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom()),
+      );
+      this.scheduleScrollMessagesToBottom(shouldForceBottom);
     })
     .catch(() => {
       const latest = MARKDOWN_RENDER_STATE.get(container);
@@ -161,13 +215,20 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
         version,
         rendered: true,
       });
-      this.scheduleScrollMessagesToBottom();
+      const shouldForceBottom = Boolean(
+        this.currentAbort
+        || (typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom()),
+      );
+      this.scheduleScrollMessagesToBottom(shouldForceBottom);
     });
 }
 
 
 const markdownMethods = {
   attachCodeCopyButtons,
+  attachInternalLinkHandlers,
+  getMarkdownRenderSourcePath,
+  resolveInternalLinkText,
   renderMarkdownSafely,
   enhanceCodeBlocks,
 };

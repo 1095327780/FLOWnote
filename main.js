@@ -1,5 +1,3 @@
-console.log("[opencode-assistant] runtime main.js v0.3.37 loaded");
-
 const obsidianModule = require("obsidian");
 const {
   Notice,
@@ -126,9 +124,12 @@ class OpenCodeAssistantPlugin extends Plugin {
 
   async onload() {
     try {
+      const manifestVersion = this.manifest && this.manifest.version ? String(this.manifest.version) : "dev";
+      console.log(`[opencode-assistant] runtime main.js v${manifestVersion} loaded`);
       this.ensureFacadeMethodsLoaded();
 
       this.runtimeStateMigrationDirty = false;
+      this.transportModeMigrationDirty = false;
       this.bootstrapInflight = null;
       this.bootstrapLocalDone = false;
       this.bootstrapRemoteDone = false;
@@ -189,8 +190,9 @@ class OpenCodeAssistantPlugin extends Plugin {
 
       this.addSettingTab(new runtime.OpenCodeSettingsTab(this.app, this));
       await this.bootstrapData({ waitRemote: false });
-      if (this.runtimeStateMigrationDirty) {
+      if (this.runtimeStateMigrationDirty || this.transportModeMigrationDirty) {
         this.runtimeStateMigrationDirty = false;
+        this.transportModeMigrationDirty = false;
         void this.persistState().catch((e) => {
           this.log(`persist migrated runtime state failed: ${e instanceof Error ? e.message : String(e)}`);
         });

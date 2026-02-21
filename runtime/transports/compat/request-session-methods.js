@@ -389,6 +389,21 @@ function createRequestSessionMethods(deps = {}) {
     return [];
   }
 
+  async listSessionMessages(options = {}) {
+    const sessionId = String(options.sessionId || "").trim();
+    if (!sessionId) return [];
+
+    const rawLimit = Number(options.limit || 200);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.max(1, Math.floor(rawLimit)) : 200;
+    const fetched = await this.fetchSessionMessages(sessionId, {
+      signal: options.signal,
+      limit,
+      requireRecentTail: true,
+      state: this.createMessageListFetchState(),
+    });
+    return Array.isArray(fetched && fetched.list) ? fetched.list : [];
+  }
+
   async createSession(title) {
     const res = await this.request("POST", "/session", title ? { title } : {}, { directory: this.vaultPath });
     return res && res.data ? res.data : res;

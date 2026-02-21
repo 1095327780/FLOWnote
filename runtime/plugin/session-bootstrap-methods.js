@@ -1,3 +1,102 @@
+function normalizeTimestampMs(value) {
+  const raw = Number(value || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  if (raw >= 1e14) return Math.floor(raw / 1000);
+  if (raw >= 1e12) return Math.floor(raw);
+  if (raw >= 1e9) return Math.floor(raw * 1000);
+  return Math.floor(raw);
+}
+
+function mergeSnapshotText(existingText, incomingText) {
+  const existing = String(existingText || "");
+  const incoming = String(incomingText || "");
+  if (!incoming.trim()) return existing;
+  if (!existing.trim()) return incoming;
+  if (existing === incoming) return existing;
+  if (incoming.includes(existing)) return incoming;
+  if (existing.includes(incoming)) return existing;
+  return incoming.length >= existing.length ? incoming : existing;
+}
+
+function extractMergedPartText(parts, targetType = "text") {
+  const list = Array.isArray(parts) ? parts : [];
+  const byPart = new Map();
+  list.forEach((part, index) => {
+    const item = part && typeof part === "object" ? part : null;
+    if (!item || String(item.type || "").trim().toLowerCase() !== String(targetType || "").toLowerCase()) return;
+    const key = String(item.id || `${targetType}:${index}`);
+    const current = String(byPart.get(key) || "");
+    let next = current;
+    if (typeof item.delta === "string") next = mergeSnapshotText(next, item.delta);
+    if (typeof item.text === "string") next = mergeSnapshotText(next, item.text);
+    byPart.set(key, next);
+  });
+  return Array.from(byPart.values())
+    .map((text) => String(text || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function toLocalSessionMessage(envelope, index, extractAssistantPayload) {
+  const row = envelope && typeof envelope === "object" ? envelope : null;
+  if (!row) return null;
+  const info = row.info && typeof row.info === "object" ? row.info : {};
+  const parts = Array.isArray(row.parts) ? row.parts : [];
+  const roleRaw = String(info.role || info.type || "").trim().toLowerCase();
+  const role = roleRaw === "assistant" ? "assistant" : roleRaw === "user" ? "user" : "";
+  if (!role) return null;
+
+  const id = String(info.id || `${role}-${index}`);
+  const createdAt = normalizeTimestampMs(
+    (info.time && info.time.created) || info.created || info.updated || 0,
+  );
+
+  if (role === "assistant") {
+    const payload = typeof extractAssistantPayload === "function"
+      ? extractAssistantPayload({ info, parts }) || { text: "", reasoning: "", meta: "", blocks: [] }
+      : {
+        text: extractMergedPartText(parts, "text"),
+        reasoning: extractMergedPartText(parts, "reasoning"),
+        meta: "",
+        blocks: [],
+      };
+    const hasVisiblePayload = Boolean(
+      String(payload.text || "").trim()
+      || String(payload.reasoning || "").trim()
+      || String(payload.meta || "").trim()
+      || (Array.isArray(payload.blocks) && payload.blocks.length),
+    );
+    if (!hasVisiblePayload) return null;
+    return {
+      id,
+      role,
+      text: String(payload.text || ""),
+      reasoning: String(payload.reasoning || ""),
+      meta: String(payload.meta || ""),
+      blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+      createdAt,
+      pending: false,
+      error: "",
+      __sortIndex: index,
+    };
+  }
+
+  const text = extractMergedPartText(parts, "text");
+  if (!text.trim()) return null;
+  return {
+    id,
+    role,
+    text,
+    reasoning: "",
+    meta: "",
+    blocks: [],
+    createdAt,
+    pending: false,
+    error: "",
+    __sortIndex: index,
+  };
+}
+
 const sessionBootstrapMethods = {
   getAssistantView() {
     const leaves = this.app.workspace.getLeavesOfType(this.getViewType());
@@ -20,9 +119,20 @@ const sessionBootstrapMethods = {
   async loadPersistedData() {
     const runtime = this.ensureRuntimeModules();
     const raw = (await this.loadData()) || {};
+    const extractRawTransportMode = (value) => String(value || "").trim().toLowerCase();
+    const markTransportModeMigrationIfNeeded = (rawMode) => {
+      const normalized = extractRawTransportMode(this.settings && this.settings.transportMode);
+      if (!rawMode || rawMode === normalized) return;
+      if (typeof this.markTransportModeCompatNormalization !== "function") return;
+      if (this.markTransportModeCompatNormalization(rawMode)) {
+        this.transportModeMigrationDirty = true;
+      }
+    };
 
     if (raw.settings || raw.runtimeState) {
-      this.settings = runtime.normalizeSettings(raw.settings || {});
+      const rawSettings = raw.settings || {};
+      const rawTransportMode = extractRawTransportMode(rawSettings.transportMode);
+      this.settings = runtime.normalizeSettings(rawSettings);
       const runtimeStateRaw = raw.runtimeState || { sessions: [], activeSessionId: "", messagesBySession: {} };
       let beforeSnapshot = "";
       try {
@@ -39,14 +149,17 @@ const sessionBootstrapMethods = {
       }
       this.runtimeStateMigrationDirty = Boolean(beforeSnapshot && afterSnapshot && beforeSnapshot !== afterSnapshot);
       this.ensureRuntimeStateShape();
+      markTransportModeMigrationIfNeeded(rawTransportMode);
       this.ensureModelCatalogState();
       return;
     }
 
+    const rawTransportMode = extractRawTransportMode(raw.transportMode);
     this.settings = runtime.normalizeSettings(raw);
     this.runtimeState = runtime.migrateLegacyMessages({ sessions: [], activeSessionId: "", messagesBySession: {} });
     this.runtimeStateMigrationDirty = false;
     this.ensureRuntimeStateShape();
+    markTransportModeMigrationIfNeeded(rawTransportMode);
     this.ensureModelCatalogState();
   },
 
@@ -107,6 +220,68 @@ const sessionBootstrapMethods = {
     if (!removed) return false;
     await this.persistState();
     return true;
+  },
+
+  normalizeRemoteSessionMessages(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    let extractAssistantPayload = null;
+    try {
+      const payloadUtils = this.requireRuntimeModule("assistant-payload-utils");
+      if (payloadUtils && typeof payloadUtils.extractAssistantPayloadFromEnvelope === "function") {
+        extractAssistantPayload = payloadUtils.extractAssistantPayloadFromEnvelope;
+      }
+    } catch {
+      extractAssistantPayload = null;
+    }
+
+    return list
+      .map((item, index) => toLocalSessionMessage(item, index, extractAssistantPayload))
+      .filter(Boolean)
+      .sort((a, b) => {
+        const at = Number(a.createdAt || 0);
+        const bt = Number(b.createdAt || 0);
+        if (at !== bt) return at - bt;
+        return Number(a.__sortIndex || 0) - Number(b.__sortIndex || 0);
+      })
+      .map((item) => ({
+        id: item.id,
+        role: item.role,
+        text: item.text,
+        reasoning: item.reasoning,
+        meta: item.meta,
+        blocks: item.blocks,
+        pending: false,
+        error: item.error,
+        createdAt: Number(item.createdAt || 0),
+      }));
+  },
+
+  async ensureSessionMessagesLoaded(sessionId, options = {}) {
+    const sid = String(sessionId || "").trim();
+    if (!sid || !this.sessionStore || !this.opencodeClient) return false;
+
+    const force = Boolean(options.force);
+    const st = this.sessionStore.state();
+    const currentMessages = Array.isArray(st.messagesBySession && st.messagesBySession[sid])
+      ? st.messagesBySession[sid]
+      : [];
+    if (!force && currentMessages.length) return false;
+
+    let remoteMessages = [];
+    try {
+      remoteMessages = await this.opencodeClient.listSessionMessages({
+        sessionId: sid,
+        limit: Number(options.limit || 200),
+        signal: options.signal,
+      });
+    } catch (error) {
+      this.log(`load session messages failed (${sid}): ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+
+    const normalizedMessages = this.normalizeRemoteSessionMessages(remoteMessages);
+    if (!normalizedMessages.length && !force) return false;
+    return this.sessionStore.setSessionMessages(sid, normalizedMessages);
   },
 
   async syncSessionsFromRemote() {

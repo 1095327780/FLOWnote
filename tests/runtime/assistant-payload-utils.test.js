@@ -53,6 +53,30 @@ test("chooseRicherResponse should keep terminal content over in-progress payload
   assert.equal(hasTerminalPayload(picked), true);
 });
 
+test("chooseRicherResponse should prefer longer terminal text over block-heavy short payload", () => {
+  const shortWithBlocks = {
+    messageId: "m2",
+    text: "已完成",
+    reasoning: "",
+    meta: "",
+    blocks: [
+      { type: "tool", status: "completed", title: "read" },
+      { type: "tool", status: "completed", title: "edit" },
+      { type: "step-finish", summary: "done" },
+    ],
+  };
+  const longAnswer = {
+    messageId: "m2",
+    text: "已完成修改。变更点如下：1) 重构会话命名逻辑；2) 增加历史消息回填；3) 补充回归测试。",
+    reasoning: "",
+    meta: "",
+    blocks: [{ type: "step-finish", summary: "done" }],
+  };
+
+  const picked = chooseRicherResponse(shortWithBlocks, longAnswer);
+  assert.equal(picked.text, longAnswer.text);
+});
+
 test("extractAssistantPayloadFromEnvelope should collapse snapshot-like reasoning updates", () => {
   const payload = extractAssistantPayloadFromEnvelope({
     info: { role: "assistant" },

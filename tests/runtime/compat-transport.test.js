@@ -596,59 +596,66 @@ test("isUnknownStatusFallbackText should detect unknown-status placeholder", () 
   assert.equal(transport.isUnknownStatusFallbackText("ok"), false);
 });
 
-test("sendMessage should fallback to sync recovery when async finalize fails", async () => {
+test("sendMessage should use /message response as authoritative result in streaming mode", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
+  const tokenUpdates = [];
 
   transport.request = async (method, endpoint) => {
-    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_final",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100, completed: 101 },
+          finish: "stop",
+        },
+        parts: [{ type: "text", text: "authoritative-final" }],
+      };
+    }
     throw new Error(`unexpected request: ${method} ${endpoint}`);
   };
-  transport.streamAssistantFromEvents = async () => null;
-  transport.streamAssistantFromPolling = async () => ({
-    messageId: "msg_a",
-    text: "",
+  transport.streamAssistantFromEvents = async () => ({
+    messageId: "msg_stream",
+    text: "partial-stream",
     reasoning: "",
     meta: "",
     blocks: [],
-  });
-  transport.finalizeAssistantResponse = async () => {
-    throw new Error("timeout");
-  };
-  transport.trySyncMessageRecovery = async () => ({
-    messageId: "msg_a",
-    text: "ok",
-    reasoning: "",
-    meta: "",
-    blocks: [],
+    completed: false,
   });
 
   const result = await transport.sendMessage({
     sessionId: "ses_1",
     prompt: "hello",
+    onToken: (text) => tokenUpdates.push(String(text || "")),
   });
 
-  assert.equal(result.text, "ok");
-  assert.equal(result.messageId, "msg_a");
+  assert.equal(result.text, "authoritative-final");
+  assert.equal(result.messageId, "msg_final");
+  assert.equal(tokenUpdates[tokenUpdates.length - 1], "authoritative-final");
 });
 
-test("sendMessage should try sync recovery before idle no-message error", async () => {
+test("sendMessage should fallback to sync recovery when authoritative response has no renderable payload", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
 
   transport.request = async (method, endpoint) => {
-    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_empty",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100, completed: 101 },
+          finish: "stop",
+        },
+        parts: [],
+      };
+    }
     throw new Error(`unexpected request: ${method} ${endpoint}`);
   };
   transport.streamAssistantFromEvents = async () => null;
-  transport.streamAssistantFromPolling = async () => ({
-    messageId: "",
-    text: "",
-    reasoning: "",
-    meta: "",
-    blocks: [],
-  });
-  transport.getSessionStatus = async () => ({ type: "idle" });
   transport.trySyncMessageRecovery = async () => ({
     messageId: "msg_recovered",
     text: "recovered",
@@ -667,86 +674,37 @@ test("sendMessage should try sync recovery before idle no-message error", async 
   assert.equal(result.messageId, "msg_recovered");
 });
 
-test("sendMessage should finalize when streamed payload is not marked completed", async () => {
+test("sendMessage should reject response without completion signal", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
-  let finalizeCalls = 0;
 
   transport.request = async (method, endpoint) => {
-    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_a",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100 },
+        },
+        parts: [{ type: "text", text: "partial-without-complete" }],
+      };
+    }
     throw new Error(`unexpected request: ${method} ${endpoint}`);
   };
   transport.streamAssistantFromEvents = async () => null;
-  transport.streamAssistantFromPolling = async () => ({
-    messageId: "msg_stream",
-    text: "partial",
-    reasoning: "",
-    meta: "",
-    blocks: [],
-    completed: false,
-  });
-  transport.finalizeAssistantResponse = async () => {
-    finalizeCalls += 1;
-    return {
-      messageId: "msg_final",
-      text: "final answer",
-      reasoning: "",
-      meta: "",
-      blocks: [],
-      completed: true,
-    };
-  };
   transport.trySyncMessageRecovery = async () => null;
+  transport.getSessionStatus = async () => ({ type: "idle" });
+  transport.fetchSessionMessages = async () => ({ list: [] });
 
-  const result = await transport.sendMessage({
-    sessionId: "ses_1",
-    prompt: "hello",
-  });
-
-  assert.equal(finalizeCalls, 1);
-  assert.equal(result.text, "final answer");
-  assert.equal(result.messageId, "msg_final");
-});
-
-test("sendMessage should still finalize when streamed payload is marked completed", async () => {
-  const transport = createTransport();
-  transport.settings.enableStreaming = true;
-  let finalizeCalls = 0;
-
-  transport.request = async (method, endpoint) => {
-    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
-    throw new Error(`unexpected request: ${method} ${endpoint}`);
-  };
-  transport.streamAssistantFromEvents = async () => null;
-  transport.streamAssistantFromPolling = async () => ({
-    messageId: "msg_stream",
-    text: "partial by stream",
-    reasoning: "",
-    meta: "",
-    blocks: [],
-    completed: true,
-  });
-  transport.finalizeAssistantResponse = async () => {
-    finalizeCalls += 1;
-    return {
-      messageId: "msg_final",
-      text: "final authoritative answer",
-      reasoning: "",
-      meta: "",
-      blocks: [],
-      completed: true,
-    };
-  };
-  transport.trySyncMessageRecovery = async () => null;
-
-  const result = await transport.sendMessage({
-    sessionId: "ses_1",
-    prompt: "hello",
-  });
-
-  assert.equal(finalizeCalls, 1);
-  assert.equal(result.text, "final authoritative answer");
-  assert.equal(result.messageId, "msg_final");
+  await assert.rejects(
+    () =>
+      transport.sendMessage({
+        sessionId: "ses_1",
+        prompt: "hello",
+      }),
+    /未收到明确完成信号/,
+  );
 });
 
 test("reconcileAssistantResponseQuick should promote latest completed assistant message", async () => {
@@ -793,46 +751,23 @@ test("reconcileAssistantResponseQuick should promote latest completed assistant 
   assert.equal(Boolean(reconciled.completed), true);
 });
 
-test("sendMessage should keep streamed payload when finalize reconcile fails", async () => {
-  const transport = createTransport();
-  transport.settings.enableStreaming = true;
-  let finalizeCalls = 0;
-
-  transport.request = async (method, endpoint) => {
-    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
-    throw new Error(`unexpected request: ${method} ${endpoint}`);
-  };
-  transport.streamAssistantFromEvents = async () => null;
-  transport.streamAssistantFromPolling = async () => ({
-    messageId: "msg_stream",
-    text: "final by stream",
-    reasoning: "",
-    meta: "",
-    blocks: [],
-    completed: true,
-  });
-  transport.finalizeAssistantResponse = async () => {
-    finalizeCalls += 1;
-    throw new Error("reconcile failed");
-  };
-  transport.trySyncMessageRecovery = async () => null;
-
-  const result = await transport.sendMessage({
-    sessionId: "ses_1",
-    prompt: "hello",
-  });
-
-  assert.equal(finalizeCalls, 1);
-  assert.equal(result.text, "final by stream");
-  assert.equal(result.messageId, "msg_stream");
-});
-
-test("sendMessage should surface list error payload when async flow has no renderable text", async () => {
+test("sendMessage should surface list error when authoritative payload is empty", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
 
   transport.request = async (method, endpoint) => {
-    if (method === "POST" && endpoint === "/session/ses_1/prompt_async") return {};
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_empty",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100, completed: 101 },
+          finish: "stop",
+        },
+        parts: [],
+      };
+    }
     if (method === "GET" && endpoint === "/session/status") return { type: "idle" };
     if (method === "GET" && endpoint === "/session/ses_1/message") {
       return {
@@ -853,23 +788,16 @@ test("sendMessage should surface list error payload when async flow has no rende
     throw new Error(`unexpected request: ${method} ${endpoint}`);
   };
   transport.streamAssistantFromEvents = async () => null;
-  transport.streamAssistantFromPolling = async () => ({
-    messageId: "",
-    text: "",
-    reasoning: "",
-    meta: "",
-    blocks: [],
-  });
   transport.trySyncMessageRecovery = async () => null;
 
-  const result = await transport.sendMessage({
-    sessionId: "ses_1",
-    prompt: "hello",
-  });
-
-  assert.match(result.text, /模型返回错误/);
-  assert.match(result.text, /User not found/);
-  assert.equal(result.messageId, "err_1");
+  await assert.rejects(
+    () =>
+      transport.sendMessage({
+        sessionId: "ses_1",
+        prompt: "hello",
+      }),
+    /模型返回错误：/,
+  );
 });
 
 test("useWslDataHomeFallback should allocate isolated data home in WSL mode", () => {

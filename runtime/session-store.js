@@ -20,11 +20,16 @@ class SessionStore {
   static isPlaceholderTitle(title) {
     const normalized = SessionStore.normalizeSessionTitleInput(title).toLowerCase();
     if (!normalized) return true;
-    return normalized === "新会话"
+    if (
+      normalized === "新会话"
       || normalized === "未命名会话"
       || normalized === "new session"
       || normalized === "untitled"
-      || normalized === "untitled session";
+      || normalized === "untitled session"
+    ) {
+      return true;
+    }
+    return /^(new session|untitled(?: session)?|新会话|未命名会话)(?:\s*[-:：].*)?$/.test(normalized);
   }
 
   static deriveTitleFromPrompt(prompt) {
@@ -46,6 +51,15 @@ class SessionStore {
 
     const maxLen = 28;
     return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+  }
+
+  static normalizeTimestampMs(value) {
+    const raw = Number(value || 0);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    if (raw >= 1e14) return Math.floor(raw / 1000);
+    if (raw >= 1e12) return Math.floor(raw);
+    if (raw >= 1e9) return Math.floor(raw * 1000);
+    return Math.floor(raw);
   }
 
   upsertSession(session) {
@@ -89,6 +103,57 @@ class SessionStore {
 
     if (st.activeSessionId === sessionId) {
       st.activeSessionId = st.sessions.length ? st.sessions[0].id : "";
+    }
+
+    return true;
+  }
+
+  setSessionMessages(sessionId, messages) {
+    const st = this.state();
+    const sid = String(sessionId || "").trim();
+    if (!sid) return false;
+    const source = Array.isArray(messages) ? messages : [];
+    const normalized = source
+      .map((message, index) => {
+        const row = message && typeof message === "object" ? message : null;
+        if (!row) return null;
+        const roleRaw = String(row.role || "").trim().toLowerCase();
+        const role = roleRaw === "assistant" ? "assistant" : roleRaw === "user" ? "user" : "";
+        if (!role) return null;
+        const createdAt = SessionStore.normalizeTimestampMs(row.createdAt || row.updatedAt || row.timestamp || 0);
+        return {
+          id: String(row.id || `${role}-${Date.now()}-${index}`),
+          role,
+          text: String(row.text || ""),
+          reasoning: role === "assistant" ? String(row.reasoning || "") : "",
+          meta: role === "assistant" ? String(row.meta || "") : "",
+          blocks: role === "assistant" && Array.isArray(row.blocks) ? row.blocks : [],
+          pending: false,
+          error: String(row.error || ""),
+          createdAt: createdAt || Date.now(),
+        };
+      })
+      .filter(Boolean)
+      .slice(-200);
+
+    st.messagesBySession[sid] = normalized;
+
+    const session = st.sessions.find((s) => s.id === sid);
+    if (session) {
+      const latestMessage = normalized.length ? normalized[normalized.length - 1] : null;
+      if (latestMessage && Number(latestMessage.createdAt || 0) > 0) {
+        session.updatedAt = Number(latestMessage.createdAt || Date.now());
+      }
+      const latestUserMessage = [...normalized]
+        .reverse()
+        .find((row) => row && row.role === "user" && String(row.text || "").trim().length > 0);
+      if (latestUserMessage) {
+        session.lastUserPrompt = String(latestUserMessage.text || "");
+        if (SessionStore.isPlaceholderTitle(session.title)) {
+          const nextTitle = SessionStore.deriveTitleFromPrompt(session.lastUserPrompt);
+          if (nextTitle) session.title = nextTitle;
+        }
+      }
     }
 
     return true;

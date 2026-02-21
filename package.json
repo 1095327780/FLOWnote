@@ -5,8 +5,12 @@
   "type": "commonjs",
   "scripts": {
     "build": "node esbuild.config.mjs",
+    "guard:repo-hygiene": "node scripts/guard-repo-hygiene.js",
+    "guard:source-of-truth": "node scripts/guard-source-of-truth.js",
+    "verify:version-sync": "node scripts/verify-version-sync.js",
     "check": "node --check main.js",
     "check:runtime": "find runtime -type f -name '*.js' -print0 | xargs -0 -n1 node --check",
-    "test": "node --test tests/runtime/*.test.js"
+    "test": "node --test tests/runtime/*.test.js",
+    "ci": "npm run guard:repo-hygiene && npm run guard:source-of-truth && npm run verify:version-sync && npm run check && npm run check:runtime && npm run test"
   }
 }

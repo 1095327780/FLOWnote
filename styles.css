@@ -1292,12 +1292,6 @@ body.theme-dark .oc-surface {
   margin: 0;
 }
 
-.oc-code-wrapper:not(.has-language) pre {
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-x: hidden;
-}
-
 .oc-message-content > pre {
   margin: 8px 0;
 }
@@ -1307,7 +1301,6 @@ body.theme-dark .oc-surface {
   font-size: 13px;
 }
 
-.oc-code-lang-label,
 .oc-code-copy-btn {
   position: absolute;
   top: 6px;
@@ -1319,12 +1312,6 @@ body.theme-dark .oc-surface {
   z-index: 2;
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-}
-
-.oc-code-lang-label {
-  padding: 2px 8px;
-  font-size: 12px;
-  font-family: var(--font-monospace);
 }
 
 .oc-code-copy-btn {
@@ -1340,21 +1327,15 @@ body.theme-dark .oc-surface {
   height: 14px;
 }
 
-.oc-code-wrapper.has-language .oc-code-copy-btn {
-  display: none;
-}
-
-.oc-code-wrapper:not(.has-language):hover .oc-code-copy-btn {
+.oc-code-wrapper:hover .oc-code-copy-btn {
   opacity: 1;
 }
 
-.oc-code-lang-label:hover,
 .oc-code-copy-btn:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
 
-.oc-code-lang-label.copied,
 .oc-code-copy-btn.copied {
   color: var(--text-accent);
   font-size: 11px;
@@ -1894,7 +1875,6 @@ body.theme-dark .oc-surface {
 .oc-side-toggle:focus-visible,
 .oc-nav-btn:focus-visible,
 .oc-code-copy-btn:focus-visible,
-.oc-code-lang-label:focus-visible,
 .oc-text-copy-btn:focus-visible,
 .claudian-ask-question-inline:focus-visible,
 .claudian-ask-tab:focus-visible,

@@ -1,0 +1,27 @@
+{
+  "settings": {
+    "transportMode": "compat",
+    "experimentalSdkEnabled": false,
+    "cliPath": "",
+    "autoDetectCli": true,
+    "skillsDir": ".opencode/skills",
+    "skillInjectMode": "summary",
+    "defaultModel": "",
+    "authMode": "opencode-default",
+    "customProviderId": "openai",
+    "customApiKey": "",
+    "customBaseUrl": "",
+    "requestTimeoutMs": 120000,
+    "enableStreaming": true,
+    "debugLogs": false,
+    "opencodeHomeDir": ".opencode-runtime",
+    "launchStrategy": "auto",
+    "wslDistro": ""
+  },
+  "runtimeState": {
+    "sessions": [],
+    "activeSessionId": "",
+    "messagesBySession": {},
+    "deletedSessionIds": []
+  }
+}

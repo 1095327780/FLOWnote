@@ -1,3 +1,7 @@
+const {
+  isAssistantMessageEnvelopeCompleted,
+} = require("../shared/completion-signals");
+
 function createResponseRecoveryMethods(deps = {}) {
   const {
     URL,
@@ -19,6 +23,10 @@ function createResponseRecoveryMethods(deps = {}) {
   } = deps;
 
   class ResponseRecoveryMethods {
+  isMessageEnvelopeCompleted(envelope) {
+    return isAssistantMessageEnvelopeCompleted(envelope);
+  }
+
   async finalizeAssistantResponse(sessionId, responsePayload, startedAt, signal, preferredMessageId = "") {
     const data = responsePayload && responsePayload.data ? responsePayload.data : responsePayload;
     const initialMessageId = preferredMessageId || (data && data.info ? data.info.id : "");
@@ -51,13 +59,9 @@ function createResponseRecoveryMethods(deps = {}) {
         if (role && role !== "assistant") {
           return { payload: null, completed: false, messageId: "" };
         }
-        const completedAt =
-          messagePayload && messagePayload.info && messagePayload.info.time
-            ? Number(messagePayload.info.time.completed || 0)
-            : 0;
         return {
           payload: messagePayload ? extractAssistantPayloadFromEnvelope(messagePayload) : null,
-          completed: completedAt > 0,
+          completed: this.isMessageEnvelopeCompleted(messagePayload),
           messageId,
         };
       },
@@ -70,17 +74,13 @@ function createResponseRecoveryMethods(deps = {}) {
         });
         const latest = fetched.latest || this.findLatestAssistantMessage(fetched.list, startedAt);
         if (!latest) return null;
-        const completedAt =
-          latest && latest.info && latest.info.time
-            ? Number(latest.info.time.completed || 0)
-            : 0;
         const createdAt =
           latest && latest.info && latest.info.time
             ? Number(latest.info.time.created || 0)
             : 0;
         return {
           payload: extractAssistantPayloadFromEnvelope(latest),
-          completed: completedAt > 0,
+          completed: this.isMessageEnvelopeCompleted(latest),
           messageId: latest && latest.info ? latest.info.id : "",
           createdAt,
         };
@@ -128,7 +128,7 @@ function createResponseRecoveryMethods(deps = {}) {
       reasoning: payload.reasoning || "",
       meta: payload.meta || "",
       blocks: payload.blocks || [],
-      completed: Boolean(polled.completed) || (hasTerminalPayload(payload) && !payloadLooksInProgress(payload)),
+      completed: Boolean(polled.completed),
     };
   }
 
@@ -162,13 +162,9 @@ function createResponseRecoveryMethods(deps = {}) {
         if (role && role !== "assistant") {
           return { payload: null, completed: false, messageId: "" };
         }
-        const completedAt =
-          messagePayload && messagePayload.info && messagePayload.info.time
-            ? Number(messagePayload.info.time.completed || 0)
-            : 0;
         return {
           payload: messagePayload ? extractAssistantPayloadFromEnvelope(messagePayload) : null,
-          completed: completedAt > 0,
+          completed: this.isMessageEnvelopeCompleted(messagePayload),
           messageId,
         };
       },
@@ -181,11 +177,10 @@ function createResponseRecoveryMethods(deps = {}) {
         });
         const latest = fetched.latest || this.findLatestAssistantMessage(fetched.list, startedAt);
         if (!latest) return null;
-        const completedAt = latest && latest.info && latest.info.time ? Number(latest.info.time.completed || 0) : 0;
         const createdAt = latest && latest.info && latest.info.time ? Number(latest.info.time.created || 0) : 0;
         return {
           payload: extractAssistantPayloadFromEnvelope(latest),
-          completed: completedAt > 0,
+          completed: this.isMessageEnvelopeCompleted(latest),
           messageId: latest && latest.info ? latest.info.id : "",
           createdAt,
         };
@@ -579,17 +574,13 @@ function createResponseRecoveryMethods(deps = {}) {
         if (!role || role === "assistant") {
           const payload = messagePayload ? extractAssistantPayloadFromEnvelope(messagePayload) : null;
           if (payload) {
-            const completedAt =
-              messagePayload && messagePayload.info && messagePayload.info.time
-                ? Number(messagePayload.info.time.completed || 0)
-                : 0;
             merged = chooseRicherResponse(merged, {
               messageId: messageIdHint,
               text: String(payload.text || ""),
               reasoning: String(payload.reasoning || ""),
               meta: String(payload.meta || ""),
               blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
-              completed: completedAt > 0,
+              completed: this.isMessageEnvelopeCompleted(messagePayload),
             });
           }
         }
@@ -609,17 +600,13 @@ function createResponseRecoveryMethods(deps = {}) {
       const latest = fetched.latest || this.findLatestAssistantMessage(fetched.list, startedAt);
       if (latest) {
         const payload = extractAssistantPayloadFromEnvelope(latest);
-        const completedAt =
-          latest && latest.info && latest.info.time
-            ? Number(latest.info.time.completed || 0)
-            : 0;
         merged = chooseRicherResponse(merged, {
           messageId: latest && latest.info && latest.info.id ? String(latest.info.id) : messageIdHint,
           text: String(payload.text || ""),
           reasoning: String(payload.reasoning || ""),
           meta: String(payload.meta || ""),
           blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
-          completed: completedAt > 0,
+          completed: this.isMessageEnvelopeCompleted(latest),
         });
       }
     } catch (error) {

@@ -101,10 +101,21 @@ function scrollMessagesTo(target) {
   if (!messages) return;
   if (target === "top") {
     this.autoScrollEnabled = false;
+    if (typeof this.setForceBottomWindow === "function") this.setForceBottomWindow(0);
+    if (typeof this.withProgrammaticScroll === "function") {
+      this.withProgrammaticScroll(messages, () => {
+        messages.scrollTop = 0;
+      });
+      return;
+    }
     messages.scrollTop = 0;
     return;
   }
   this.autoScrollEnabled = true;
+  if (typeof this.scheduleScrollMessagesToBottom === "function") {
+    this.scheduleScrollMessagesToBottom(true);
+    return;
+  }
   messages.scrollTop = messages.scrollHeight;
 }
 
@@ -120,11 +131,16 @@ function normalizeSessionTitle(value) {
 function isPlaceholderSessionTitle(title) {
   const normalized = normalizeSessionTitle(title).toLowerCase();
   if (!normalized) return true;
-  return normalized === "新会话"
+  if (
+    normalized === "新会话"
     || normalized === "未命名会话"
     || normalized === "new session"
     || normalized === "untitled"
-    || normalized === "untitled session";
+    || normalized === "untitled session"
+  ) {
+    return true;
+  }
+  return /^(new session|untitled(?: session)?|新会话|未命名会话)(?:\s*[-:：].*)?$/.test(normalized);
 }
 
 function deriveSessionTitleFromPrompt(prompt) {
@@ -252,6 +268,16 @@ function renderSidebar(side) {
     if (s.id === active) item.addClass("is-active");
     item.addEventListener("click", async () => {
       this.plugin.sessionStore.setActiveSession(s.id);
+      this.render();
+      try {
+        if (typeof this.plugin.ensureSessionMessagesLoaded === "function") {
+          await this.plugin.ensureSessionMessagesLoaded(s.id, { force: false });
+        }
+      } catch (error) {
+        this.plugin.log(
+          `load session history failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       await this.plugin.persistState();
       this.render();
     });

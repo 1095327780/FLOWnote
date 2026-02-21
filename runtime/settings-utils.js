@@ -1,5 +1,6 @@
 const DEFAULT_SETTINGS = {
-  transportMode: "sdk",
+  transportMode: "compat",
+  experimentalSdkEnabled: false,
   cliPath: "",
   autoDetectCli: true,
   skillsDir: ".opencode/skills",
@@ -18,18 +19,25 @@ const DEFAULT_SETTINGS = {
 };
 
 function migrateLegacySettings(raw) {
-  const data = raw || {};
+  const data = raw && typeof raw === "object" ? { ...raw } : {};
 
   if (typeof data.useCustomApiKey === "boolean") {
     data.authMode = data.useCustomApiKey ? "custom-api-key" : "opencode-default";
     delete data.useCustomApiKey;
   }
 
-  if (!data.transportMode) data.transportMode = "sdk";
+  const transportModeRaw = String(data.transportMode || "").trim().toLowerCase();
+  if (!transportModeRaw) data.transportMode = "compat";
+  else if (!["sdk", "compat"].includes(transportModeRaw)) data.transportMode = "compat";
+  else data.transportMode = transportModeRaw;
 
   if (data.prependSkillPrompt === false && !data.skillInjectMode) data.skillInjectMode = "off";
   if (data.prependSkillPrompt === true && !data.skillInjectMode) data.skillInjectMode = "summary";
   delete data.prependSkillPrompt;
+
+  if (typeof data.experimentalSdkEnabled !== "boolean") {
+    data.experimentalSdkEnabled = false;
+  }
 
   return data;
 }
@@ -37,7 +45,11 @@ function migrateLegacySettings(raw) {
 function normalizeSettings(raw) {
   const merged = Object.assign({}, DEFAULT_SETTINGS, migrateLegacySettings(raw));
 
-  if (!["sdk", "compat"].includes(merged.transportMode)) merged.transportMode = "sdk";
+  if (!["sdk", "compat"].includes(String(merged.transportMode || "").trim().toLowerCase())) {
+    merged.transportMode = "compat";
+  }
+  merged.experimentalSdkEnabled = Boolean(merged.experimentalSdkEnabled);
+  if (!merged.experimentalSdkEnabled) merged.transportMode = "compat";
   if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
   if (!["opencode-default", "custom-api-key"].includes(merged.authMode)) merged.authMode = "opencode-default";
   if (!["auto", "native", "wsl"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
@@ -51,6 +63,7 @@ function normalizeSettings(raw) {
   merged.customProviderId = String(merged.customProviderId || "openai").trim();
   merged.customApiKey = String(merged.customApiKey || "").trim();
   merged.customBaseUrl = String(merged.customBaseUrl || "").trim();
+  merged.transportMode = String(merged.transportMode || "compat").trim().toLowerCase();
   merged.launchStrategy = String(merged.launchStrategy || "auto").trim().toLowerCase();
   merged.wslDistro = String(merged.wslDistro || "").trim();
 

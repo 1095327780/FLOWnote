@@ -4,7 +4,18 @@ const runtimeStateMethods = {
       this.runtimeState = {};
     }
     if (!Array.isArray(this.runtimeState.deletedSessionIds)) this.runtimeState.deletedSessionIds = [];
+    if (!this.runtimeState.migrationFlags || typeof this.runtimeState.migrationFlags !== "object") {
+      this.runtimeState.migrationFlags = {};
+    }
     this.runtimeState.lastLaunchProfile = this.normalizeLaunchProfile(this.runtimeState.lastLaunchProfile);
+  },
+
+  markTransportModeCompatNormalization(rawValue) {
+    this.ensureRuntimeStateShape();
+    if (this.runtimeState.migrationFlags.transportModeCompatNormalized) return false;
+    this.runtimeState.migrationFlags.transportModeCompatNormalized = true;
+    this.log(`settings migration applied: transportMode ${String(rawValue || "unknown")} -> compat`);
+    return true;
   },
 
   normalizeLaunchProfile(profile) {

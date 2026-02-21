@@ -7,8 +7,7 @@ function createSendMessageMethods(deps = {}) {
     hasRenderablePayload,
     formatSessionStatusText,
     payloadLooksInProgress,
-    hasTerminalPayload,
-    chooseRicherResponse,
+    extractAssistantPayloadFromEnvelope,
     sessionStatusLooksAuthFailure,
   } = deps;
 
@@ -39,9 +38,8 @@ function createSendMessageMethods(deps = {}) {
       })}`);
     }
 
-    let res;
+    let res = null;
     let streamed = null;
-    let usedRealStreaming = false;
     const commandBody = isCommandRequest
       ? {
         command: resolvedCommand.command,
@@ -58,7 +56,6 @@ function createSendMessageMethods(deps = {}) {
     if (model) messageBody.model = model;
 
     if (this.settings.enableStreaming) {
-      usedRealStreaming = true;
       const linked = createLinkedAbortController(options.signal);
       const eventSignal = linked.controller.signal;
       const eventStreamPromise = this.streamAssistantFromEvents(options.sessionId, startedAt, eventSignal, {
@@ -71,26 +68,13 @@ function createSendMessageMethods(deps = {}) {
         onPromptAppend: options.onPromptAppend,
         onToast: options.onToast,
       }).catch((e) => {
-        this.log(`event stream fallback: ${e instanceof Error ? e.message : String(e)}`);
+        this.log(`event stream unavailable: ${e instanceof Error ? e.message : String(e)}`);
         return null;
-      });
-      const streamWaitMs = Math.max(
-        20000,
-        Math.min(60000, Math.floor((Number(this.settings.requestTimeoutMs) || 120000) / 2)),
-      );
-      let streamTimeoutHandle = null;
-      const streamTimeoutPromise = new Promise((resolve) => {
-        streamTimeoutHandle = setTimeout(() => {
-          this.log(`event stream soft-timeout (${streamWaitMs}ms), fallback to polling`);
-          linked.controller.abort();
-          resolve(null);
-        }, streamWaitMs);
       });
 
       try {
         if (isCommandRequest) {
-          // 保持与终端行为一致：命令执行期间也实时订阅事件流。
-          await this.request(
+          res = await this.request(
             "POST",
             `/session/${encodeURIComponent(options.sessionId)}/command`,
             commandBody,
@@ -98,36 +82,21 @@ function createSendMessageMethods(deps = {}) {
             options.signal,
           );
         } else {
-          await this.request(
+          // Best practice: keep /message response as authoritative final assistant payload.
+          res = await this.request(
             "POST",
-            `/session/${encodeURIComponent(options.sessionId)}/prompt_async`,
+            `/session/${encodeURIComponent(options.sessionId)}/message`,
             messageBody,
             { directory: this.vaultPath },
             options.signal,
           );
         }
-        streamed = await Promise.race([eventStreamPromise, streamTimeoutPromise]);
-        if (streamTimeoutHandle) clearTimeout(streamTimeoutHandle);
       } finally {
-        if (streamTimeoutHandle) clearTimeout(streamTimeoutHandle);
         linked.detach();
         linked.controller.abort();
       }
-
-      if (
-        !streamed ||
-        (!normalizedRenderableText(streamed.text) &&
-          !String(streamed.reasoning || "").trim() &&
-          !(Array.isArray(streamed.blocks) && streamed.blocks.length))
-      ) {
-        streamed = await this.streamAssistantFromPolling(options.sessionId, startedAt, options.signal, {
-          onToken: options.onToken,
-          onReasoning: options.onReasoning,
-          onBlocks: options.onBlocks,
-        });
-      }
+      streamed = await eventStreamPromise;
     } else if (isCommandRequest) {
-      // 非流式时命令走 /command，结果由 finalize 统一收敛。
       res = await this.request(
         "POST",
         `/session/${encodeURIComponent(options.sessionId)}/command`,
@@ -145,148 +114,101 @@ function createSendMessageMethods(deps = {}) {
       );
     }
 
-    let finalized = null;
-    if (usedRealStreaming) {
-      finalized = streamed || {
-        messageId: "", text: "", reasoning: "", meta: "", blocks: [], completed: false,
-      };
-      const streamedMessageId = String(finalized && finalized.messageId ? finalized.messageId : "").trim();
-      const streamedHasRenderable = hasRenderablePayload(finalized);
-      if (!streamedMessageId && !streamedHasRenderable) {
-        const status = await this.getSessionStatus(options.sessionId, options.signal);
-        const statusText = formatSessionStatusText(status);
-        const activeModel = String(this.settings && this.settings.defaultModel ? this.settings.defaultModel : "").trim();
-        const modelText = activeModel ? `模型 ${activeModel}` : "当前模型";
-        if (sessionStatusLooksAuthFailure(status)) {
-          throw new Error(`${modelText} 鉴权失败（session.status=${statusText}）。请检查 Provider 登录或 API Key。`);
-        }
-        if (!isCommandRequest) {
-          const recovered = await this.trySyncMessageRecovery(
-            options.sessionId,
-            messageBody,
-            options.signal,
-            streamedMessageId,
-          );
-          if (recovered && hasRenderablePayload(recovered)) {
-            finalized = chooseRicherResponse(finalized, recovered);
-          }
-        }
-        if (!hasRenderablePayload(finalized)) {
-          try {
-            const fetched = await this.fetchSessionMessages(options.sessionId, {
-              signal: options.signal,
-              limit: 20,
-              requireRecentTail: true,
-            });
-            const listPayload = Array.isArray(fetched.list) ? fetched.list : [];
-            const latestErrorEnvelope = [...listPayload]
-              .reverse()
-              .find((item) => {
-                const info = item && item.info && typeof item.info === "object" ? item.info : null;
-                return Boolean(info && info.error);
-              }) || null;
-            if (latestErrorEnvelope) {
-              const info = latestErrorEnvelope.info && typeof latestErrorEnvelope.info === "object"
-                ? latestErrorEnvelope.info
-                : {};
-              const err = extractErrorText(info.error);
-              if (err) {
-                finalized = chooseRicherResponse(finalized, {
-                  messageId: info && info.id ? String(info.id) : streamedMessageId,
-                  text: `模型返回错误：${err}`,
-                  reasoning: "",
-                  meta: err,
-                  blocks: [],
-                  completed: true,
-                });
-              }
-            }
-            const tail = listPayload
-              .slice(-5)
-              .map((item) => {
-                const info = item && item.info && typeof item.info === "object" ? item.info : {};
-                const role = String(info.role || info.type || "unknown");
-                const id = String(info.id || "");
-                const t = info.time && typeof info.time === "object" ? info.time : {};
-                const created = Number(t.created || info.created || 0);
-                const hasError = info && info.error ? ":error" : "";
-                return `${role}:${id || "-"}:${created || 0}${hasError}`;
-              })
-              .join(", ");
-            this.log(`no-renderable-after-async session=${options.sessionId} status=${statusText} messageCount=${listPayload.length} tail=[${tail}]`);
-          } catch (error) {
-            this.log(`no-renderable-after-async inspect failed: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-        if (!hasRenderablePayload(finalized) && status && status.type === "idle") {
-          throw new Error(`${modelText} 未返回可用消息（session.status=${statusText}）。请切换模型或检查登录配置。`);
-        }
-      }
-      finalized = await this.reconcileAssistantResponseQuick(
-        options.sessionId,
-        finalized,
-        startedAt,
-        options.signal,
-        streamedMessageId,
-      );
+    const data = res && res.data ? res.data : res;
+    let envelope = this.normalizeMessageEnvelope(data);
+    if (!envelope) {
+      const list = this.extractMessageList(data);
+      const latest = this.findLatestAssistantMessage(list, startedAt);
+      if (latest) envelope = latest;
+    }
 
-      // Streaming is only the live channel; always reconcile with persisted server state once.
+    let finalized = {
+      messageId: "",
+      text: "",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: false,
+    };
+    if (envelope) {
+      const payload = extractAssistantPayloadFromEnvelope(envelope);
+      finalized = {
+        messageId: envelope.info && envelope.info.id ? String(envelope.info.id) : "",
+        text: String(payload && payload.text ? payload.text : ""),
+        reasoning: String(payload && payload.reasoning ? payload.reasoning : ""),
+        meta: String(payload && payload.meta ? payload.meta : ""),
+        blocks: payload && Array.isArray(payload.blocks) ? payload.blocks : [],
+        completed: this.isMessageEnvelopeCompleted(envelope),
+      };
+    }
+
+    if (!hasRenderablePayload(finalized) && !isCommandRequest) {
+      const recovered = await this.trySyncMessageRecovery(
+        options.sessionId,
+        messageBody,
+        options.signal,
+        finalized.messageId,
+      );
+      if (recovered && hasRenderablePayload(recovered)) {
+        finalized = recovered;
+      }
+    }
+
+    if (!hasRenderablePayload(finalized) && streamed && hasRenderablePayload(streamed)) {
+      finalized = {
+        messageId: String(streamed.messageId || finalized.messageId || ""),
+        text: String(streamed.text || ""),
+        reasoning: String(streamed.reasoning || ""),
+        meta: String(streamed.meta || ""),
+        blocks: Array.isArray(streamed.blocks) ? streamed.blocks : [],
+        completed: Boolean(streamed.completed),
+      };
+    }
+
+    if (!hasRenderablePayload(finalized)) {
+      const status = await this.getSessionStatus(options.sessionId, options.signal);
+      const statusText = formatSessionStatusText(status);
+      const activeModel = String(this.settings && this.settings.defaultModel ? this.settings.defaultModel : "").trim();
+      const modelText = activeModel ? `模型 ${activeModel}` : "当前模型";
+      if (sessionStatusLooksAuthFailure(status)) {
+        throw new Error(`${modelText} 鉴权失败（session.status=${statusText}）。请检查 Provider 登录或 API Key。`);
+      }
+
       try {
-        const fetchedFinal = await this.finalizeAssistantResponse(
-          options.sessionId,
-          null,
-          startedAt,
-          options.signal,
-          streamedMessageId,
-        );
-        const currentText = finalized && typeof finalized === "object" ? String(finalized.text || "") : "";
-        const nextText = fetchedFinal && typeof fetchedFinal === "object" ? String(fetchedFinal.text || "") : "";
-        const shouldKeepCurrent =
-          hasRenderablePayload(finalized)
-          && !this.isUnknownStatusFallbackText(currentText)
-          && this.isUnknownStatusFallbackText(nextText);
-        if (!shouldKeepCurrent) {
-          finalized = chooseRicherResponse(finalized, fetchedFinal);
+        const fetched = await this.fetchSessionMessages(options.sessionId, {
+          signal: options.signal,
+          limit: 20,
+          requireRecentTail: true,
+        });
+        const listPayload = Array.isArray(fetched.list) ? fetched.list : [];
+        const latestErrorEnvelope = [...listPayload]
+          .reverse()
+          .find((item) => {
+            const info = item && item.info && typeof item.info === "object" ? item.info : null;
+            return Boolean(info && info.error);
+          }) || null;
+        if (latestErrorEnvelope) {
+          const info = latestErrorEnvelope.info && typeof latestErrorEnvelope.info === "object"
+            ? latestErrorEnvelope.info
+            : {};
+          const err = extractErrorText(info.error);
+          if (err) {
+            throw new Error(`模型返回错误：${err}`);
+          }
         }
       } catch (error) {
-        let recovered = null;
-        if (!isCommandRequest) {
-          recovered = await this.trySyncMessageRecovery(
-            options.sessionId,
-            messageBody,
-            options.signal,
-            streamedMessageId,
-          );
-        }
-        if (recovered && hasRenderablePayload(recovered) && !payloadLooksInProgress(recovered)) {
-          finalized = chooseRicherResponse(finalized, recovered);
-        } else {
-          const canKeepStreamedResult =
-            hasRenderablePayload(finalized)
-            && hasTerminalPayload(finalized)
-            && !payloadLooksInProgress(finalized);
-          if (!canKeepStreamedResult) throw error;
-          this.log(`finalize reconcile skipped, keep streamed result: ${error instanceof Error ? error.message : String(error)}`);
-        }
+        if (error instanceof Error && /^模型返回错误：/.test(error.message)) throw error;
+        this.log(`no-renderable inspect failed: ${error instanceof Error ? error.message : String(error)}`);
       }
 
-      if (!isCommandRequest && this.isUnknownStatusFallbackText(finalized && finalized.text)) {
-        const recovered = await this.trySyncMessageRecovery(
-          options.sessionId,
-          messageBody,
-          options.signal,
-          streamedMessageId,
-        );
-        if (recovered && hasRenderablePayload(recovered)) {
-          finalized = chooseRicherResponse(finalized, recovered);
-        }
-      }
-    } else {
-      finalized = await this.finalizeAssistantResponse(options.sessionId, res, startedAt, options.signal);
+      throw new Error(`${modelText} 未返回可用消息（session.status=${statusText}）。`);
     }
 
     if (payloadLooksInProgress(finalized)) {
       throw new Error("模型响应未完成且已超时，请切换模型或检查该 Provider 鉴权。");
+    }
+    if (!Boolean(finalized && finalized.completed)) {
+      throw new Error("模型响应未收到明确完成信号（message.updated.completed/finish），已终止以避免截断。");
     }
 
     const messageId = finalized.messageId;
@@ -295,7 +217,12 @@ function createSendMessageMethods(deps = {}) {
     const meta = finalized.meta || "";
     const blocks = Array.isArray(finalized.blocks) ? finalized.blocks : [];
 
-    if (this.settings.enableStreaming && !usedRealStreaming) {
+    if (this.settings.enableStreaming) {
+      // Always reconcile the UI with authoritative final response from /message or /command.
+      if (options.onReasoning) options.onReasoning(reasoning);
+      if (options.onToken) options.onToken(text);
+      if (options.onBlocks) options.onBlocks(blocks);
+    } else {
       if (reasoning && options.onReasoning) {
         await streamPseudo(reasoning, options.onReasoning, options.signal);
       }

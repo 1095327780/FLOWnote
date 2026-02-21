@@ -57,3 +57,30 @@ test("updateAssistantDraft should keep latest snapshot reasoning without duplica
   assert.equal((draft.reasoning.match(/我需要执行/g) || []).length, 1);
 });
 
+test("isPlaceholderTitle should treat timestamped default titles as placeholder", () => {
+  assert.equal(SessionStore.isPlaceholderTitle("New session - 2026-02-21T03:59:31.476Z"), true);
+  assert.equal(SessionStore.isPlaceholderTitle("未命名会话 - 2026/02/21"), true);
+});
+
+test("setSessionMessages should derive session title from latest user message when current title is placeholder", () => {
+  const { store, plugin } = createStoreFixture();
+  const changed = store.setSessionMessages("s1", [
+    {
+      id: "u1",
+      role: "user",
+      text: "请帮我整理今天的会议纪要并提炼三条行动项",
+      createdAt: 1739990000000,
+    },
+    {
+      id: "a1",
+      role: "assistant",
+      text: "好的，我会按会议目标、结论、行动项输出。",
+      createdAt: 1739990001000,
+    },
+  ]);
+
+  assert.equal(changed, true);
+  assert.equal(plugin.runtimeState.messagesBySession.s1.length, 2);
+  assert.equal(plugin.runtimeState.sessions[0].lastUserPrompt, "请帮我整理今天的会议纪要并提炼三条行动项");
+  assert.equal(plugin.runtimeState.sessions[0].title, "请帮我整理今天的会议纪要并提炼三条行动项");
+});

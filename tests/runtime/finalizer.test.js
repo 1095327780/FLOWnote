@@ -210,3 +210,27 @@ test("pollAssistantPayload should not early-stop on transient idle while payload
     Date.now = originalNow;
   }
 });
+
+test("pollAssistantPayload should wait for explicit completion signal when session is still busy", async () => {
+  const result = await pollAssistantPayload({
+    quietTimeoutMs: 40,
+    maxTotalMs: 80,
+    noMessageTimeoutMs: 10,
+    sleep: async () => {},
+    getLatest: async () => ({
+      messageId: "msg_a1",
+      createdAt: Date.now(),
+      payload: {
+        text: "partial",
+        reasoning: "",
+        meta: "",
+        blocks: [{ type: "step-finish", summary: "stop" }],
+      },
+      completed: false,
+    }),
+    getSessionStatus: async () => ({ type: "busy" }),
+  });
+
+  assert.equal(result.timedOut, true);
+  assert.equal(result.completed, false);
+});

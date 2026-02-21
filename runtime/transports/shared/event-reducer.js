@@ -2,10 +2,14 @@ const {
   toPartBlock,
   blocksFingerprint,
   extractErrorText,
-  hasTerminalPayload,
-  payloadLooksInProgress,
   mergeSnapshotText,
 } = require("../../assistant-payload-utils");
+const {
+  isAssistantMessageCompletedInfo,
+  extractSessionIdFromEventProperties,
+  extractSessionStatusFromEventProperties,
+  extractSessionStatusType,
+} = require("./completion-signals");
 
 function normalizeTimestampMs(value) {
   const raw = Number(value || 0);
@@ -206,12 +210,9 @@ function createTransportEventReducer(options) {
       }
     }
 
-    if (info.time && Number(info.time.completed || 0) > 0) {
+    if (isAssistantMessageCompletedInfo(info)) {
       completionSeen = true;
-      if (idleSeen) {
-        const snapshot = { text, reasoning, meta, blocks };
-        if (hasTerminalPayload(snapshot) && !payloadLooksInProgress(snapshot)) done = true;
-      }
+      if (idleSeen) done = true;
     }
   };
 
@@ -336,7 +337,7 @@ function createTransportEventReducer(options) {
     }
 
     if (event.type === "session.idle") {
-      const sid = event.properties && event.properties.sessionID;
+      const sid = extractSessionIdFromEventProperties(event.properties);
       if (sid === sessionId) {
         const hasAnyPayload = Boolean(String(text || "").trim()
           || String(reasoning || "").trim()
@@ -352,8 +353,10 @@ function createTransportEventReducer(options) {
     }
 
     if (event.type === "session.status") {
-      const sid = event.properties && event.properties.sessionID;
-      const status = event.properties && event.properties.status && event.properties.status.type;
+      const sid = extractSessionIdFromEventProperties(event.properties);
+      const status = extractSessionStatusType(
+        extractSessionStatusFromEventProperties(event.properties),
+      );
       if (sid === sessionId && status === "idle") {
         const hasAnyPayload = Boolean(String(text || "").trim()
           || String(reasoning || "").trim()

@@ -9,11 +9,14 @@ const {
   showCopyFeedback,
 } = domUtils;
 
-function renderMessages() {
+function renderMessages(options = {}) {
   const container = this.elements.messages;
   if (!container) return;
+  const cfg = options && typeof options === "object" ? options : {};
+  const forceBottom = Boolean(cfg.forceBottom);
+  if (forceBottom) this.autoScrollEnabled = true;
   this.bindMessagesScrollTracking();
-  const shouldStickToBottom = this.shouldAutoScrollMessages();
+  const shouldStickToBottom = forceBottom || this.shouldAutoScrollMessages();
   const prevScrollTop = Number(container.scrollTop || 0);
   container.empty();
 

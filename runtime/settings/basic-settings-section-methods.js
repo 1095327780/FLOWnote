@@ -130,6 +130,38 @@ class BasicSettingsSectionMethods {
     containerEl.createEl("h3", { text: "高级设置" });
 
     new Setting(containerEl)
+      .setName("实验功能：启用 SDK 传输")
+      .setDesc("默认关闭。生产建议使用 compat 传输；仅在调试场景中开启 SDK。")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(Boolean(this.plugin.settings.experimentalSdkEnabled))
+          .onChange(async (value) => {
+            this.plugin.settings.experimentalSdkEnabled = Boolean(value);
+            if (!this.plugin.settings.experimentalSdkEnabled) {
+              this.plugin.settings.transportMode = "compat";
+            }
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+
+    if (this.plugin.settings.experimentalSdkEnabled) {
+      new Setting(containerEl)
+        .setName("实验传输模式")
+        .setDesc("兼容模式为稳定路径；SDK 模式仅用于实验排障。")
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOption("compat", "compat（稳定）")
+            .addOption("sdk", "sdk（实验）")
+            .setValue(String(this.plugin.settings.transportMode || "compat"))
+            .onChange(async (value) => {
+              this.plugin.settings.transportMode = value === "sdk" ? "sdk" : "compat";
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+
+    new Setting(containerEl)
       .setName("内置 Skills 安装目录")
       .setDesc("默认 .opencode/skills。插件会自动安装内置 skills，并忽略目录中的非内置 skills。通常无需修改。")
       .addText((text) => {

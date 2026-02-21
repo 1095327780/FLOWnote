@@ -263,3 +263,58 @@ test("event reducer should merge snapshot-like deltas without quadratic duplicat
     "I need to analyze the request.\nThen implement the fix.",
   );
 });
+
+test("event reducer should treat assistant finish field as completion signal", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_t1",
+        type: "text",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "final reply",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        finish: "stop",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "session.idle",
+    properties: { sessionID: "ses_1" },
+  });
+
+  assert.equal(reducer.isDone(), true);
+  const snap = reducer.snapshot();
+  assert.equal(Boolean(snap.completed), true);
+});

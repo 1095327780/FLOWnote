@@ -19,39 +19,52 @@ class OpenCodeClient {
     this.compat.updateSettings(settings);
   }
 
+  isExperimentalSdkEnabled() {
+    if (!this.settings || typeof this.settings !== "object") return false;
+    if (!Boolean(this.settings.experimentalSdkEnabled)) return false;
+    return String(this.settings.transportMode || "").trim().toLowerCase() === "sdk";
+  }
+
   primary() {
-    // In Obsidian renderer runtime, SDK path can hit file:// import restrictions.
-    // Force compat transport for reliability.
+    if (this.isExperimentalSdkEnabled()) {
+      return this.sdk;
+    }
     return this.compat;
   }
 
   fallback() {
+    if (this.isExperimentalSdkEnabled()) return this.compat;
     return null;
   }
 
   async withTransport(actionName, fn) {
     const primary = this.primary();
+    const primaryMode = primary === this.sdk ? "sdk" : "compat";
     try {
       const out = await fn(primary);
-      this.logger(`action=${actionName} mode=compat ok`);
-      this.lastMode = "compat";
+      this.logger(`action=${actionName} mode=${primaryMode} ok`);
+      this.lastMode = primaryMode;
       this.lastError = "";
       return out;
     } catch (e1) {
       const fb = this.fallback();
       if (!fb) {
-        this.logger(`action=${actionName} mode=compat err=${e1 instanceof Error ? e1.message : String(e1)}`);
+        this.logger(`action=${actionName} mode=${primaryMode} err=${e1 instanceof Error ? e1.message : String(e1)}`);
         this.lastError = e1 instanceof Error ? e1.message : String(e1);
         throw e1;
       }
 
+      const fallbackMode = fb === this.sdk ? "sdk" : "compat";
       try {
         const out = await fn(fb);
-        this.lastMode = "compat";
+        this.lastMode = fallbackMode;
         this.lastError = "";
         return out;
       } catch (e2) {
-        this.lastError = `[${actionName}] SDK失败: ${e1 instanceof Error ? e1.message : String(e1)} | Compat失败: ${e2 instanceof Error ? e2.message : String(e2)}`;
+        this.lastError = [
+          `[${actionName}] ${primaryMode.toUpperCase()}失败: ${e1 instanceof Error ? e1.message : String(e1)}`,
+          `[${actionName}] ${fallbackMode.toUpperCase()}失败: ${e2 instanceof Error ? e2.message : String(e2)}`,
+        ].join(" | ");
         throw e2;
       }
     }
@@ -62,6 +75,18 @@ class OpenCodeClient {
   }
   listSessions() {
     return this.withTransport("listSessions", (t) => t.listSessions());
+  }
+  listSessionMessages(options = {}) {
+    return this.withTransport("listSessionMessages", (t) => {
+      if (typeof t.listSessionMessages === "function") return t.listSessionMessages(options);
+      if (typeof t.fetchSessionMessages === "function") {
+        return t.fetchSessionMessages(String(options.sessionId || ""), options).then((result) => {
+          if (result && Array.isArray(result.list)) return result.list;
+          return [];
+        });
+      }
+      throw new Error("当前传输层不支持会话消息列表读取。");
+    });
   }
   createSession(title) {
     return this.withTransport("createSession", (t) => t.createSession(title));

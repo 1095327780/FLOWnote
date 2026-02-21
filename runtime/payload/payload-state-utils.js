@@ -169,11 +169,23 @@ function chooseRicherResponse(primary, secondary) {
   const sTextLen = normalizedRenderableText(s.text || "").length;
   const pTerminal = hasTerminalPayload(p);
   const sTerminal = hasTerminalPayload(s);
+  const pIntermediate = isIntermediateToolCallPayload(p);
+  const sIntermediate = isIntermediateToolCallPayload(s);
 
   if (sTerminal && !pTerminal) return mergeAssistantPayload(secondary, primary);
   if (pTerminal && !sTerminal) return mergeAssistantPayload(primary, secondary);
+  if (pIntermediate && sTextLen > 1 && pTextLen <= 1) return mergeAssistantPayload(secondary, primary);
+  if (sIntermediate && pTextLen > 1 && sTextLen <= 1) return mergeAssistantPayload(primary, secondary);
   if (sTextLen > 0 && pTextLen === 0) return mergeAssistantPayload(secondary, primary);
   if (pTextLen > 0 && sTextLen === 0) return mergeAssistantPayload(primary, secondary);
+  if (pTerminal && sTerminal) {
+    const textGap = Math.abs(pTextLen - sTextLen);
+    const textGapThreshold = 24;
+    if (textGap >= textGapThreshold) {
+      if (sTextLen > pTextLen) return mergeAssistantPayload(secondary, primary);
+      if (pTextLen > sTextLen) return mergeAssistantPayload(primary, secondary);
+    }
+  }
 
   const pScore = responseRichnessScore(primary);
   const sScore = responseRichnessScore(secondary);
