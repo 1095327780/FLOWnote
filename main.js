@@ -3,18 +3,24 @@ const {
   Notice,
   Plugin,
 } = obsidianModule;
-const fs = require("fs");
-const path = require("path");
+
+const {
+  createModuleLoaderMethods,
+} = require("./runtime/plugin/module-loader-methods");
+const {
+  runtimeStateMethods,
+} = require("./runtime/plugin/runtime-state-methods");
+const {
+  modelCatalogMethods,
+} = require("./runtime/plugin/model-catalog-methods");
+const {
+  createBundledSkillsMethods,
+} = require("./runtime/plugin/bundled-skills-methods");
+const {
+  sessionBootstrapMethods,
+} = require("./runtime/plugin/session-bootstrap-methods");
 
 const DEFAULT_VIEW_TYPE = "opencode-assistant-view";
-
-function uniqueNonEmpty(items) {
-  return [...new Set(
-    (Array.isArray(items) ? items : [])
-      .map((item) => String(item || "").trim())
-      .filter(Boolean),
-  )];
-}
 
 class OpenCodeAssistantPlugin extends Plugin {
   constructor(app, manifest) {
@@ -22,92 +28,14 @@ class OpenCodeAssistantPlugin extends Plugin {
     this.__pluginFacadeMethodsLoaded = false;
   }
 
-  getPluginRootCandidatesForFacade() {
-    const manifestDir = this.manifest && this.manifest.dir ? String(this.manifest.dir) : "";
-    const manifestId = this.manifest && this.manifest.id ? String(this.manifest.id) : "opencode-assistant";
-    const configDir = this.app && this.app.vault && this.app.vault.configDir
-      ? String(this.app.vault.configDir)
-      : ".obsidian";
-
-    let vaultPath = "";
-    try {
-      vaultPath = this.getVaultPath();
-    } catch {
-      vaultPath = "";
-    }
-
-    return uniqueNonEmpty([
-      manifestDir,
-      manifestDir && vaultPath && !path.isAbsolute(manifestDir)
-        ? path.resolve(vaultPath, manifestDir)
-        : "",
-      vaultPath ? path.join(vaultPath, configDir, "plugins", manifestId) : "",
-      typeof __dirname === "string" ? __dirname : "",
-      typeof __dirname === "string" ? path.resolve(__dirname) : "",
-      typeof __dirname === "string" ? path.resolve(__dirname, "..") : "",
-    ]);
-  }
-
-  resolvePluginRootForFacade() {
-    const candidates = this.getPluginRootCandidatesForFacade();
-    for (const dir of candidates) {
-      if (!fs.existsSync(dir)) continue;
-      if (fs.existsSync(path.join(dir, "manifest.json"))) return dir;
-    }
-    return candidates[0] || "";
-  }
-
-  requirePluginRuntimeModule(relativePath) {
-    const rel = String(relativePath || "").replace(/^\/+/, "");
-    const roots = this.getPluginRootCandidatesForFacade();
-    const attempts = [];
-
-    for (const root of roots) {
-      const absPath = path.join(root, rel);
-      const candidates = [absPath, `${absPath}.js`];
-      for (const candidate of candidates) {
-        attempts.push(candidate);
-        if (!fs.existsSync(candidate)) continue;
-        return require(candidate);
-      }
-    }
-
-    try {
-      return require(`./${rel}`);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`无法加载模块 ${rel}\n尝试路径:\n${attempts.join("\n")}\n原因: ${detail}`);
-    }
-  }
-
   ensureFacadeMethodsLoaded() {
     if (this.__pluginFacadeMethodsLoaded) return;
 
-    const {
-      createModuleLoaderMethods,
-    } = this.requirePluginRuntimeModule("runtime/plugin/module-loader-methods");
-    const {
-      runtimeStateMethods,
-    } = this.requirePluginRuntimeModule("runtime/plugin/runtime-state-methods");
-    const {
-      modelCatalogMethods,
-    } = this.requirePluginRuntimeModule("runtime/plugin/model-catalog-methods");
-    const {
-      createBundledSkillsMethods,
-    } = this.requirePluginRuntimeModule("runtime/plugin/bundled-skills-methods");
-    const {
-      sessionBootstrapMethods,
-    } = this.requirePluginRuntimeModule("runtime/plugin/session-bootstrap-methods");
-
-    const pluginRootDir = this.resolvePluginRootForFacade();
     const moduleLoaderMethods = createModuleLoaderMethods({
-      pluginDirname: pluginRootDir,
       defaultViewType: DEFAULT_VIEW_TYPE,
-      obsidianModule,
-      pluginRequire: require,
     });
     const bundledSkillsMethods = createBundledSkillsMethods({
-      pluginDirname: pluginRootDir,
+      pluginDirname: __dirname,
     });
 
     Object.assign(

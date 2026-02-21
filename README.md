@@ -4,7 +4,7 @@
 
 - 生产运行时代码唯一来源：`runtime/`
 - `src/` 已移除，禁止重新引入历史代码树
-- `main.js` 作为插件入口，动态加载 `runtime/` 模块
+- `main.js` 作为插件入口，静态装配 `runtime/` 模块
 
 ## Repo Hygiene
 
@@ -51,5 +51,5 @@
 
 ## 开发说明
 
-当前运行时由 `main.js` 入口动态加载 `runtime/` 下的 CommonJS 模块。
+当前运行时由 `main.js` 入口静态装配 `runtime/` 下的 CommonJS 模块。
 发布构建不经过额外打包步骤，直接交付 `main.js + runtime/`。

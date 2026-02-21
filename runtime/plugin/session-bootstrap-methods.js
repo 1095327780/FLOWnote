@@ -1,3 +1,7 @@
+const {
+  extractAssistantPayloadFromEnvelope,
+} = require("../assistant-payload-utils");
+
 function normalizeTimestampMs(value) {
   const raw = Number(value || 0);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
@@ -224,15 +228,7 @@ const sessionBootstrapMethods = {
 
   normalizeRemoteSessionMessages(messages) {
     const list = Array.isArray(messages) ? messages : [];
-    let extractAssistantPayload = null;
-    try {
-      const payloadUtils = this.requireRuntimeModule("assistant-payload-utils");
-      if (payloadUtils && typeof payloadUtils.extractAssistantPayloadFromEnvelope === "function") {
-        extractAssistantPayload = payloadUtils.extractAssistantPayloadFromEnvelope;
-      }
-    } catch {
-      extractAssistantPayload = null;
-    }
+    const extractAssistantPayload = extractAssistantPayloadFromEnvelope;
 
     return list
       .map((item, index) => toLocalSessionMessage(item, index, extractAssistantPayload))
