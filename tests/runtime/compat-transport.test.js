@@ -674,6 +674,60 @@ test("sendMessage should fallback to sync recovery when authoritative response h
   assert.equal(result.messageId, "msg_recovered");
 });
 
+test("sendMessage should fallback to polling stream callbacks when event stream is unavailable", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+  const tokenUpdates = [];
+  let pollingFallbackCalled = 0;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_empty",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100, completed: 101 },
+          finish: "stop",
+        },
+        parts: [],
+      };
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => {
+    throw new Error("sse unavailable");
+  };
+  transport.streamAssistantFromPolling = async (_sessionId, _startedAt, _signal, handlers) => {
+    pollingFallbackCalled += 1;
+    if (handlers && typeof handlers.onToken === "function") {
+      handlers.onToken("po");
+      handlers.onToken("polling");
+    }
+    return {
+      messageId: "msg_poll",
+      text: "polling",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: true,
+    };
+  };
+  transport.trySyncMessageRecovery = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+    onToken: (text) => tokenUpdates.push(String(text || "")),
+  });
+
+  assert.equal(pollingFallbackCalled, 1);
+  assert.equal(result.text, "polling");
+  assert.equal(result.messageId, "msg_poll");
+  assert.equal(tokenUpdates.includes("po"), true);
+  assert.equal(tokenUpdates.includes("polling"), true);
+});
+
 test("sendMessage should reject response without completion signal", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;

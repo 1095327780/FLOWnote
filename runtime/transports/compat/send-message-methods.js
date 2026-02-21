@@ -57,7 +57,7 @@ function createSendMessageMethods(deps = {}) {
     if (this.settings.enableStreaming) {
       const linked = createLinkedAbortController(options.signal);
       const eventSignal = linked.controller.signal;
-      const eventStreamPromise = this.streamAssistantFromEvents(options.sessionId, startedAt, eventSignal, {
+      const streamHandlers = {
         onToken: options.onToken,
         onReasoning: options.onReasoning,
         onBlocks: options.onBlocks,
@@ -66,10 +66,27 @@ function createSendMessageMethods(deps = {}) {
         onQuestionResolved: options.onQuestionResolved,
         onPromptAppend: options.onPromptAppend,
         onToast: options.onToast,
-      }).catch((e) => {
-        this.log(`event stream unavailable: ${e instanceof Error ? e.message : String(e)}`);
-        return null;
-      });
+      };
+      const eventStreamPromise = this.streamAssistantFromEvents(options.sessionId, startedAt, eventSignal, streamHandlers)
+        .catch(async (e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          if (options.signal && options.signal.aborted) {
+            this.log(`event stream aborted by user: ${message}`);
+            return null;
+          }
+          this.log(`event stream unavailable: ${message}; fallback to polling stream`);
+          try {
+            return await this.streamAssistantFromPolling(
+              options.sessionId,
+              startedAt,
+              options.signal,
+              streamHandlers,
+            );
+          } catch (pollError) {
+            this.log(`polling stream fallback failed: ${pollError instanceof Error ? pollError.message : String(pollError)}`);
+            return null;
+          }
+        });
 
       try {
         if (isCommandRequest) {

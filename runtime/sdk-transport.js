@@ -420,6 +420,7 @@ class SdkTransport {
     let streamed = null;
     let directResponse = null;
     let usedRealStreaming = false;
+    let shouldEmitPollingUpdates = false;
 
     if (this.settings.enableStreaming) {
       usedRealStreaming = true;
@@ -469,6 +470,11 @@ class SdkTransport {
         linked.detach();
         linked.controller.abort();
       }
+      shouldEmitPollingUpdates = Boolean(
+        !streamed
+        || !hasTerminalPayload(streamed)
+        || !Boolean(streamed && streamed.completed),
+      );
     } else if (parsedCommand && resolvedCommand.use) {
       const commandRes = await client.session.command(
         {
@@ -526,7 +532,9 @@ class SdkTransport {
         startedAt,
         options.signal,
         preferredMessageId,
-        usedRealStreaming ? null : options,
+        usedRealStreaming
+          ? (shouldEmitPollingUpdates ? options : null)
+          : options,
       ).catch((e) => {
         this.log(`sdk poll fallback failed: ${e instanceof Error ? e.message : String(e)}`);
         return null;
