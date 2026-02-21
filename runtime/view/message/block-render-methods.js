@@ -119,10 +119,10 @@ function renderPatchPart(container, block, messagePending) {
   const hash = patchHash(block);
   const shortHash = hash ? hash.slice(0, 12) : "";
   const summaryText = files.length
-    ? `${files.length} 个文件${shortHash ? ` · ${shortHash}` : ""}`
+    ? `${files.length} 个变更文件${shortHash ? ` · ${shortHash}` : ""}`
     : shortHash
       ? `hash ${shortHash}`
-      : "文件改动";
+      : "变更文件";
 
   const details = container.createEl("details", { cls: "oc-tool-call oc-tool-patch" });
   details.addClass(`is-${status}`);
