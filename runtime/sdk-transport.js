@@ -239,33 +239,6 @@ class SdkTransport {
     return parseSlashCommand(prompt);
   }
 
-  async ensureAuth() {
-    if (this.settings.authMode !== "custom-api-key") return;
-    if (!this.settings.customApiKey.trim()) throw new Error("当前是自定义 API Key 模式，但 API Key 为空");
-
-    const providerId = this.settings.customProviderId.trim();
-    await this.setProviderApiKeyAuth({
-      providerID: providerId,
-      key: this.settings.customApiKey.trim(),
-    });
-
-    if (this.settings.customBaseUrl.trim()) {
-      const client = await this.ensureClient();
-      await client.config.update({
-        directory: this.vaultPath,
-        config: {
-          provider: {
-            [providerId]: {
-              options: {
-                baseURL: this.settings.customBaseUrl.trim(),
-              },
-            },
-          },
-        },
-      });
-    }
-  }
-
   async getSessionStatus(sessionId, signal) {
     try {
       const client = await this.ensureClient();
@@ -438,7 +411,6 @@ class SdkTransport {
   async sendMessage(options) {
     this.log(`sendMessage start ${JSON.stringify({ sessionId: options.sessionId, transport: "sdk" })}`);
     const client = await this.ensureClient();
-    await this.ensureAuth();
     const startedAt = Date.now();
     const model = this.parseModel();
     const commandModel = this.parseCommandModel();
@@ -667,7 +639,6 @@ class SdkTransport {
 
   async setDefaultModel(options) {
     const client = await this.ensureClient();
-    await this.ensureAuth();
 
     const modelID = String(options.model || "").trim();
     if (!modelID) return { ok: true, model: "" };

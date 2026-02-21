@@ -18,7 +18,6 @@ function createSendMessageMethods(deps = {}) {
       transport: "compat",
       streaming: Boolean(this.settings.enableStreaming),
     })}`);
-    await this.ensureAuth();
     const questionWatch = this.createQuestionWatch(options.sessionId, options.signal, {
       onQuestionRequest: options.onQuestionRequest,
       onQuestionResolved: options.onQuestionResolved,

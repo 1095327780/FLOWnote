@@ -52,7 +52,6 @@ function createQuestionPermissionMethods(deps = {}) {
   }
 
   async setDefaultModel(options) {
-    await this.ensureAuth();
     const modelID = String(options.model || "").trim();
     if (!modelID) return { ok: true, model: "" };
 

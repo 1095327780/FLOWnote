@@ -25,3 +25,16 @@ test("normalizeSettings should normalize invalid transport values to compat", ()
   });
   assert.equal(out.transportMode, "compat");
 });
+
+test("normalizeSettings should drop legacy plugin-side auth fields", () => {
+  const out = normalizeSettings({
+    authMode: "custom-api-key",
+    customProviderId: "openai",
+    customApiKey: "sk-test",
+    customBaseUrl: "https://example.com/v1",
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "authMode"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "customProviderId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "customApiKey"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "customBaseUrl"), false);
+});

@@ -348,34 +348,6 @@ function createRequestSessionMethods(deps = {}) {
     return findLatestAssistantMessage(messages, startedAt);
   }
 
-  async ensureAuth() {
-    if (this.settings.authMode !== "custom-api-key") return;
-    if (!this.settings.customApiKey.trim()) throw new Error("当前是自定义 API Key 模式，但 API Key 为空");
-
-    const providerId = this.settings.customProviderId.trim();
-    await this.setProviderApiKeyAuth({
-      providerID: providerId,
-      key: this.settings.customApiKey.trim(),
-    });
-
-    if (this.settings.customBaseUrl.trim()) {
-      await this.request(
-        "PATCH",
-        "/config",
-        {
-          provider: {
-            [providerId]: {
-              options: {
-                baseURL: this.settings.customBaseUrl.trim(),
-              },
-            },
-          },
-        },
-        { directory: this.vaultPath },
-      );
-    }
-  }
-
   async testConnection() {
     await this.request("GET", "/path", undefined, { directory: this.vaultPath });
     return { ok: true, mode: "compat" };

@@ -120,14 +120,6 @@ const modelCatalogMethods = {
       );
     }
 
-    const customProviderID = String(this.settings && this.settings.customProviderId ? this.settings.customProviderId : "")
-      .trim()
-      .toLowerCase();
-    if (customProviderID && this.settings && this.settings.authMode === "custom-api-key") {
-      if (!(out instanceof Set)) out = new Set();
-      out.add(customProviderID);
-    }
-
     return out;
   },
 

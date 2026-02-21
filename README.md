@@ -46,8 +46,8 @@
 
 ## 鉴权模式
 
-- `opencode-default`：使用 OpenCode 本机凭据/默认认证。
-- `custom-api-key`：使用自定义 Provider + API Key + 可选 Base URL。
+- 统一使用 OpenCode Provider 登录管理（OAuth / API Key）。
+- 插件不再保存 Provider/API Key 明文字段到插件设置。
 
 ## 开发说明
 
