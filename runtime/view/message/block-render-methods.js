@@ -20,6 +20,7 @@ const {
   summarizePatchChanges,
   patchChangeLabel,
   patchFileDisplayPath,
+  withInferredPatchActions,
   patchHash,
 } = blockUtilsInternal;
 
@@ -115,10 +116,11 @@ function renderToolPart(container, block, messagePending) {
   }
 }
 
-function renderPatchPart(container, block, messagePending) {
+function renderPatchPart(container, block, messagePending, message, blockIndex) {
   const status = this.resolveDisplayBlockStatus(block, messagePending);
   const detailText = String((block && block.detail) || "").trim();
-  const entries = extractPatchFileEntries(block, detailText);
+  const rawEntries = extractPatchFileEntries(block, detailText);
+  const entries = withInferredPatchActions(rawEntries, message, blockIndex);
   const hash = patchHash(block);
   const shortHash = hash ? hash.slice(0, 12) : "";
   const changeSummary = summarizePatchChanges(entries);
@@ -152,7 +154,8 @@ function renderPatchPart(container, block, messagePending) {
     entries.forEach((entry) => {
       const label = patchChangeLabel(entry && entry.action);
       const displayPath = patchFileDisplayPath(entry) || "(未提供路径)";
-      const text = `[${label}] ${displayPath}`;
+      const isInferred = Boolean(entry && entry.inferred);
+      const text = `[${label}${isInferred ? "(推断)" : ""}] ${displayPath}`;
       const item = list.createDiv({ cls: "oc-tool-file-item", text });
       item.setAttr("title", text);
       item.setAttr("data-change-type", String((entry && entry.action) || "unknown"));
@@ -209,7 +212,7 @@ function renderAssistantBlocks(row, message) {
   }
   container.toggleClass("is-empty", false);
 
-  blocks.forEach((block) => {
+  blocks.forEach((block, blockIndex) => {
     const type = String((block && block.type) || "").trim().toLowerCase();
     if (type === "reasoning") {
       this.renderReasoningPart(container, block, messagePending);
@@ -220,7 +223,7 @@ function renderAssistantBlocks(row, message) {
       return;
     }
     if (type === "patch") {
-      this.renderPatchPart(container, block, messagePending);
+      this.renderPatchPart(container, block, messagePending, message, blockIndex);
       return;
     }
 

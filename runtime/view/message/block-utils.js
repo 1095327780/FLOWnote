@@ -109,7 +109,7 @@ function patchChangeLabel(changeType) {
   if (normalized === "deleted") return "删除";
   if (normalized === "renamed") return "重命名";
   if (normalized === "copied") return "复制";
-  return "未知";
+  return "变更";
 }
 
 function normalizePatchPath(pathLike) {
@@ -420,10 +420,59 @@ function summarizePatchChanges(entries) {
   if (counter.deleted) parts.push(`删除${counter.deleted}`);
   if (counter.renamed) parts.push(`重命名${counter.renamed}`);
   if (counter.copied) parts.push(`复制${counter.copied}`);
-  if (counter.unknown) parts.push(`未知${counter.unknown}`);
+  if (counter.unknown) parts.push(`变更${counter.unknown}`);
 
   if (!parts.length) return `${list.length} 个变更文件`;
   return parts.join(" · ");
+}
+
+function inferPatchActionFromToolName(toolName) {
+  const name = String(toolName || "").trim().toLowerCase();
+  if (!name) return "";
+  if (/(^|[._-])(delete|remove|unlink|rm|trash)([._-]|$)/.test(name)) return "deleted";
+  if (/(^|[._-])(rename|move|mv)([._-]|$)/.test(name)) return "renamed";
+  if (/(^|[._-])(copy|cp)([._-]|$)/.test(name)) return "copied";
+  if (/(^|[._-])(create|touch|new)([._-]|$)/.test(name)) return "added";
+  if (/(^|[._-])(write|edit|update|append|replace|patch)([._-]|$)/.test(name)) return "modified";
+  return "";
+}
+
+function inferPatchActionFromMessage(message, patchBlockIndex) {
+  const blocks = Array.isArray(message && message.blocks) ? message.blocks : [];
+  const startIndex = Number.isFinite(patchBlockIndex) ? patchBlockIndex - 1 : blocks.length - 1;
+  for (let i = Math.min(startIndex, blocks.length - 1); i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (!block || typeof block !== "object") continue;
+    const type = String(block.type || "").trim().toLowerCase();
+    if (type !== "tool") continue;
+    const candidates = [
+      block.tool,
+      block.title,
+      block.summary,
+      block.raw && block.raw.tool,
+    ];
+    for (const candidate of candidates) {
+      const action = inferPatchActionFromToolName(candidate);
+      if (action) return action;
+    }
+  }
+  return "";
+}
+
+function withInferredPatchActions(entries, message, patchBlockIndex) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) return list;
+  const inferred = inferPatchActionFromMessage(message, patchBlockIndex);
+  if (!inferred) return list;
+
+  return list.map((entry) => {
+    const action = normalizePatchChangeType(entry && entry.action);
+    if (action !== "unknown") return entry;
+    const next = entry && typeof entry === "object" ? { ...entry } : {};
+    next.action = inferred;
+    next.inferred = true;
+    return next;
+  });
 }
 
 function extractPatchFiles(block, detailText = "") {
@@ -509,6 +558,9 @@ const blockUtilsInternal = {
   patchFileDisplayPath,
   extractPatchFileEntries,
   summarizePatchChanges,
+  inferPatchActionFromToolName,
+  inferPatchActionFromMessage,
+  withInferredPatchActions,
   extractPatchFiles,
   patchHash,
 };

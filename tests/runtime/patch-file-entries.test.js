@@ -8,6 +8,7 @@ const {
   extractPatchFileEntries,
   summarizePatchChanges,
   patchFileDisplayPath,
+  withInferredPatchActions,
 } = blockUtilsInternal;
 
 test("extractPatchFileEntries should classify structured patch entries", () => {
@@ -54,7 +55,7 @@ test("extractPatchFileEntries should classify string patch entries", () => {
     "renamed",
     "unknown",
   ]);
-  assert.equal(summarizePatchChanges(entries), "新增1 · 修改1 · 删除1 · 重命名1 · 未知1");
+  assert.equal(summarizePatchChanges(entries), "新增1 · 修改1 · 删除1 · 重命名1 · 变更1");
 });
 
 test("extractPatchFileEntries should merge rename from/to detail lines", () => {
@@ -85,4 +86,25 @@ test("toPartBlock should preserve structured patch file metadata and readable de
   assert.match(block.detail, /src\/new-file\.js/);
   assert.match(block.detail, /src\/old\.js -> src\/new\.js/);
   assert.equal(block.detail.includes("[object Object]"), false);
+});
+
+test("withInferredPatchActions should infer unknown patch actions from nearby tool blocks", () => {
+  const entries = [
+    { action: "unknown", path: "a.md" },
+    { action: "added", path: "b.md" },
+  ];
+  const message = {
+    blocks: [
+      { type: "tool", tool: "write" },
+      { type: "patch", raw: { files: ["a.md", "b.md"] } },
+    ],
+  };
+
+  const inferred = withInferredPatchActions(entries, message, 1);
+
+  assert.equal(inferred[0].action, "modified");
+  assert.equal(Boolean(inferred[0].inferred), true);
+  assert.equal(inferred[1].action, "added");
+  assert.equal(Boolean(inferred[1].inferred), false);
+  assert.equal(summarizePatchChanges(inferred), "新增1 · 修改1");
 });
