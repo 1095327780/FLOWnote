@@ -1056,25 +1056,103 @@ class CaptureModal extends Modal {
     });
 
     // --- Keyboard avoidance for mobile ---
-    // Use visualViewport to reposition modal above virtual keyboard.
-    // Wrapped in rAF to ensure the modal DOM is fully attached.
-    if (Platform.isMobile && typeof visualViewport !== "undefined") {
-      const vv = visualViewport;
+    // Obsidian API doesn't expose keyboard height directly.
+    // Use window.visualViewport when available, then fall back to resize/focus signals.
+    if (Platform.isMobile) {
       requestAnimationFrame(() => {
         const modalEl = contentEl.closest(".modal");
         if (!modalEl) return;
-        const onViewportChange = () => {
-          const kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-          modalEl.style.setProperty("bottom", kbHeight > 0 ? `${kbHeight}px` : "0", "important");
-          modalEl.style.setProperty("top", "auto", "important");
+
+        const vv = typeof window !== "undefined" && window.visualViewport
+          ? window.visualViewport
+          : null;
+        const ua = typeof navigator !== "undefined" ? String(navigator.userAgent || "") : "";
+        const isLikelyIOS = Boolean(
+          (Platform && (Platform.isIosApp || Platform.isIos))
+          || /iPad|iPhone|iPod/i.test(ua),
+        );
+
+        let rafId = 0;
+        let baselineBottom = 0;
+        const listeners = [];
+
+        const getViewportBottom = () => {
+          if (vv) return Number(vv.height || 0) + Number(vv.offsetTop || 0);
+          return Number(window.innerHeight || 0);
         };
-        vv.addEventListener("resize", onViewportChange);
-        vv.addEventListener("scroll", onViewportChange);
+
+        const applyKeyboardOffset = (keyboardHeight) => {
+          const offset = Math.max(0, Math.round(Number(keyboardHeight) || 0));
+          const inputFocused = typeof document !== "undefined" && document.activeElement === inputEl;
+
+          // iOS WebView on some versions may not report keyboard delta reliably.
+          // When focused, force a top-anchored compact layout so input stays visible.
+          if (isLikelyIOS && inputFocused) {
+            modalEl.style.setProperty("top", "max(8px, env(safe-area-inset-top, 0px))", "important");
+            modalEl.style.setProperty("bottom", "auto", "important");
+            modalEl.toggleClass("oc-capture-top-mode", true);
+            modalEl.toggleClass("oc-capture-kb-open", true);
+            contentEl.style.setProperty("--oc-capture-keyboard-offset", `${offset}px`);
+            return;
+          }
+
+          modalEl.toggleClass("oc-capture-top-mode", false);
+          modalEl.style.setProperty("bottom", offset > 0 ? `${offset}px` : "0", "important");
+          modalEl.style.setProperty("top", "auto", "important");
+          modalEl.toggleClass("oc-capture-kb-open", offset > 0);
+          contentEl.style.setProperty("--oc-capture-keyboard-offset", `${offset}px`);
+        };
+
+        const recalc = () => {
+          const currentBottom = getViewportBottom();
+          if (!baselineBottom || currentBottom > baselineBottom) baselineBottom = currentBottom;
+          const keyboardHeight = Math.max(0, baselineBottom - currentBottom);
+          applyKeyboardOffset(keyboardHeight);
+        };
+
+        const scheduleRecalc = (delay = 0) => {
+          if (rafId) cancelAnimationFrame(rafId);
+          if (delay > 0) {
+            window.setTimeout(() => {
+              rafId = requestAnimationFrame(recalc);
+            }, delay);
+            return;
+          }
+          rafId = requestAnimationFrame(recalc);
+        };
+
+        const bind = (target, eventName, handler, options) => {
+          target.addEventListener(eventName, handler, options);
+          listeners.push(() => target.removeEventListener(eventName, handler, options));
+        };
+
+        baselineBottom = getViewportBottom();
+        scheduleRecalc();
+        scheduleRecalc(80);
+        scheduleRecalc(180);
+
+        if (vv) {
+          bind(vv, "resize", () => scheduleRecalc());
+          bind(vv, "scroll", () => scheduleRecalc());
+        }
+        bind(window, "resize", () => {
+          // Orientation change / system UI changes may alter the baseline.
+          baselineBottom = Math.max(baselineBottom, getViewportBottom());
+          scheduleRecalc();
+        });
+        bind(inputEl, "focus", () => scheduleRecalc(50));
+        bind(inputEl, "blur", () => scheduleRecalc(120));
+        bind(document, "focusin", () => scheduleRecalc(30));
+        bind(document, "focusout", () => scheduleRecalc(120));
+
         this._vpCleanup = () => {
-          vv.removeEventListener("resize", onViewportChange);
-          vv.removeEventListener("scroll", onViewportChange);
+          if (rafId) cancelAnimationFrame(rafId);
+          for (const dispose of listeners) dispose();
           modalEl.style.removeProperty("bottom");
           modalEl.style.removeProperty("top");
+          modalEl.removeClass("oc-capture-kb-open");
+          modalEl.removeClass("oc-capture-top-mode");
+          contentEl.style.removeProperty("--oc-capture-keyboard-offset");
         };
       });
     }
@@ -1314,6 +1392,119 @@ class MobileSettingsTab extends PluginSettingTab {
  * Plugin class
  * ========================================================================= */
 
+function resolveFacadeModuleAbsolutePath(plugin, relativePath) {
+  let fsMod;
+  let pathMod;
+  try {
+    fsMod = require("fs");
+    pathMod = require("path");
+  } catch (_error) {
+    return "";
+  }
+
+  const candidates = [];
+  if (plugin && plugin.manifest && plugin.manifest.dir) {
+    candidates.push(String(plugin.manifest.dir));
+  }
+  const adapter = plugin && plugin.app && plugin.app.vault ? plugin.app.vault.adapter : null;
+  const byMethod = adapter && typeof adapter.getBasePath === "function" ? adapter.getBasePath() : "";
+  const byField = adapter && adapter.basePath ? adapter.basePath : "";
+  const basePath = byMethod || byField;
+  const configDir = plugin && plugin.app && plugin.app.vault && plugin.app.vault.configDir
+    ? String(plugin.app.vault.configDir)
+    : ".obsidian";
+  const pluginId = plugin && plugin.manifest && plugin.manifest.id
+    ? String(plugin.manifest.id)
+    : "flownote";
+  if (basePath) {
+    candidates.push(pathMod.join(basePath, configDir, "plugins", pluginId));
+  }
+  if (typeof __dirname === "string" && __dirname) {
+    candidates.push(__dirname);
+  }
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    const modulePath = pathMod.join(normalized, "runtime", `${String(relativePath || "").replace(/^\/+/, "")}.js`);
+    if (fsMod.existsSync(modulePath)) return modulePath;
+  }
+  return "";
+}
+
+function requireFacadeModule(plugin, relativePath) {
+  try {
+    switch (relativePath) {
+      case "plugin/module-loader-methods":
+        return require("./runtime/plugin/module-loader-methods");
+      case "plugin/runtime-state-methods":
+        return require("./runtime/plugin/runtime-state-methods");
+      case "plugin/model-catalog-methods":
+        return require("./runtime/plugin/model-catalog-methods");
+      case "plugin/bundled-skills-methods":
+        return require("./runtime/plugin/bundled-skills-methods");
+      case "plugin/session-bootstrap-methods":
+        return require("./runtime/plugin/session-bootstrap-methods");
+      default:
+        throw new Error(`unknown facade module: ${relativePath}`);
+    }
+  } catch (primaryError) {
+    const fallbackPath = resolveFacadeModuleAbsolutePath(plugin, relativePath);
+    if (fallbackPath) return requireFacadeModuleFromAbsolutePath(fallbackPath);
+    throw primaryError;
+  }
+}
+
+const OBSIDIAN_REQUIRE_SHIM_KEY = "__flownoteObsidianRequireShim";
+
+function ensureObsidianRequireShim() {
+  let moduleLoader = null;
+  try {
+    moduleLoader = require("module");
+  } catch (_error) {
+    return false;
+  }
+  if (!moduleLoader || typeof moduleLoader._load !== "function") return false;
+  if (moduleLoader[OBSIDIAN_REQUIRE_SHIM_KEY]) return true;
+
+  const originalLoad = moduleLoader._load;
+  const patchedLoad = function patchedLoad(request, parent, isMain) {
+    if (request === "obsidian") return obsidianModule;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  moduleLoader._load = patchedLoad;
+  moduleLoader[OBSIDIAN_REQUIRE_SHIM_KEY] = {
+    originalLoad,
+    patchedLoad,
+  };
+  return true;
+}
+
+function removeObsidianRequireShim() {
+  let moduleLoader = null;
+  try {
+    moduleLoader = require("module");
+  } catch (_error) {
+    return;
+  }
+  if (!moduleLoader || typeof moduleLoader._load !== "function") return;
+
+  const state = moduleLoader[OBSIDIAN_REQUIRE_SHIM_KEY];
+  if (!state || typeof state !== "object") return;
+  if (moduleLoader._load === state.patchedLoad && typeof state.originalLoad === "function") {
+    moduleLoader._load = state.originalLoad;
+  }
+  delete moduleLoader[OBSIDIAN_REQUIRE_SHIM_KEY];
+}
+
+function requireFacadeModuleFromAbsolutePath(modulePath) {
+  ensureObsidianRequireShim();
+  return require(modulePath);
+}
+
 class FLOWnoteAssistantPlugin extends Plugin {
   constructor(app, manifest) {
     super(app, manifest);
@@ -1325,19 +1516,19 @@ class FLOWnoteAssistantPlugin extends Plugin {
 
     const {
       createModuleLoaderMethods,
-    } = require("./runtime/plugin/module-loader-methods");
+    } = requireFacadeModule(this, "plugin/module-loader-methods");
     const {
       runtimeStateMethods,
-    } = require("./runtime/plugin/runtime-state-methods");
+    } = requireFacadeModule(this, "plugin/runtime-state-methods");
     const {
       modelCatalogMethods,
-    } = require("./runtime/plugin/model-catalog-methods");
+    } = requireFacadeModule(this, "plugin/model-catalog-methods");
     const {
       createBundledSkillsMethods,
-    } = require("./runtime/plugin/bundled-skills-methods");
+    } = requireFacadeModule(this, "plugin/bundled-skills-methods");
     const {
       sessionBootstrapMethods,
-    } = require("./runtime/plugin/session-bootstrap-methods");
+    } = requireFacadeModule(this, "plugin/session-bootstrap-methods");
 
     const moduleLoaderMethods = createModuleLoaderMethods({
       defaultViewType: DEFAULT_VIEW_TYPE,
@@ -1450,6 +1641,7 @@ class FLOWnoteAssistantPlugin extends Plugin {
     if (typeof this.getViewType === "function") {
       this.app.workspace.detachLeavesOfType(this.getViewType());
     }
+    removeObsidianRequireShim();
   }
 
   log(line) {

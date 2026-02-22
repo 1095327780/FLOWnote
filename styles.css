@@ -2397,3 +2397,22 @@ body.theme-dark .oc-surface {
   min-height: auto;
   width: auto;
 }
+
+/* iOS fallback: force top-anchored compact sheet when keyboard metrics are unreliable */
+.is-mobile .modal.oc-capture-top-mode {
+  top: max(8px, env(safe-area-inset-top, 0px)) !important;
+  bottom: auto !important;
+  max-height: min(62vh, 460px) !important;
+  height: auto !important;
+  border-radius: 16px !important;
+}
+
+.is-mobile .modal.oc-capture-top-mode .oc-capture-modal {
+  max-height: min(62vh, 460px);
+  overflow-y: auto;
+}
+
+.is-mobile .modal.oc-capture-top-mode .oc-capture-input {
+  min-height: 110px;
+  max-height: min(28vh, 240px);
+}
