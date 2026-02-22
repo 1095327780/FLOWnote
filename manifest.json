@@ -3,7 +3,7 @@
   "name": "FLOWnote",
   "version": "0.3.22",
   "minAppVersion": "1.5.0",
-  "description": "在 Obsidian 中使用 FLOWnote 进行聊天、会话、技能与诊断。",
+  "description": "Chat sessions, skills, diagnostics, and mobile quick capture.",
   "author": "阿浩learn",
   "isDesktopOnly": false
 }
