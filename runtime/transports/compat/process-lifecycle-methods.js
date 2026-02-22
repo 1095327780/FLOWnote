@@ -81,18 +81,18 @@ function createProcessLifecycleMethods(deps = {}) {
       try {
         this.process = spawn(launch.command, Array.isArray(launch.args) ? launch.args : [], launch.options || {});
       } catch (e) {
-        finish(new Error(`无法启动 OpenCode 服务 (${label}): ${e instanceof Error ? e.message : String(e)}`));
+        finish(new Error(`无法启动 FLOWnote 服务 (${label}): ${e instanceof Error ? e.message : String(e)}`));
         return;
       }
 
       const inspectOutput = (source, chunk) => {
         collectOutputTail(outputTail, source, chunk);
         const text = String(chunk || "");
-        const dataHomeMatch = text.match(/\[opencode-assistant\]\s+WSL XDG_DATA_HOME=([^\r\n]+)/);
+        const dataHomeMatch = text.match(/\[flownote\]\s+WSL XDG_DATA_HOME=([^\r\n]+)/);
         if (dataHomeMatch && dataHomeMatch[1]) {
           detectedWslDataHome = String(dataHomeMatch[1]).trim();
         }
-        const homeMatch = text.match(/\[opencode-assistant\]\s+WSL HOME=([^\r\n]+)/);
+        const homeMatch = text.match(/\[flownote\]\s+WSL HOME=([^\r\n]+)/);
         if (homeMatch && homeMatch[1]) {
           detectedWslUserHome = String(homeMatch[1]).trim();
         }
@@ -107,7 +107,7 @@ function createProcessLifecycleMethods(deps = {}) {
 
       onError = (err) => {
         const message = err instanceof Error ? err.message : String(err);
-        finish(new Error(appendOutputHint(`无法启动 OpenCode 服务 (${label}): ${message}`, outputTail)));
+        finish(new Error(appendOutputHint(`无法启动 FLOWnote 服务 (${label}): ${message}`, outputTail)));
       };
 
       onExit = (code) => {
@@ -120,7 +120,7 @@ function createProcessLifecycleMethods(deps = {}) {
           ? "（Windows 0xC0000005：进程崩溃，常见于架构不匹配或运行时异常）"
           : "";
         finish(new Error(appendOutputHint(
-          `OpenCode 服务提前退出 (${label})，退出码: ${String(code)}${armHint}`,
+          `FLOWnote 服务提前退出 (${label})，退出码: ${String(code)}${armHint}`,
           outputTail,
         )));
       };
@@ -133,7 +133,7 @@ function createProcessLifecycleMethods(deps = {}) {
       startupTimeout = setTimeout(() => {
         if (!this.baseUrl) {
           finish(new Error(appendOutputHint(
-            `等待 OpenCode 服务启动超时 (${label}, ${startupTimeoutMs}ms)`,
+            `等待 FLOWnote 服务启动超时 (${label}, ${startupTimeoutMs}ms)`,
             outputTail,
           )));
         }
@@ -150,7 +150,7 @@ function createProcessLifecycleMethods(deps = {}) {
 
     if (!attempts.length) {
       const hint = resolved && resolved.hint ? resolved.hint : "opencode 未找到";
-      throw new Error(`无法启动 OpenCode 服务: ${hint}`);
+      throw new Error(`无法启动 FLOWnote 服务: ${hint}`);
     }
 
     const failed = [];
@@ -168,7 +168,7 @@ function createProcessLifecycleMethods(deps = {}) {
     }
 
     const hint = resolved && resolved.hint ? `\n提示: ${resolved.hint}` : "";
-    throw new Error(`无法启动 OpenCode 服务，已尝试 ${attempts.length} 种方式:\n${failed.join("\n")}${hint}`);
+    throw new Error(`无法启动 FLOWnote 服务，已尝试 ${attempts.length} 种方式:\n${failed.join("\n")}${hint}`);
   }
 
   clearProcessState() {

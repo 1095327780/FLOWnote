@@ -431,7 +431,7 @@ function createPathWslMethods(deps = {}) {
     if (!SQLITE_LOCK_RE.test(detail)) return "";
     const dataHome = String(this.launchContext.wslHome || "").trim();
     const suffix = dataHome ? ` 当前 XDG_DATA_HOME=${dataHome}。` : "";
-    return `\n提示: 检测到 SQLite/文件锁问题。OpenCode 官方将数据库存放在 XDG_DATA_HOME（默认 ~/.local/share/opencode）。插件已改为独立 XDG_DATA_HOME，以避免与其他 OpenCode 进程竞争同一个数据库。${suffix}`;
+    return `\n提示: 检测到 SQLite/文件锁问题。FLOWnote 官方将数据库存放在 XDG_DATA_HOME（默认 ~/.local/share/opencode）。插件已改为独立 XDG_DATA_HOME，以避免与其他 FLOWnote 进程竞争同一个数据库。${suffix}`;
   }
 
   buildWslServeCommand(_runtimeHome) {
@@ -458,7 +458,7 @@ function createPathWslMethods(deps = {}) {
       "  echo \"opencode not found in WSL PATH or common install dirs\" 1>&2;",
       "  exit 127;",
       "fi;",
-      "echo \"[opencode-assistant] WSL HOME=$HOME\" 1>&2;",
+      "echo \"[FLOWnote] WSL HOME=$HOME\" 1>&2;",
       `XDG_DATA_HOME_DIR=${dataHomeExpr};`,
       `XDG_CONFIG_HOME_DIR="$HOME/${WSL_XDG_CONFIG_DIR}";`,
       `XDG_STATE_HOME_DIR="$HOME/${WSL_XDG_STATE_DIR}";`,
@@ -471,8 +471,8 @@ function createPathWslMethods(deps = {}) {
       "  cp -R \"$SRC_DATA_DIR\"/. \"$TARGET_DATA_DIR\"/ >/dev/null 2>&1 || true;",
       "  find \"$TARGET_DATA_DIR\" -type f \\( -name \"*.lock\" -o -name \"*.wal\" -o -name \"*.shm\" \\) -delete >/dev/null 2>&1 || true;",
       "fi;",
-      "echo \"[opencode-assistant] WSL XDG_DATA_HOME=$XDG_DATA_HOME_DIR\" 1>&2;",
-      "echo \"[opencode-assistant] WSL XDG_CONFIG_HOME=$XDG_CONFIG_HOME_DIR\" 1>&2;",
+      "echo \"[FLOWnote] WSL XDG_DATA_HOME=$XDG_DATA_HOME_DIR\" 1>&2;",
+      "echo \"[FLOWnote] WSL XDG_CONFIG_HOME=$XDG_CONFIG_HOME_DIR\" 1>&2;",
       `exec env XDG_DATA_HOME="$XDG_DATA_HOME_DIR" XDG_CONFIG_HOME="$XDG_CONFIG_HOME_DIR" XDG_STATE_HOME="$XDG_STATE_HOME_DIR" XDG_CACHE_HOME="$XDG_CACHE_HOME_DIR" "$OPENCODE_BIN" ${args}`,
     ].join(" ");
   }

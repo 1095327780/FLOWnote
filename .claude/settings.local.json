@@ -3,7 +3,30 @@
     "allow": [
       "Bash(grep -r \"Platform\\\\.isMobile\\\\|Platform\\\\.isDesktop\\\\|isMobile\\\\|isDesktop\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/runtime --include=\"*.js\" 2>/dev/null | head -20)",
       "Bash(grep -r \"process\\\\.platform\\\\|win32\\\\|darwin\\\\|linux\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/runtime --include=\"*.js\" 2>/dev/null | head -30)",
-      "Bash(find /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant -name \"manifest.json\" -o -name \"package.json\" | xargs cat 2>/dev/null | head -50)"
+      "Bash(find /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant -name \"manifest.json\" -o -name \"package.json\" | xargs cat 2>/dev/null | head -50)",
+      "Bash(tree -L 3 /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant -I 'node_modules|.git|data.json' 2>/dev/null || find /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant -type d -not -path '*/\\\\.*' | sort | head -40)",
+      "mcp__mcp-sequential-thinking__sequentialthinking",
+      "Bash(node -c /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/main.js 2>&1)",
+      "Bash(node -c /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/runtime/settings-utils.js && node -c /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/runtime/settings/basic-settings-section-methods.js && echo \"All syntax OK\")",
+      "WebSearch",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "WebFetch(domain:forum.obsidian.md)",
+      "WebFetch(domain:docs.obsidian.md)",
+      "Bash(node --check /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/main.js)",
+      "Bash(md5 /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/main.js && wc -l /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/main.js && head -20 /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/main.js)",
+      "Bash(grep -n \"mobile-capture-methods\\\\|mobileCaptureMethodsMixin\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/main.js; echo \"Exit code: $?\")",
+      "Bash(find /Users/shanghao/Desktop/FLOWnote/.opencode/skills -name \"*.md\" 2>/dev/null | head -20)",
+      "Bash(find /Users/shanghao/Desktop/FLOWnote/.opencode/skills -name \"*.md\" 2>/dev/null | xargs grep -l \"capture\\\\|URL\\\\|http\" 2>/dev/null | head -10)",
+      "Bash(grep -r \"visualViewport\\\\|keyboard.*event\\\\|resize.*keyboard\\\\|window.innerHeight\\\\|keyboard-inset\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins --include=\"*.js\" --include=\"*.ts\" 2>/dev/null | head -30)",
+      "Bash(grep -r \"Modal\\\\|modal\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/*/main.js 2>/dev/null | grep -i \"class\\\\|extend\" | head -10)",
+      "Bash(grep -r \"Platform.isMobile\\\\|isMobile\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/*/main.js 2>/dev/null | grep -v \"^Binary\" | head -20)",
+      "Bash(grep -r \"\\\\.modal\\\\|keyboard\\\\|env\\(\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/*/styles.css 2>/dev/null)",
+      "Bash(find /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins -name \"*.d.ts\" -type f 2>/dev/null | head -20)",
+      "Bash(grep -r \"keyboard\\\\|onKeyboard\\\\|keyboardHeight\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins -type f 2>/dev/null | grep -v \"^Binary\" | head -20)",
+      "Bash(grep -A 20 \"class.*Modal.*extends\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/calendar/main.js 2>/dev/null | head -30)",
+      "Bash(grep -r \"addEventListener.*resize\\\\|addEventListener.*keydown\\\\|visualViewport\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins -type f -l 2>/dev/null)",
+      "Bash(grep -n \"env\\(safe-area\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/*/styles.css 2>/dev/null)"
     ]
   },
   "enabledMcpjsonServers": [

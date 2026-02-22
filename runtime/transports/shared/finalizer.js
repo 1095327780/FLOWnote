@@ -271,7 +271,7 @@ async function ensureRenderablePayload(options) {
   const statusText = formatSessionStatusText(status);
   return {
     ...payload,
-    text: `(无文本返回：session.status=${statusText}。可能是模型仍在排队/执行，或当前模型不可用；请在 OpenCode 诊断中查看状态详情。)`,
+    text: `(无文本返回：session.status=${statusText}。可能是模型仍在排队/执行，或当前模型不可用；请在 FLOWnote 诊断中查看状态详情。)`,
   };
 }
 

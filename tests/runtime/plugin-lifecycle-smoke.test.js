@@ -83,14 +83,14 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
       },
     };
     const manifest = {
-      id: "opencode-assistant",
+      id: "flownote",
       dir: process.cwd(),
       version: "0.3.21",
     };
 
     const plugin = new fixture.PluginClass(app, manifest);
     plugin.ensureFacadeMethodsLoaded = () => {};
-    plugin.getViewType = () => "opencode-assistant-view";
+    plugin.getViewType = () => "flownote-view";
     plugin.ensureRuntimeModules = () => ({
       SessionStore: class {
         constructor() {}
@@ -98,7 +98,7 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
       SkillService: class {
         constructor() {}
       },
-      OpenCodeClient: class {
+      FLOWnoteClient: class {
         constructor() {}
         async stop() {
           clientStopped += 1;
@@ -107,10 +107,10 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
       DiagnosticsService: class {
         constructor() {}
       },
-      OpenCodeAssistantView: class {
+      FLOWnoteAssistantView: class {
         constructor() {}
       },
-      OpenCodeSettingsTab: class {
+      FLOWnoteSettingsTab: class {
         constructor() {}
       },
       SdkTransport: class {},
@@ -137,7 +137,7 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
     await plugin.onload();
     await plugin.onunload();
 
-    assert.equal(detachType, "opencode-assistant-view");
+    assert.equal(detachType, "flownote-view");
     assert.equal(clientStopped, 1);
     assert.equal(fixture.noticeMessages.length, 0);
   } finally {

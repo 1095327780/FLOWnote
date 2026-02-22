@@ -194,7 +194,7 @@ function createSendMessageMethods(deps = {}) {
       this.log(line);
       try {
         if (typeof console !== "undefined" && typeof console.error === "function") {
-          console.error("[opencode-assistant]", line);
+          console.error("[FLOWnote]", line);
         }
       } catch {
       }

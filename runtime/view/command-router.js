@@ -209,8 +209,8 @@ async function applyModelSelection(modelID, options = {}) {
       return `已切换模型：${normalized}`;
     }
 
-    if (!options.silentNotice) new Notice("已恢复默认模型（由 OpenCode 自动选择）");
-    return "已恢复默认模型（由 OpenCode 自动选择）";
+    if (!options.silentNotice) new Notice("已恢复默认模型（由 FLOWnote 自动选择）");
+    return "已恢复默认模型（由 FLOWnote 自动选择）";
   } catch (e) {
     this.selectedModel = previous;
     this.plugin.settings.defaultModel = previousSetting;

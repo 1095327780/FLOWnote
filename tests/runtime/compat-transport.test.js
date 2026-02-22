@@ -25,13 +25,13 @@ test("normalizeDirectoryForService should migrate legacy wsl workspace directory
     directory: "/mnt/c/Users/me/Desktop/FLOWnote",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-home",
+    wslHome: "/home/me/.flownote-home",
   };
   transport.resolveWslDirectory = () => "/home/me/.opencode-runtime/workspace";
-  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.flownote-workspace";
 
   const normalized = transport.normalizeDirectoryForService("Y:\\Desktop\\FLOWnote");
-  assert.equal(normalized, "/home/me/.opencode-assistant-workspace");
+  assert.equal(normalized, "/home/me/.flownote-workspace");
 });
 
 test("normalizeDirectoryForService should keep non-legacy wsl directory", () => {
@@ -41,7 +41,7 @@ test("normalizeDirectoryForService should keep non-legacy wsl directory", () => 
     directory: "/mnt/c/Users/me/Desktop/FLOWnote",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-home",
+    wslHome: "/home/me/.flownote-home",
   };
   transport.resolveWslDirectory = () => "/home/me/projects/FLOWnote";
 
@@ -57,11 +57,11 @@ test("normalizeDirectoryForService should keep mapped /mnt path when mount is ac
     directory: "/mnt/c/Users/me/Desktop/FLOWnote",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-home",
+    wslHome: "/home/me/.flownote-home",
   };
   transport.resolveWslDirectory = () => "/mnt/c/Users/me/Desktop/FLOWnote";
   transport.probeWslDirectory = () => true;
-  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.flownote-workspace";
   transport.ensureWslFallbackWorkspaceMirror = () => {
     mirrored = true;
   };
@@ -79,20 +79,20 @@ test("normalizeDirectoryForService should fallback when mapped /mnt path is inac
     directory: "/mnt/y/Desktop/FLOWnote",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-home",
+    wslHome: "/home/me/.flownote-home",
   };
   transport.resolveWslDirectory = () => "/mnt/y/Desktop/FLOWnote";
   transport.probeWslDirectory = () => false;
-  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.flownote-workspace";
   transport.ensureWslFallbackWorkspaceMirror = (raw, fallback) => {
     mirrorArgs = { raw, fallback };
   };
 
   const normalized = transport.normalizeDirectoryForService("Y:\\Desktop\\FLOWnote");
-  assert.equal(normalized, "/home/me/.opencode-assistant-workspace");
+  assert.equal(normalized, "/home/me/.flownote-workspace");
   assert.deepEqual(mirrorArgs, {
     raw: "Y:\\Desktop\\FLOWnote",
-    fallback: "/home/me/.opencode-assistant-workspace",
+    fallback: "/home/me/.flownote-workspace",
   });
 });
 
@@ -123,7 +123,7 @@ test("buildWslServeCommand should pin xdg paths in wsl", () => {
   const script = transport.buildWslServeCommand("");
   assert.match(script, /XDG_DATA_HOME/);
   assert.match(script, /XDG_CONFIG_HOME/);
-  assert.match(script, /\.opencode-assistant-data/);
+  assert.match(script, /\.flownote-data/);
   assert.match(script, /SRC_DATA_DIR/);
   assert.match(script, /TARGET_DATA_DIR/);
   assert.match(script, /cp -R/);
@@ -134,9 +134,9 @@ test("buildWslServeCommand should pin xdg paths in wsl", () => {
 
 test("buildWslServeCommand should honor overridden WSL data home", () => {
   const transport = createTransport();
-  transport.wslDataHomeOverride = "/home/me/.opencode-assistant-data-custom";
+  transport.wslDataHomeOverride = "/home/me/.flownote-data-custom";
   const script = transport.buildWslServeCommand("");
-  assert.match(script, /XDG_DATA_HOME_DIR='\/home\/me\/\.opencode-assistant-data-custom'/);
+  assert.match(script, /XDG_DATA_HOME_DIR='\/home\/me\/\.flownote-data-custom'/);
 });
 
 test("buildLaunchAttempts should run node script via node runtime", () => {
@@ -175,17 +175,17 @@ test("buildEventStreamUrlCandidates should include legacy and global endpoints",
   const transport = createTransport();
   const urls = transport.buildEventStreamUrlCandidates(
     "http://127.0.0.1:38080",
-    "/home/me/.opencode-assistant-workspace",
+    "/home/me/.flownote-workspace",
   );
 
   assert.deepEqual(urls, [
     {
       path: "/event",
-      url: "http://127.0.0.1:38080/event?directory=%2Fhome%2Fme%2F.opencode-assistant-workspace",
+      url: "http://127.0.0.1:38080/event?directory=%2Fhome%2Fme%2F.flownote-workspace",
     },
     {
       path: "/global/event",
-      url: "http://127.0.0.1:38080/global/event?directory=%2Fhome%2Fme%2F.opencode-assistant-workspace",
+      url: "http://127.0.0.1:38080/global/event?directory=%2Fhome%2Fme%2F.flownote-workspace",
     },
   ]);
 });
@@ -415,9 +415,9 @@ test("createSession should fallback directories in wsl mode when primary respons
   const transport = createTransport();
   transport.launchContext = {
     mode: "wsl",
-    directory: "/home/me/.opencode-assistant-workspace",
+    directory: "/home/me/.flownote-workspace",
   };
-  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.flownote-workspace";
   transport.resolveWslDirectory = () => "/home/me/projects/FLOWnote";
   transport.buildWslDirectoryCandidates = () => ["/home/me/projects/FLOWnote"];
 
@@ -429,7 +429,7 @@ test("createSession should fallback directories in wsl mode when primary respons
     const directory = String((query && query.directory) || "");
     attemptedDirectories.push(directory);
     if (directory === "/vault") return {};
-    if (directory === "/home/me/.opencode-assistant-workspace") return { sessionId: "ses_wsl_ok", title: "wsl" };
+    if (directory === "/home/me/.flownote-workspace") return { sessionId: "ses_wsl_ok", title: "wsl" };
     return {};
   };
 
@@ -536,22 +536,22 @@ test("fetchSessionMessages should fallback directory in wsl mode and cache sessi
   const transport = createTransport();
   transport.launchContext = {
     mode: "wsl",
-    directory: "/home/me/.opencode-assistant-workspace",
+    directory: "/home/me/.flownote-workspace",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-home",
+    wslHome: "/home/me/.flownote-home",
     wslUserHome: "/home/me",
   };
-  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.flownote-workspace";
   transport.resolveWslDirectory = (value) => String(value || "");
-  transport.buildWslDirectoryCandidates = () => ["/home/me/.opencode-assistant-workspace"];
+  transport.buildWslDirectoryCandidates = () => ["/home/me/.flownote-workspace"];
 
   transport.request = async (_method, endpoint, _body, query) => {
     if (endpoint !== "/session/ses_1/message") throw new Error(`unexpected endpoint: ${endpoint}`);
     if (query && query.directory === "/vault") {
       return { messages: [] };
     }
-    if (query && query.directory === "/home/me/.opencode-assistant-workspace") {
+    if (query && query.directory === "/home/me/.flownote-workspace") {
       return {
         messages: [
           {
@@ -572,17 +572,17 @@ test("fetchSessionMessages should fallback directory in wsl mode and cache sessi
   assert.equal(fetched.strategy, "limited-directory-fallback");
   assert.equal(Array.isArray(fetched.list), true);
   assert.equal(fetched.list.length, 1);
-  assert.equal(transport.getSessionScopedDirectory("ses_1"), "/home/me/.opencode-assistant-workspace");
+  assert.equal(transport.getSessionScopedDirectory("ses_1"), "/home/me/.flownote-workspace");
 });
 
 test("sendMessage should use session directory hint for history session", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = false;
-  transport.rememberSessionDirectoryHint("ses_1", "/home/me/.opencode-assistant-workspace");
+  transport.rememberSessionDirectoryHint("ses_1", "/home/me/.flownote-workspace");
 
   transport.request = async (method, endpoint, _body, query) => {
     if (method === "POST" && endpoint === "/session/ses_1/message") {
-      assert.equal(query && query.directory, "/home/me/.opencode-assistant-workspace");
+      assert.equal(query && query.directory, "/home/me/.flownote-workspace");
       return {
         info: {
           id: "a_1",
@@ -640,20 +640,20 @@ test("hasPendingQuestionsForSession should fallback directory in wsl mode", asyn
   const transport = createTransport();
   transport.launchContext = {
     mode: "wsl",
-    directory: "/home/me/.opencode-assistant-workspace",
+    directory: "/home/me/.flownote-workspace",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-home",
+    wslHome: "/home/me/.flownote-home",
     wslUserHome: "/home/me",
   };
-  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.flownote-workspace";
   transport.resolveWslDirectory = (value) => String(value || "");
-  transport.buildWslDirectoryCandidates = () => ["/home/me/.opencode-assistant-workspace"];
+  transport.buildWslDirectoryCandidates = () => ["/home/me/.flownote-workspace"];
 
   transport.request = async (method, endpoint, _body, query) => {
     if (method === "GET" && endpoint === "/question") {
       if (query && query.directory === "/vault") return [];
-      if (query && query.directory === "/home/me/.opencode-assistant-workspace") {
+      if (query && query.directory === "/home/me/.flownote-workspace") {
         return [{ id: "que_1", sessionID: "ses_1", questions: [{ id: "q1" }] }];
       }
       return [];
@@ -663,7 +663,7 @@ test("hasPendingQuestionsForSession should fallback directory in wsl mode", asyn
 
   const hasPending = await transport.hasPendingQuestionsForSession("ses_1");
   assert.equal(hasPending, true);
-  assert.equal(transport.getSessionScopedDirectory("ses_1"), "/home/me/.opencode-assistant-workspace");
+  assert.equal(transport.getSessionScopedDirectory("ses_1"), "/home/me/.flownote-workspace");
 });
 
 test("trySyncMessageRecovery should reuse placeholder parent message id", async () => {
@@ -972,7 +972,7 @@ test("sendMessage should recover from request timeout when streaming payload is 
 
   transport.request = async (method, endpoint) => {
     if (method === "POST" && endpoint === "/session/ses_1/message") {
-      throw new Error("OpenCode 连接失败: 请求超时 (120000ms)");
+      throw new Error("FLOWnote 连接失败: 请求超时 (120000ms)");
     }
     throw new Error(`unexpected request: ${method} ${endpoint}`);
   };
@@ -1374,17 +1374,17 @@ test("useWslDataHomeFallback should allocate isolated data home in WSL mode", ()
   const transport = createTransport();
   transport.launchContext = {
     mode: "wsl",
-    directory: "/home/me/.opencode-assistant-workspace",
+    directory: "/home/me/.flownote-workspace",
     label: "wsl(sh)",
     distro: "Ubuntu",
-    wslHome: "/home/me/.opencode-assistant-data",
+    wslHome: "/home/me/.flownote-data",
     wslUserHome: "/home/me",
   };
   transport.getWslHomeDirectory = () => "/home/me";
 
   const changed = transport.useWslDataHomeFallback();
   assert.equal(changed, true);
-  assert.match(transport.wslDataHomeOverride, /^\/home\/me\/\.opencode-assistant-data-/);
+  assert.match(transport.wslDataHomeOverride, /^\/home\/me\/\.flownote-data-/);
 });
 
 test("useWslDataHomeFallback should no-op outside WSL mode", () => {

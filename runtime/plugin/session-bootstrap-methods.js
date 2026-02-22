@@ -195,7 +195,7 @@ const sessionBootstrapMethods = {
     const vaultPath = this.getVaultPath();
     const syncResult = this.syncBundledSkills(vaultPath, { force: true });
     console.log(
-      `[opencode-assistant] bundled skills reload: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
+      `[FLOWnote] bundled skills reload: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
       `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
     );
     if (syncResult.errors.length) this.log(`bundled skills sync: ${syncResult.errors.join("; ")}`);
@@ -220,7 +220,7 @@ const sessionBootstrapMethods = {
       || "",
     ).trim();
     if (!sessionId) {
-      throw new Error("OpenCode 创建会话失败：返回数据缺少会话 ID");
+      throw new Error("FLOWnote 创建会话失败：返回数据缺少会话 ID");
     }
     const session = {
       id: sessionId,
@@ -355,7 +355,7 @@ const sessionBootstrapMethods = {
     const syncResult = this.syncBundledSkills(vaultPath, { force: Boolean(options.force) });
     if (!syncResult.errors.length && !syncResult.skipped) {
       console.log(
-        `[opencode-assistant] bundled skills bootstrap: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
+        `[FLOWnote] bundled skills bootstrap: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
         `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
       );
     }

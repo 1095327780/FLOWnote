@@ -273,7 +273,7 @@ async function runSendPrompt(view, userText, options = {}) {
 
   view.currentAbort = new AbortController();
   view.setBusy(true);
-  view.setRuntimeStatus("正在等待 OpenCode 响应…", "working");
+  view.setRuntimeStatus("正在等待 FLOWnote 响应…", "working");
   let shouldRerenderModelPicker = false;
 
   try {

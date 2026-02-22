@@ -69,7 +69,7 @@ class SdkTransport {
 
     if (!mod || typeof mod.createOpencodeClient !== "function") {
       const details = importErrors.length ? `；${importErrors.join(" | ")}` : "";
-      throw new Error(`OpenCode SDK(v2) 加载失败：createOpencodeClient 不可用${details}`);
+      throw new Error(`FLOWnote SDK(v2) 加载失败：createOpencodeClient 不可用${details}`);
     }
 
     this.client = mod.createOpencodeClient({

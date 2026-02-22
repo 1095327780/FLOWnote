@@ -1,10 +1,72 @@
 const { Setting, Notice } = require("obsidian");
+const {
+  LINK_RESOLVER_DEFAULTS,
+  normalizeLinkResolver,
+  normalizeResolverProviderId,
+} = require("../settings-utils");
+
+const LINK_RESOLVER_PROVIDER_PRESETS = {
+  tianapi: {
+    id: "tianapi",
+    name: "TianAPI",
+    keyLabel: "TianAPI Key",
+    keyPlaceholder: "tianapi key",
+    keyUrl: "https://www.tianapi.com/apiview/66",
+    docsUrl: "https://www.tianapi.com/apiview/66",
+    hint: "适合基础网页正文抓取；动态页面或强反爬页面可能失败。",
+  },
+  showapi: {
+    id: "showapi",
+    name: "ShowAPI（万维易源）",
+    keyLabel: "ShowAPI AppKey",
+    keyPlaceholder: "showapi appKey",
+    keyUrl: "https://www.showapi.com/apiGateway/view/3262/1",
+    docsUrl: "https://www.showapi.com/apiGateway/view/3262/1",
+    hint: "按调用计费，部分套餐有免费额度；适合作为低门槛选项。",
+  },
+  gugudata: {
+    id: "gugudata",
+    name: "咕咕数据",
+    keyLabel: "咕咕数据 AppKey",
+    keyPlaceholder: "gugudata appkey",
+    keyUrl: "https://www.gugudata.com/api/details/url2markdown",
+    docsUrl: "https://www.gugudata.com/api/details/url2markdown",
+    hint: "输出 Markdown 质量较稳定；官方建议控制请求频率。",
+  },
+};
+
+function getResolverProviderPreset(providerId) {
+  return LINK_RESOLVER_PROVIDER_PRESETS[normalizeResolverProviderId(providerId)]
+    || LINK_RESOLVER_PROVIDER_PRESETS.tianapi;
+}
+
+function getResolverProviderKey(linkResolver, providerId) {
+  if (providerId === "tianapi") return String(linkResolver.tianapiKey || "").trim();
+  if (providerId === "showapi") return String(linkResolver.showapiAppKey || "").trim();
+  if (providerId === "gugudata") return String(linkResolver.gugudataAppKey || "").trim();
+  return "";
+}
+
+function setResolverProviderKey(linkResolver, providerId, nextValue) {
+  const value = String(nextValue || "").trim();
+  if (providerId === "tianapi") {
+    linkResolver.tianapiKey = value;
+    return;
+  }
+  if (providerId === "showapi") {
+    linkResolver.showapiAppKey = value;
+    return;
+  }
+  if (providerId === "gugudata") {
+    linkResolver.gugudataAppKey = value;
+  }
+}
 
 class BasicSettingsSectionMethods {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "OpenCode Assistant 设置" });
+    containerEl.createEl("h2", { text: "FLOWnote 设置" });
     containerEl.createEl("p", {
       text: "常用情况下只需要确认连接状态和 Provider 登录。其余高级项一般保持默认即可。",
     });
@@ -13,7 +75,7 @@ class BasicSettingsSectionMethods {
     const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
     const launchStrategyForUi = !isWindows && launchStrategyValue === "wsl" ? "auto" : launchStrategyValue;
     new Setting(containerEl)
-      .setName("OpenCode CLI 路径（可选）")
+      .setName("FLOWnote CLI 路径（可选）")
       .setDesc("通常留空。插件会自动探测。Windows 本机请优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd）；Windows + WSL 可填 wsl、wsl.exe 或 wsl:发行版名（例如 wsl:Ubuntu）。")
       .addText((text) => {
         text
@@ -151,7 +213,7 @@ class BasicSettingsSectionMethods {
 
     new Setting(containerEl)
       .setName("连接诊断")
-      .setDesc("检测 OpenCode 可执行文件与连接状态。")
+      .setDesc("检测 FLOWnote 可执行文件与连接状态。")
       .addButton((b) => {
         b.setButtonText("运行诊断").onClick(async () => {
           b.setDisabled(true);
@@ -200,6 +262,242 @@ class BasicSettingsSectionMethods {
         });
     }
 
+    // --- Mobile Capture Settings (visible on all platforms for pre-configuration) ---
+    this.renderMobileCaptureSection(containerEl);
+  }
+
+  renderMobileCaptureSection(containerEl) {
+    let PROVIDER_PRESETS;
+    try {
+      PROVIDER_PRESETS = require("../mobile/mobile-ai-service").PROVIDER_PRESETS;
+    } catch (_e) {
+      return; // mobile module not available
+    }
+
+    containerEl.createEl("h3", { text: "移动端快速捕获" });
+    containerEl.createEl("p", {
+      text: "在桌面端预先配置移动端捕获设置。同步到移动端后即可使用。",
+      cls: "setting-item-description",
+    });
+
+    const mc = this.plugin.settings.mobileCapture;
+    mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
+    const lr = mc.linkResolver;
+    const resolverProvider = getResolverProviderPreset(lr.provider);
+
+    new Setting(containerEl)
+      .setName("AI 提供商")
+      .setDesc("选择预设提供商或自定义。")
+      .addDropdown((d) => {
+        for (const [id, preset] of Object.entries(PROVIDER_PRESETS)) {
+          d.addOption(id, preset.name);
+        }
+        d.setValue(mc.provider).onChange(async (v) => {
+          mc.provider = v;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("API Key")
+      .setDesc("留空则跳过 AI 清理，直接记录原文。")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("sk-...")
+          .setValue(mc.apiKey)
+          .onChange(async (v) => {
+            mc.apiKey = v.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    const preset = PROVIDER_PRESETS[mc.provider] || PROVIDER_PRESETS.deepseek;
+
+    new Setting(containerEl)
+      .setName("Base URL（可选）")
+      .setDesc(`留空使用预设: ${preset.baseUrl || "(无)"}`)
+      .addText((text) => {
+        text
+          .setPlaceholder(preset.baseUrl || "https://api.example.com")
+          .setValue(mc.baseUrl)
+          .onChange(async (v) => {
+            mc.baseUrl = v.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("模型名（可选）")
+      .setDesc(`留空使用预设: ${preset.defaultModel || "(无)"}`)
+      .addText((text) => {
+        text
+          .setPlaceholder(preset.defaultModel || "")
+          .setValue(mc.model)
+          .onChange(async (v) => {
+            mc.model = v.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("启用 AI 清理")
+      .setDesc("开启后自动去除语气词。")
+      .addToggle((toggle) => {
+        toggle.setValue(mc.enableAiCleanup).onChange(async (v) => {
+          mc.enableAiCleanup = v;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("启用链接摘要")
+      .setDesc("优先走国内解析服务（天聚/万维易源/咕咕数据），失败后自动回退 AI，再回退纯文本。")
+      .addToggle((toggle) => {
+        toggle.setValue(mc.enableUrlSummary !== false).onChange(async (v) => {
+          mc.enableUrlSummary = v;
+          lr.enabled = v;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("解析服务总开关")
+      .setDesc("关闭后不请求任何链接解析服务。")
+      .addToggle((toggle) => {
+        toggle.setValue(lr.enabled).onChange(async (v) => {
+          lr.enabled = v;
+          mc.enableUrlSummary = v;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("链接解析服务商")
+      .setDesc("三选一配置即可，插件只会使用当前选中的服务商。")
+      .addDropdown((d) => {
+        for (const id of Object.keys(LINK_RESOLVER_PROVIDER_PRESETS)) {
+          const provider = getResolverProviderPreset(id);
+          d.addOption(id, provider.name);
+        }
+        d.setValue(resolverProvider.id).onChange(async (v) => {
+          lr.provider = normalizeResolverProviderId(v);
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
+    const resolverKeySetting = new Setting(containerEl)
+      .setName(resolverProvider.keyLabel)
+      .setDesc(resolverProvider.hint)
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder(resolverProvider.keyPlaceholder)
+          .setValue(getResolverProviderKey(lr, resolverProvider.id))
+          .onChange(async (v) => {
+            setResolverProviderKey(lr, resolverProvider.id, v);
+            await this.plugin.saveSettings();
+          });
+      });
+    {
+      const descFrag = document.createDocumentFragment();
+      descFrag.appendText("配置入口：");
+      const keyLink = descFrag.createEl("a", { text: "申请/购买 Key", href: resolverProvider.keyUrl });
+      keyLink.setAttr("target", "_blank");
+      descFrag.appendText(" · ");
+      const docLink = descFrag.createEl("a", { text: "接口文档", href: resolverProvider.docsUrl });
+      docLink.setAttr("target", "_blank");
+      descFrag.appendText("。若目标网页反爬或动态加载失败，将自动降级到 AI，再降级到原文保留。");
+      resolverKeySetting.setDesc(descFrag);
+    }
+
+    new Setting(containerEl)
+      .setName("解析超时(ms)")
+      .setDesc("单次解析请求超时，默认 25000。")
+      .addText((text) => {
+        text
+          .setPlaceholder("25000")
+          .setValue(String(lr.timeoutMs))
+          .onChange(async (v) => {
+            lr.timeoutMs = Math.max(5000, Number(v) || LINK_RESOLVER_DEFAULTS.timeoutMs);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("失败重试次数")
+      .setDesc("单服务重试次数，默认 2。")
+      .addText((text) => {
+        text
+          .setPlaceholder("2")
+          .setValue(String(lr.retries))
+          .onChange(async (v) => {
+            lr.retries = Math.min(5, Math.max(0, Number(v) || LINK_RESOLVER_DEFAULTS.retries));
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("最大并发")
+      .setDesc("并发解析 URL 上限，默认 2。")
+      .addText((text) => {
+        text
+          .setPlaceholder("2")
+          .setValue(String(lr.maxConcurrency))
+          .onChange(async (v) => {
+            lr.maxConcurrency = Math.min(5, Math.max(1, Number(v) || LINK_RESOLVER_DEFAULTS.maxConcurrency));
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("每日笔记路径")
+      .addText((text) => {
+        text
+          .setPlaceholder("01-捕获层/每日笔记")
+          .setValue(mc.dailyNotePath)
+          .onChange(async (v) => {
+            mc.dailyNotePath = v.trim() || "01-捕获层/每日笔记";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("想法区域标题")
+      .addText((text) => {
+        text
+          .setPlaceholder("### 💡 想法和灵感")
+          .setValue(mc.ideaSectionHeader)
+          .onChange(async (v) => {
+            mc.ideaSectionHeader = v.trim() || "### 💡 想法和灵感";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("测试 AI 连接")
+      .addButton((b) => {
+        b.setButtonText("测试").onClick(async () => {
+          if (!mc.apiKey) {
+            new Notice("请先填写 API Key");
+            return;
+          }
+          b.setDisabled(true);
+          b.setButtonText("测试中...");
+          try {
+            const { testConnection } = require("../mobile/mobile-ai-service");
+            const result = await testConnection(mc);
+            new Notice(result.ok ? `✅ ${result.message}` : `❌ ${result.message}`);
+          } catch (e) {
+            new Notice(`❌ ${e instanceof Error ? e.message : String(e)}`);
+          } finally {
+            b.setDisabled(false);
+            b.setButtonText("测试");
+          }
+        });
+      });
   }
 
 }

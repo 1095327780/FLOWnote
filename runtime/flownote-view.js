@@ -16,13 +16,13 @@ const { messageRendererMethods } = require("./view/message-renderer");
 const { questionFlowMethods } = require("./view/question-flow");
 const { runtimeStatusMethods } = require("./view/runtime-status");
 
-const VIEW_TYPE = "opencode-assistant-view";
+const VIEW_TYPE = "flownote-view";
 
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-class OpenCodeAssistantView extends ItemView {
+class FLOWnoteAssistantView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -54,7 +54,7 @@ class OpenCodeAssistantView extends ItemView {
   }
 
   getDisplayText() {
-    return "OpenCode 助手";
+    return "FLOWnote";
   }
 
   getIcon() {
@@ -129,7 +129,7 @@ class OpenCodeAssistantView extends ItemView {
   handleToastEvent(toast) {
     const title = typeof toast.title === "string" ? toast.title.trim() : "";
     const message = typeof toast.message === "string" ? toast.message.trim() : "";
-    const text = [title, message].filter(Boolean).join("：") || "OpenCode 提示";
+    const text = [title, message].filter(Boolean).join("：") || "FLOWnote 提示";
     new Notice(text, 4000);
   }
 
@@ -174,7 +174,7 @@ class OpenCodeAssistantView extends ItemView {
 }
 
 Object.assign(
-  OpenCodeAssistantView.prototype,
+  FLOWnoteAssistantView.prototype,
   commandRouterMethods,
   layoutRendererMethods,
   messageRendererMethods,
@@ -184,5 +184,5 @@ Object.assign(
 
 module.exports = {
   VIEW_TYPE,
-  OpenCodeAssistantView,
+  FLOWnoteAssistantView,
 };

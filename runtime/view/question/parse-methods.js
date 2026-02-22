@@ -248,7 +248,7 @@ function buildFallbackQuestionItemsFromRequest(request) {
     question = req.title.trim();
   }
   if (!question) {
-    question = "OpenCode 需要你的输入，请填写后提交继续。";
+    question = "FLOWnote 需要你的输入，请填写后提交继续。";
   }
   return [
     {

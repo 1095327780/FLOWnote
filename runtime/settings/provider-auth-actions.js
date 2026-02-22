@@ -101,7 +101,7 @@ class ProviderAuthActionsMethods {
     const { providerID, providerName, rowStatus } = context;
     const key = await this.showInputModal({
       title: `设置 ${providerName} API Key`,
-      description: "请输入该 Provider 的 API Key（仅保存在本地 OpenCode 凭据中）。",
+      description: "请输入该 Provider 的 API Key（仅保存在本地 FLOWnote 凭据中）。",
       placeholder: "输入 API Key",
       password: true,
       submitText: "保存",

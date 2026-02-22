@@ -183,7 +183,7 @@ function renderHeader(header) {
   const brand = header.createDiv({ cls: "oc-brand" });
   const logo = brand.createDiv({ cls: "oc-brand-logo" });
   setIcon(logo, "bot");
-  brand.createDiv({ cls: "oc-brand-title", text: "OpenCode Assistant" });
+  brand.createDiv({ cls: "oc-brand-title", text: "FLOWnote" });
 
   const actions = header.createDiv({ cls: "oc-header-actions" });
   actions.createDiv({ cls: "oc-header-meta", text: "Chat Runtime" });
@@ -317,7 +317,7 @@ function renderSidebar(side) {
 
   side.createDiv({
     cls: "oc-side-footer",
-    text: "兼容 OpenCode 会话、技能注入、模型切换与诊断。",
+    text: "兼容 FLOWnote 会话、技能注入、模型切换与诊断。",
   });
 }
 
@@ -466,7 +466,7 @@ function renderMain(main) {
   });
 
   const inputToolbar = inputWrapper.createDiv({ cls: "oc-input-toolbar" });
-  inputToolbar.createDiv({ cls: "oc-input-meta", text: "OpenCode Compat Runtime" });
+  inputToolbar.createDiv({ cls: "oc-input-meta", text: "FLOWnote Compat Runtime" });
 
   const actions = inputToolbar.createDiv({ cls: "oc-actions" });
   this.elements.sendBtn = actions.createEl("button", { cls: "mod-cta oc-send-btn", text: "发送" });

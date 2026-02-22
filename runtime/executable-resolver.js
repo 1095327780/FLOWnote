@@ -215,7 +215,7 @@ class ExecutableResolver {
       const home = os.homedir();
       return [
         "未找到可执行文件。",
-        "请在设置里填写 OpenCode CLI 的绝对路径（优先 .exe，其次 cli.js），例如：",
+        "请在设置里填写 FLOWnote CLI 的绝对路径（优先 .exe，其次 cli.js），例如：",
         `${path.join(home, ".opencode", "bin", "opencode.exe")}`,
         `${path.join(home, "AppData", "Roaming", "npm", "node_modules", "@opencode-ai", "opencode", "dist", "cli.js")}`,
         "Windows 下请避免填写 opencode.cmd 包装脚本。",

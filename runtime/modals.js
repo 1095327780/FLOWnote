@@ -26,7 +26,7 @@ class DiagnosticsModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("oc-diagnostics-modal");
-    contentEl.createEl("h2", { text: "OpenCode 诊断" });
+    contentEl.createEl("h2", { text: "FLOWnote 诊断" });
 
     if (!this.result) {
       contentEl.createEl("p", { text: "尚未运行诊断。" });
@@ -74,7 +74,7 @@ class PermissionRequestModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("oc-perm-modal");
-    contentEl.createEl("h2", { text: "OpenCode 权限请求" });
+    contentEl.createEl("h2", { text: "FLOWnote 权限请求" });
 
     const title =
       (typeof this.permission.title === "string" && this.permission.title.trim()) ||
@@ -130,7 +130,7 @@ class PromptAppendModal extends Modal {
     contentEl.createEl("h2", { text: "模型请求补充输入" });
     contentEl.createDiv({
       cls: "oc-prompt-desc",
-      text: "OpenCode 通过 question/tool 触发了补充输入请求。你可以编辑后放入输入框继续。",
+      text: "FLOWnote 通过 question/tool 触发了补充输入请求。你可以编辑后放入输入框继续。",
     });
 
     const input = contentEl.createEl("textarea", {
@@ -172,7 +172,7 @@ class ModelSelectorModal extends Modal {
     contentEl.createEl("h2", { text: "选择模型" });
     contentEl.createDiv({
       cls: "oc-model-modal-subtitle",
-      text: "使用官方模型列表（来自 OpenCode provider 配置）",
+      text: "使用官方模型列表（来自 FLOWnote provider 配置）",
     });
 
     const search = contentEl.createEl("input", {

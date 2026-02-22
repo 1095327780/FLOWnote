@@ -123,7 +123,7 @@ function renderInlineQuestionPanel(messages) {
     },
     this.currentAbort ? this.currentAbort.signal : undefined,
     {
-      title: "OpenCode has a question",
+      title: "FLOWnote has a question",
       showCustomInput: true,
       immediateSelect: interaction.questions.length === 1 && Array.isArray(interaction.questions[0].options) && interaction.questions[0].options.length > 0,
     },

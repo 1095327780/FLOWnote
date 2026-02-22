@@ -1,4 +1,4 @@
-# OpenCode Assistant (Obsidian)
+# FLOWnote (Obsidian)
 
 ## Source Of Truth
 
@@ -40,14 +40,14 @@
 
 如果看到：`spawn opencode ENOENT`
 
-1. 打开插件设置，启用“自动探测 OpenCode CLI”。
-2. 如果仍失败，在“OpenCode CLI 路径”填绝对路径，例如：
+1. 打开插件设置，启用“自动探测 FLOWnote CLI”。
+2. 如果仍失败，在“FLOWnote CLI 路径”填绝对路径，例如：
    - `/Users/shanghao/.opencode/bin/opencode`
-3. 点击“测试 OpenCode 连接”，查看诊断结果。
+3. 点击“测试 FLOWnote 连接”，查看诊断结果。
 
 ## 鉴权模式
 
-- 统一使用 OpenCode Provider 登录管理（OAuth / API Key）。
+- 统一使用 FLOWnote Provider 登录管理（OAuth / API Key）。
 - 插件不再保存 Provider/API Key 明文字段到插件设置。
 
 ## 开发说明

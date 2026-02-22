@@ -1,8 +1,25 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 function createBundledSkillsMethods(options = {}) {
   const pluginDirname = String(options.pluginDirname || "");
+
+  function walkFilesRecursive(rootDir, currentDir = rootDir, output = []) {
+    if (!rootDir || !currentDir || !fs.existsSync(currentDir)) return output;
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry || String(entry.name || "").startsWith(".")) continue;
+      const absPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walkFilesRecursive(rootDir, absPath, output);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      output.push(path.relative(rootDir, absPath));
+    }
+    return output;
+  }
 
   return {
     getPluginRootDir() {
@@ -10,7 +27,7 @@ function createBundledSkillsMethods(options = {}) {
       const configDir = this.app && this.app.vault && this.app.vault.configDir
         ? String(this.app.vault.configDir)
         : ".obsidian";
-      const id = this.manifest && this.manifest.id ? String(this.manifest.id) : "opencode-assistant";
+      const id = this.manifest && this.manifest.id ? String(this.manifest.id) : "flownote";
 
       const candidates = [
         path.join(vaultPath, configDir, "plugins", id),
@@ -29,14 +46,43 @@ function createBundledSkillsMethods(options = {}) {
       return path.join(this.getPluginRootDir(), "bundled-skills");
     },
 
-    getBundledSkillsStamp(skillIds = []) {
+    getBundledSkillsContentSignature(rootDir = this.getBundledSkillsRoot(), skillIds = []) {
+      if (!rootDir || !fs.existsSync(rootDir)) return "";
+      const ids = [...new Set(
+        (Array.isArray(skillIds) ? skillIds : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean),
+      )].sort((a, b) => a.localeCompare(b));
+      if (!ids.length) return "";
+
+      const hash = crypto.createHash("sha1");
+      for (const skillId of ids) {
+        const skillDir = path.join(rootDir, skillId);
+        if (!fs.existsSync(skillDir)) continue;
+        const relFiles = walkFilesRecursive(skillDir).sort((a, b) => a.localeCompare(b));
+        hash.update(`${skillId}\n`);
+        for (const relFile of relFiles) {
+          const absFile = path.join(skillDir, relFile);
+          try {
+            hash.update(`${relFile}\n`);
+            hash.update(fs.readFileSync(absFile));
+          } catch (_e) {
+            // Ignore a single file read failure and continue hashing others.
+          }
+        }
+      }
+      return hash.digest("hex");
+    },
+
+    getBundledSkillsStamp(skillIds = [], contentSignature = "") {
       const version = this.manifest && this.manifest.version ? String(this.manifest.version) : "0";
       const ids = [...new Set(
         (Array.isArray(skillIds) ? skillIds : [])
           .map((id) => String(id || "").trim())
           .filter(Boolean),
       )].sort((a, b) => a.localeCompare(b));
-      return `${version}:${ids.join(",")}`;
+      const signature = String(contentSignature || "").trim();
+      return `${version}:${ids.join(",")}:${signature}`;
     },
 
     hasSyncedBundledSkills(targetRoot, bundledIds) {
@@ -69,7 +115,8 @@ function createBundledSkillsMethods(options = {}) {
       const force = Boolean(options && options.force);
       const bundledRoot = this.getBundledSkillsRoot();
       const bundledIds = this.listBundledSkillIds(bundledRoot);
-      const stamp = this.getBundledSkillsStamp(bundledIds);
+      const signature = this.getBundledSkillsContentSignature(bundledRoot, bundledIds);
+      const stamp = this.getBundledSkillsStamp(bundledIds, signature);
 
       if (this.skillService) this.skillService.setAllowedSkillIds(bundledIds);
       if (!bundledIds.length) {

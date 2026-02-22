@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { OpenCodeClient } = require("../../runtime/open-code-client");
+const { FLOWnoteClient } = require("../../runtime/flownote-client");
 
 function createTransportClass(label, options = {}) {
   const instances = [];
@@ -38,10 +38,10 @@ function createTransportClass(label, options = {}) {
   return TransportMock;
 }
 
-test("OpenCodeClient should use compat path when experimental sdk is disabled", async () => {
+test("FLOWnoteClient should use compat path when experimental sdk is disabled", async () => {
   const SdkTransport = createTransportClass("sdk");
   const CompatTransport = createTransportClass("compat");
-  const client = new OpenCodeClient({
+  const client = new FLOWnoteClient({
     settings: { transportMode: "sdk", experimentalSdkEnabled: false },
     SdkTransport,
     CompatTransport,
@@ -54,10 +54,10 @@ test("OpenCodeClient should use compat path when experimental sdk is disabled", 
   assert.equal(client.lastMode, "compat");
 });
 
-test("OpenCodeClient should use sdk path only when experimental sdk is enabled", async () => {
+test("FLOWnoteClient should use sdk path only when experimental sdk is enabled", async () => {
   const SdkTransport = createTransportClass("sdk");
   const CompatTransport = createTransportClass("compat");
-  const client = new OpenCodeClient({
+  const client = new FLOWnoteClient({
     settings: { transportMode: "sdk", experimentalSdkEnabled: true },
     SdkTransport,
     CompatTransport,
@@ -70,10 +70,10 @@ test("OpenCodeClient should use sdk path only when experimental sdk is enabled",
   assert.equal(client.lastMode, "sdk");
 });
 
-test("OpenCodeClient should fallback to compat when sdk experimental path fails", async () => {
+test("FLOWnoteClient should fallback to compat when sdk experimental path fails", async () => {
   const SdkTransport = createTransportClass("sdk", { failTestConnection: true });
   const CompatTransport = createTransportClass("compat");
-  const client = new OpenCodeClient({
+  const client = new FLOWnoteClient({
     settings: { transportMode: "sdk", experimentalSdkEnabled: true },
     SdkTransport,
     CompatTransport,
@@ -86,14 +86,14 @@ test("OpenCodeClient should fallback to compat when sdk experimental path fails"
   assert.equal(client.lastMode, "compat");
 });
 
-test("OpenCodeClient listSessionMessages should return transport result", async () => {
+test("FLOWnoteClient listSessionMessages should return transport result", async () => {
   const SdkTransport = createTransportClass("sdk", {
     sessionMessages: [{ id: "m1", info: { role: "assistant" }, parts: [] }],
   });
   const CompatTransport = createTransportClass("compat", {
     sessionMessages: [{ id: "m2", info: { role: "assistant" }, parts: [] }],
   });
-  const client = new OpenCodeClient({
+  const client = new FLOWnoteClient({
     settings: { transportMode: "compat", experimentalSdkEnabled: false },
     SdkTransport,
     CompatTransport,

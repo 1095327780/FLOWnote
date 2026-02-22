@@ -14,7 +14,7 @@ const {
   providerAuthActionsMethods,
 } = require("./settings/provider-auth-actions");
 
-class OpenCodeSettingsTab extends PluginSettingTab {
+class FLOWnoteSettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -24,11 +24,11 @@ class OpenCodeSettingsTab extends PluginSettingTab {
 }
 
 Object.assign(
-  OpenCodeSettingsTab.prototype,
+  FLOWnoteSettingsTab.prototype,
   basicSettingsSectionMethods,
   providerAuthUtilsMethods,
   providerAuthSectionMethods,
   providerAuthActionsMethods,
 );
 
-module.exports = { OpenCodeSettingsTab };
+module.exports = { FLOWnoteSettingsTab };

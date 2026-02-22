@@ -1,7 +1,7 @@
-class OpenCodeClient {
+class FLOWnoteClient {
   constructor(options) {
     if (!options || typeof options.SdkTransport !== "function" || typeof options.CompatTransport !== "function") {
-      throw new Error("OpenCodeClient 需要注入 SdkTransport 和 CompatTransport 构造器");
+      throw new Error("FLOWnoteClient 需要注入 SdkTransport 和 CompatTransport 构造器");
     }
     this.SdkTransport = options.SdkTransport;
     this.CompatTransport = options.CompatTransport;
@@ -168,4 +168,4 @@ class OpenCodeClient {
 }
 
 
-module.exports = { OpenCodeClient };
+module.exports = { FLOWnoteClient };

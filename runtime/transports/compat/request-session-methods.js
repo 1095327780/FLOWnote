@@ -179,7 +179,7 @@ function createRequestSessionMethods(deps = {}) {
         });
       }
       const hint = `${this.buildWslDirectoryHint(message)}${this.buildWslSqliteHint(message)}`;
-      throw new Error(`OpenCode 连接失败: ${message}${hint}`);
+      throw new Error(`FLOWnote 连接失败: ${message}${hint}`);
     }
     const text = resp.text;
     let parsed = null;
@@ -199,7 +199,7 @@ function createRequestSessionMethods(deps = {}) {
         });
       }
       const hint = `${this.buildWslDirectoryHint(detail)}${this.buildWslSqliteHint(detail)}`;
-      throw new Error(`OpenCode 请求失败 (${resp.status}): ${detail}${hint}`);
+      throw new Error(`FLOWnote 请求失败 (${resp.status}): ${detail}${hint}`);
     }
 
     return parsed;

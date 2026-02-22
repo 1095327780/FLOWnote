@@ -4,7 +4,7 @@ class ProviderAuthSectionMethods {
   renderProviderAuthSection(containerEl) {
     containerEl.createEl("h3", { text: "Provider 登录管理（OAuth / API Key）" });
     containerEl.createEl("p", {
-      text: "用于在插件内连接官方/第三方模型 provider。完成后会写入当前插件运行时的 OpenCode 凭据。",
+      text: "用于在插件内连接官方/第三方模型 provider。完成后会写入当前插件运行时的 FLOWnote 凭据。",
     });
 
     const controls = containerEl.createDiv();

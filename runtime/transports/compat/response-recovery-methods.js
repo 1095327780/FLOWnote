@@ -369,7 +369,7 @@ function createResponseRecoveryMethods(deps = {}) {
     }
 
     if (lastError) throw lastError;
-    throw new Error("OpenCode 事件流连接失败");
+    throw new Error("FLOWnote 事件流连接失败");
   }
 
   buildEventStreamUrlCandidates(baseUrl, directory) {

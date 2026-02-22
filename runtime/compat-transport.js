@@ -90,8 +90,8 @@ const OPENCODE_SERVE_ARGS = [
 ];
 const STARTUP_TIMEOUT_MS = 15000;
 const WSL_STARTUP_TIMEOUT_MS = 30000;
-const WSL_RUNTIME_WORKSPACE_DIR = ".opencode-assistant-workspace";
-const WSL_XDG_DATA_DIR = ".opencode-assistant-data";
+const WSL_RUNTIME_WORKSPACE_DIR = ".flownote-workspace";
+const WSL_XDG_DATA_DIR = ".flownote-data";
 const WSL_XDG_CONFIG_DIR = ".config";
 const WSL_XDG_STATE_DIR = ".local/state";
 const WSL_XDG_CACHE_DIR = ".cache";

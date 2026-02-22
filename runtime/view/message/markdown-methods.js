@@ -153,7 +153,7 @@ function attachInternalLinkHandlers(container) {
     anchorEl.addEventListener("mouseover", (evt) => {
       this.app.workspace.trigger("hover-link", {
         event: evt,
-        source: "opencode-assistant",
+        source: "flownote",
         hoverParent: this,
         targetEl: anchorEl,
         linktext,
