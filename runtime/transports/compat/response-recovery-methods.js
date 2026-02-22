@@ -22,6 +22,75 @@ function createResponseRecoveryMethods(deps = {}) {
     chooseRicherResponse,
   } = deps;
 
+  function normalizeTimestampMs(value) {
+    const raw = Number(value || 0);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    if (raw >= 1e14) return Math.floor(raw / 1000);
+    if (raw >= 1e12) return Math.floor(raw);
+    if (raw >= 1e9) return Math.floor(raw * 1000);
+    return Math.floor(raw);
+  }
+
+  function envelopeInfo(item) {
+    if (!item || typeof item !== "object") return null;
+    return item.info && typeof item.info === "object" ? item.info : null;
+  }
+
+  function envelopeRole(item) {
+    const info = envelopeInfo(item);
+    if (!info) return "";
+    return typeof info.role === "string" ? info.role.trim().toLowerCase() : "";
+  }
+
+  function envelopeCreatedAtMs(item) {
+    const info = envelopeInfo(item);
+    if (!info) return 0;
+    const time = info.time && typeof info.time === "object" ? info.time : {};
+    return normalizeTimestampMs(time.created || time.updated || info.created || info.updated || 0);
+  }
+
+  function findLatestUserAnchor(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    let latest = null;
+    let latestCreated = 0;
+    for (const item of list) {
+      if (envelopeRole(item) !== "user") continue;
+      const info = envelopeInfo(item);
+      if (!info || typeof info.id !== "string" || !info.id.trim()) continue;
+      const created = envelopeCreatedAtMs(item);
+      if (!latest || created >= latestCreated) {
+        latest = item;
+        latestCreated = created;
+      }
+    }
+    return latest;
+  }
+
+  function findLatestAssistantAnchoredByUser(messages, userAnchor) {
+    const list = Array.isArray(messages) ? messages : [];
+    const anchorInfo = envelopeInfo(userAnchor);
+    const anchorId = anchorInfo && typeof anchorInfo.id === "string" ? anchorInfo.id.trim() : "";
+    const anchorCreated = envelopeCreatedAtMs(userAnchor);
+    if (!anchorId && !anchorCreated) return null;
+
+    const assistants = list
+      .filter((item) => envelopeRole(item) === "assistant")
+      .sort((a, b) => envelopeCreatedAtMs(b) - envelopeCreatedAtMs(a));
+
+    const byParent = assistants.find((item) => {
+      const info = envelopeInfo(item);
+      const parentId = info && typeof info.parentID === "string" ? info.parentID.trim() : "";
+      return Boolean(anchorId && parentId && parentId === anchorId);
+    });
+    if (byParent) return byParent;
+
+    if (!anchorCreated) return null;
+    return assistants.find((item) => {
+      const created = envelopeCreatedAtMs(item);
+      return Boolean(created && created >= anchorCreated);
+    }) || null;
+  }
+
   class ResponseRecoveryMethods {
   isMessageEnvelopeCompleted(envelope) {
     return isAssistantMessageEnvelopeCompleted(envelope);
@@ -48,7 +117,7 @@ function createResponseRecoveryMethods(deps = {}) {
           "GET",
           `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
           undefined,
-          { directory: this.vaultPath },
+          this.buildSessionDirectoryQuery(sessionId),
           requestSignal,
         );
         const messagePayload = this.normalizeMessageEnvelope(msgRes && msgRes.data ? msgRes.data : msgRes);
@@ -86,6 +155,10 @@ function createResponseRecoveryMethods(deps = {}) {
         };
       },
       getSessionStatus: (requestSignal) => this.getSessionStatus(sessionId, requestSignal),
+      isQuestionPending: (requestSignal) => {
+        if (typeof this.hasPendingQuestionsForSession !== "function") return false;
+        return this.hasPendingQuestionsForSession(sessionId, requestSignal);
+      },
     });
 
     const hadRenderablePayload = hasRenderablePayload(polled.payload);
@@ -132,15 +205,37 @@ function createResponseRecoveryMethods(deps = {}) {
     };
   }
 
-  async streamAssistantFromPolling(sessionId, startedAt, signal, handlers) {
+  async streamAssistantFromPolling(sessionId, startedAt, signal, handlers, options = {}) {
     const timeoutCfg = this.getFinalizeTimeoutConfig();
-    const quietTimeoutMs = timeoutCfg.quietTimeoutMs;
+    const pollOptions = options && typeof options === "object" ? options : {};
+    const quickFallback = Boolean(pollOptions.quickFallback);
+    const quietTimeoutMs = Number.isFinite(Number(pollOptions.quietTimeoutMs)) && Number(pollOptions.quietTimeoutMs) > 0
+      ? Number(pollOptions.quietTimeoutMs)
+      : quickFallback
+        ? Math.min(timeoutCfg.quietTimeoutMs, 5000)
+        : timeoutCfg.quietTimeoutMs;
+    const maxTotalMs = Number.isFinite(Number(pollOptions.maxTotalMs)) && Number(pollOptions.maxTotalMs) > 0
+      ? Number(pollOptions.maxTotalMs)
+      : quickFallback
+        ? Math.min(timeoutCfg.maxTotalMs, 8000)
+        : timeoutCfg.maxTotalMs;
+    const latestIntervalMs = Number.isFinite(Number(pollOptions.latestIntervalMs)) && Number(pollOptions.latestIntervalMs) > 0
+      ? Number(pollOptions.latestIntervalMs)
+      : quickFallback
+        ? 700
+        : 1100;
+    const noMessageTimeoutMs = Number.isFinite(Number(pollOptions.noMessageTimeoutMs))
+      && Number(pollOptions.noMessageTimeoutMs) > 0
+      ? Number(pollOptions.noMessageTimeoutMs)
+      : undefined;
+    const allowQuestionPending = pollOptions.allowQuestionPending !== false;
     const messageListFetchState = this.createMessageListFetchState();
     const polled = await pollAssistantPayload({
       signal,
       quietTimeoutMs,
-      maxTotalMs: timeoutCfg.maxTotalMs,
-      latestIntervalMs: 1100,
+      maxTotalMs,
+      latestIntervalMs,
+      noMessageTimeoutMs,
       sleep,
       requireTerminal: false,
       onToken: handlers && handlers.onToken,
@@ -151,7 +246,7 @@ function createResponseRecoveryMethods(deps = {}) {
           "GET",
           `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
           undefined,
-          { directory: this.vaultPath },
+          this.buildSessionDirectoryQuery(sessionId),
           requestSignal,
         );
         const messagePayload = this.normalizeMessageEnvelope(msgRes && msgRes.data ? msgRes.data : msgRes);
@@ -186,6 +281,12 @@ function createResponseRecoveryMethods(deps = {}) {
         };
       },
       getSessionStatus: (requestSignal) => this.getSessionStatus(sessionId, requestSignal),
+      isQuestionPending: allowQuestionPending
+        ? (requestSignal) => {
+          if (typeof this.hasPendingQuestionsForSession !== "function") return false;
+          return this.hasPendingQuestionsForSession(sessionId, requestSignal);
+        }
+        : undefined,
     });
 
     return {
@@ -200,7 +301,8 @@ function createResponseRecoveryMethods(deps = {}) {
 
   async streamAssistantFromEvents(sessionId, startedAt, signal, handlers) {
     const baseUrl = await this.ensureStarted();
-    const expectedDirectory = this.normalizeDirectoryForService(this.vaultPath) || this.vaultPath;
+    const sessionDirectory = this.getSessionScopedDirectory(sessionId);
+    const expectedDirectory = this.normalizeDirectoryForService(sessionDirectory) || sessionDirectory;
     const reducer = createTransportEventReducer({
       sessionId,
       startedAt,
@@ -244,7 +346,7 @@ function createResponseRecoveryMethods(deps = {}) {
               const root = raw && typeof raw === "object" ? raw : null;
               if (root && typeof root.directory === "string" && root.directory) {
                 const eventDir = String(root.directory || "").trim();
-                const originDir = String(this.vaultPath || "").trim();
+                const originDir = String(sessionDirectory || "").trim();
                 if (eventDir !== expectedDirectory && eventDir !== originDir) return;
               }
 
@@ -327,7 +429,11 @@ function createResponseRecoveryMethods(deps = {}) {
     while (!(signal && signal.aborted)) {
       let listed = [];
       try {
-        listed = await this.listQuestions({ signal });
+        listed = await this.listQuestions({
+          signal,
+          sessionId,
+          allowDirectoryFallback: false,
+        });
       } catch (error) {
         if (signal && signal.aborted) break;
         const message = error instanceof Error ? error.message : String(error);
@@ -376,7 +482,7 @@ function createResponseRecoveryMethods(deps = {}) {
         seenByRequestId.set(requestId, request);
       }
 
-      await sleep(850);
+      await sleep(1600);
     }
   }
 
@@ -400,7 +506,7 @@ function createResponseRecoveryMethods(deps = {}) {
           "GET",
           `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(placeholderId)}`,
           undefined,
-          { directory: this.vaultPath },
+          this.buildSessionDirectoryQuery(sessionId),
           signal,
         );
         const placeholder = this.normalizeMessageEnvelope(
@@ -481,7 +587,7 @@ function createResponseRecoveryMethods(deps = {}) {
         "POST",
         `/session/${encodeURIComponent(sessionId)}/message`,
         body,
-        { directory: this.vaultPath },
+        this.buildSessionDirectoryQuery(sessionId),
         signal,
       );
       const raw = syncRes && syncRes.data ? syncRes.data : syncRes;
@@ -563,7 +669,7 @@ function createResponseRecoveryMethods(deps = {}) {
           "GET",
           `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageIdHint)}`,
           undefined,
-          { directory: this.vaultPath },
+          this.buildSessionDirectoryQuery(sessionId),
           signal,
         );
         const messagePayload = this.normalizeMessageEnvelope(msgRes && msgRes.data ? msgRes.data : msgRes);
@@ -597,7 +703,12 @@ function createResponseRecoveryMethods(deps = {}) {
         requireRecentTail: true,
         state: this.createMessageListFetchState(),
       });
-      const latest = fetched.latest || this.findLatestAssistantMessage(fetched.list, startedAt);
+      const list = Array.isArray(fetched && fetched.list) ? fetched.list : [];
+      let latest = fetched.latest || this.findLatestAssistantMessage(list, startedAt);
+      if (!latest && list.length) {
+        const latestUser = findLatestUserAnchor(list);
+        latest = findLatestAssistantAnchoredByUser(list, latestUser) || this.findLatestAssistantMessage(list, 0);
+      }
       if (latest) {
         const payload = extractAssistantPayloadFromEnvelope(latest);
         merged = chooseRicherResponse(merged, {

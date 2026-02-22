@@ -11,6 +11,121 @@ function createRequestSessionMethods(deps = {}) {
   } = deps;
 
   class RequestSessionMethods {
+  ensureSessionAliasMap() {
+    if (!(this.sessionAliasMap instanceof Map)) {
+      this.sessionAliasMap = new Map();
+    }
+    return this.sessionAliasMap;
+  }
+
+  resolveSessionAlias(sessionId) {
+    const original = String(sessionId || "").trim();
+    if (!original) return "";
+
+    const map = this.ensureSessionAliasMap();
+    const seen = new Set();
+    let current = original;
+    while (current && map.has(current) && !seen.has(current)) {
+      seen.add(current);
+      const next = String(map.get(current) || "").trim();
+      if (!next) break;
+      current = next;
+    }
+    return current || original;
+  }
+
+  rememberSessionAlias(fromSessionId, toSessionId, source = "") {
+    const from = String(fromSessionId || "").trim();
+    const toRaw = String(toSessionId || "").trim();
+    if (!from || !toRaw || from === toRaw) return;
+    const to = this.resolveSessionAlias(toRaw);
+    if (!to || from === to) return;
+
+    const map = this.ensureSessionAliasMap();
+    const previous = String(map.get(from) || "").trim();
+    if (previous === to) return;
+    map.set(from, to);
+    if (source) {
+      this.log(`session alias set ${JSON.stringify({ from, to, source })}`);
+    }
+  }
+
+  ensureSessionDirectoryHintMap() {
+    if (!(this.sessionDirectoryHints instanceof Map)) {
+      this.sessionDirectoryHints = new Map();
+    }
+    return this.sessionDirectoryHints;
+  }
+
+  rememberSessionDirectoryHint(sessionId, directory, source = "") {
+    const sidRaw = String(sessionId || "").trim();
+    const sid = this.resolveSessionAlias(sidRaw) || sidRaw;
+    const rawDirectory = String(directory || "").trim();
+    if (!sid || !rawDirectory) return;
+
+    const normalized = String(this.normalizeDirectoryForService(rawDirectory) || rawDirectory).trim();
+    if (!normalized) return;
+
+    const map = this.ensureSessionDirectoryHintMap();
+    const previous = String(map.get(sid) || "").trim();
+    if (previous === normalized) return;
+
+    map.set(sid, normalized);
+    if (source) {
+      this.log(`session directory hint set ${JSON.stringify({ sessionId: sid, directory: normalized, source })}`);
+    }
+  }
+
+  getSessionScopedDirectory(sessionId) {
+    const sidRaw = String(sessionId || "").trim();
+    const sid = this.resolveSessionAlias(sidRaw) || sidRaw;
+    if (!sid) return this.vaultPath;
+    const map = this.ensureSessionDirectoryHintMap();
+    const hinted = String(map.get(sid) || "").trim();
+    return hinted || this.vaultPath;
+  }
+
+  buildSessionDirectoryQuery(sessionId, query = {}) {
+    const next = query && typeof query === "object" ? { ...query } : {};
+    const hasDirectory = Object.prototype.hasOwnProperty.call(next, "directory")
+      && String(next.directory || "").trim().length > 0;
+    if (!hasDirectory) {
+      const scoped = this.getSessionScopedDirectory(sessionId);
+      if (String(scoped || "").trim()) next.directory = scoped;
+    }
+    return next;
+  }
+
+  collectSessionDirectoryCandidates(sessionId, preferredDirectory = "") {
+    const candidates = [];
+    const seen = new Set();
+    const push = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return;
+      if (seen.has(raw)) return;
+      seen.add(raw);
+      candidates.push(raw);
+    };
+
+    push(preferredDirectory);
+    push(this.getSessionScopedDirectory(sessionId));
+    push(this.vaultPath);
+    if (this.launchContext && this.launchContext.mode === "wsl") {
+      push(this.launchContext.directory);
+      if (typeof this.getDefaultWslWorkspaceDir === "function") {
+        push(this.getDefaultWslWorkspaceDir());
+      }
+      if (typeof this.resolveWslDirectory === "function") {
+        push(this.resolveWslDirectory(this.vaultPath));
+      }
+      if (typeof this.buildWslDirectoryCandidates === "function") {
+        const extras = this.buildWslDirectoryCandidates(this.vaultPath);
+        for (const item of extras) push(item);
+      }
+    }
+    return candidates;
+  }
+
   withWslRequestLock(task) {
     const run = typeof task === "function" ? task : async () => null;
     const chain = Promise.resolve(this.wslRequestChain)
@@ -96,6 +211,29 @@ function createRequestSessionMethods(deps = {}) {
 
   parseCommandModel() {
     return parseCommandModel(this.settings.defaultModel);
+  }
+
+  extractSessionId(candidate) {
+    const payload = candidate && typeof candidate === "object" ? candidate : null;
+    if (!payload) return "";
+
+    const direct = String(payload.id || payload.sessionID || payload.sessionId || "").trim();
+    if (direct) return direct;
+
+    const nestedCandidates = [
+      payload.session,
+      payload.data,
+      payload.result,
+      payload.payload,
+      payload.item,
+    ];
+    for (const nested of nestedCandidates) {
+      if (!nested || typeof nested !== "object") continue;
+      const nestedId = String(nested.id || nested.sessionID || nested.sessionId || "").trim();
+      if (nestedId) return nestedId;
+    }
+
+    return "";
   }
 
   normalizeSessionStatus(candidate) {
@@ -209,6 +347,8 @@ function createRequestSessionMethods(deps = {}) {
   }
 
   async fetchSessionMessages(sessionId, options = {}) {
+    const requestedSessionId = String(sessionId || "").trim();
+    const targetSessionId = this.resolveSessionAlias(requestedSessionId) || requestedSessionId;
     const signal = options.signal;
     const startedAt = Number(options.startedAt || 0);
     const requireRecentTail = Boolean(options.requireRecentTail);
@@ -220,12 +360,65 @@ function createRequestSessionMethods(deps = {}) {
     const fetchList = async (query) => {
       const listRes = await this.request(
         "GET",
-        `/session/${encodeURIComponent(sessionId)}/message`,
+        `/session/${encodeURIComponent(targetSessionId)}/message`,
         undefined,
         query,
         signal,
       );
       return this.extractMessageList(listRes && listRes.data ? listRes.data : listRes);
+    };
+
+    const fetchListWithDirectoryFallback = async (baseQuery = {}) => {
+      const primaryDirectory = String(
+        Object.prototype.hasOwnProperty.call(baseQuery, "directory")
+          ? baseQuery.directory
+          : this.getSessionScopedDirectory(sessionId),
+      ).trim();
+
+      const fallbackEnabled = Boolean(
+        options.allowDirectoryFallback !== false
+        && this.launchContext
+        && this.launchContext.mode === "wsl",
+      );
+
+      const candidates = fallbackEnabled
+        ? this.collectSessionDirectoryCandidates(sessionId, primaryDirectory)
+        : [primaryDirectory || this.vaultPath];
+
+      let firstError = null;
+      let firstList = null;
+      let firstDirectory = "";
+
+      for (let i = 0; i < candidates.length; i += 1) {
+        const candidate = String(candidates[i] || "").trim();
+        const query = { ...baseQuery, directory: candidate };
+        try {
+          const list = await fetchList(query);
+          if (i === 0) {
+            firstList = list;
+            firstDirectory = candidate;
+          }
+          if (Array.isArray(list) && list.length > 0) {
+            this.rememberSessionDirectoryHint(targetSessionId, candidate, i > 0 ? "message-list-fallback" : "message-list");
+            if (i > 0) {
+              this.log(`message list directory fallback hit ${JSON.stringify({
+                sessionId: targetSessionId,
+                directory: String(this.normalizeDirectoryForService(candidate) || candidate),
+                size: list.length,
+              })}`);
+            }
+            return { list, directory: candidate, source: i > 0 ? "fallback" : "primary" };
+          }
+        } catch (error) {
+          if (!firstError) firstError = error;
+        }
+      }
+
+      if (Array.isArray(firstList)) {
+        return { list: firstList, directory: firstDirectory, source: "primary-empty" };
+      }
+      if (firstError) throw firstError;
+      return { list: [], directory: primaryDirectory, source: "empty" };
     };
 
     const pickLatest = (messages) => {
@@ -234,15 +427,17 @@ function createRequestSessionMethods(deps = {}) {
     };
 
     if (state && state.useUnbounded) {
-      const unbounded = await fetchList({ directory: this.vaultPath });
+      const unboundedResult = await fetchListWithDirectoryFallback(this.buildSessionDirectoryQuery(sessionId));
+      const unbounded = unboundedResult.list;
       return {
         list: unbounded,
         latest: pickLatest(unbounded),
-        strategy: "unbounded",
+        strategy: unboundedResult.source === "fallback" ? "unbounded-directory-fallback" : "unbounded",
       };
     }
 
-    const limited = await fetchList({ directory: this.vaultPath, limit });
+    const limitedResult = await fetchListWithDirectoryFallback(this.buildSessionDirectoryQuery(sessionId, { limit }));
+    const limited = limitedResult.list;
     const limitedLatest = pickLatest(limited);
     const needUnbounded =
       limited.length >= limit
@@ -252,7 +447,7 @@ function createRequestSessionMethods(deps = {}) {
       return {
         list: limited,
         latest: limitedLatest,
-        strategy: "limited",
+        strategy: limitedResult.source === "fallback" ? "limited-directory-fallback" : "limited",
       };
     }
 
@@ -269,7 +464,8 @@ function createRequestSessionMethods(deps = {}) {
 
     if (state) state.lastFallbackAt = Date.now();
 
-    const unbounded = await fetchList({ directory: this.vaultPath });
+    const unboundedResult = await fetchListWithDirectoryFallback(this.buildSessionDirectoryQuery(sessionId));
+    const unbounded = unboundedResult.list;
     const unboundedLatest = pickLatest(unbounded);
     const shouldPreferUnbounded = Boolean(
       unbounded.length > limited.length
@@ -278,28 +474,44 @@ function createRequestSessionMethods(deps = {}) {
 
     if (state && shouldPreferUnbounded) {
       state.useUnbounded = true;
-      this.log(`message list switched to unbounded fetch session=${sessionId} limited=${limited.length} full=${unbounded.length}`);
+      this.log(`message list switched to unbounded fetch session=${targetSessionId} limited=${limited.length} full=${unbounded.length}`);
     }
 
     return shouldPreferUnbounded
-      ? { list: unbounded, latest: unboundedLatest, strategy: "unbounded" }
-      : { list: limited, latest: limitedLatest, strategy: "limited" };
+      ? {
+        list: unbounded,
+        latest: unboundedLatest,
+        strategy: unboundedResult.source === "fallback" ? "unbounded-directory-fallback" : "unbounded",
+      }
+      : {
+        list: limited,
+        latest: limitedLatest,
+        strategy: limitedResult.source === "fallback" ? "limited-directory-fallback" : "limited",
+      };
   }
 
   async getSessionStatus(sessionId, signal) {
+    const requestedSessionId = String(sessionId || "").trim();
+    const targetSessionId = this.resolveSessionAlias(requestedSessionId) || requestedSessionId;
     try {
-      const res = await this.request("GET", "/session/status", undefined, { directory: this.vaultPath }, signal);
+      const res = await this.request(
+        "GET",
+        "/session/status",
+        undefined,
+        this.buildSessionDirectoryQuery(targetSessionId),
+        signal,
+      );
       const payload = res && res.data ? res.data : res;
       if (!payload || typeof payload !== "object") return null;
 
-      if (Object.prototype.hasOwnProperty.call(payload, sessionId)) {
-        const normalized = this.normalizeSessionStatus(payload[sessionId]);
+      if (Object.prototype.hasOwnProperty.call(payload, targetSessionId)) {
+        const normalized = this.normalizeSessionStatus(payload[targetSessionId]);
         if (normalized) return normalized;
       }
 
       if (payload.sessions && typeof payload.sessions === "object"
-        && Object.prototype.hasOwnProperty.call(payload.sessions, sessionId)) {
-        const normalized = this.normalizeSessionStatus(payload.sessions[sessionId]);
+        && Object.prototype.hasOwnProperty.call(payload.sessions, targetSessionId)) {
+        const normalized = this.normalizeSessionStatus(payload.sessions[targetSessionId]);
         if (normalized) return normalized;
       }
 
@@ -307,13 +519,13 @@ function createRequestSessionMethods(deps = {}) {
         if (!payload.length) return { type: "idle" };
         const row = payload.find((item) => {
           if (!item || typeof item !== "object") return false;
-          return item.id === sessionId || item.sessionID === sessionId || item.sessionId === sessionId;
+          return item.id === targetSessionId || item.sessionID === targetSessionId || item.sessionId === targetSessionId;
         });
         const normalized = this.normalizeSessionStatus(row);
         if (normalized) return normalized;
       }
 
-      if (payload.sessionID === sessionId || payload.sessionId === sessionId || payload.id === sessionId) {
+      if (payload.sessionID === targetSessionId || payload.sessionId === targetSessionId || payload.id === targetSessionId) {
         const normalized = this.normalizeSessionStatus(payload);
         if (normalized) return normalized;
       }
@@ -356,13 +568,22 @@ function createRequestSessionMethods(deps = {}) {
   async listSessions() {
     const res = await this.request("GET", "/session", undefined, { directory: this.vaultPath });
     const payload = res && res.data ? res.data : res || [];
+    const sessions = Array.isArray(payload) ? payload : Array.isArray(payload.sessions) ? payload.sessions : [];
+    for (const row of sessions) {
+      if (!row || typeof row !== "object") continue;
+      const sid = String(row.id || row.sessionID || row.sessionId || "").trim();
+      const directory = String(row.directory || "").trim();
+      if (!sid || !directory) continue;
+      this.rememberSessionDirectoryHint(sid, directory, "list-sessions");
+    }
     if (Array.isArray(payload)) return payload;
     if (Array.isArray(payload.sessions)) return payload.sessions;
     return [];
   }
 
   async listSessionMessages(options = {}) {
-    const sessionId = String(options.sessionId || "").trim();
+    const requestedSessionId = String(options.sessionId || "").trim();
+    const sessionId = this.resolveSessionAlias(requestedSessionId) || requestedSessionId;
     if (!sessionId) return [];
 
     const rawLimit = Number(options.limit || 200);
@@ -377,8 +598,52 @@ function createRequestSessionMethods(deps = {}) {
   }
 
   async createSession(title) {
-    const res = await this.request("POST", "/session", title ? { title } : {}, { directory: this.vaultPath });
-    return res && res.data ? res.data : res;
+    const fallbackEnabled = Boolean(this.launchContext && this.launchContext.mode === "wsl");
+    const candidates = fallbackEnabled
+      ? this.collectSessionDirectoryCandidates("", this.vaultPath)
+      : [String(this.vaultPath || "").trim()];
+
+    let firstPayload = null;
+    let firstError = null;
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const directory = String(candidates[i] || "").trim();
+      if (!directory) continue;
+      try {
+        const res = await this.request(
+          "POST",
+          "/session",
+          title ? { title } : {},
+          { directory },
+        );
+        const payload = res && res.data ? res.data : res;
+        if (firstPayload === null) firstPayload = payload;
+
+        const sessionId = this.extractSessionId(payload);
+        if (!sessionId) continue;
+
+        const out = payload && typeof payload === "object" ? { ...payload } : { id: sessionId };
+        if (!String(out.id || "").trim()) out.id = sessionId;
+        this.rememberSessionDirectoryHint(
+          sessionId,
+          directory,
+          i > 0 ? "create-session-fallback" : "create-session",
+        );
+        return out;
+      } catch (error) {
+        if (!firstError) firstError = error;
+      }
+    }
+
+    if (firstPayload !== null) {
+      const sessionId = this.extractSessionId(firstPayload);
+      if (sessionId && firstPayload && typeof firstPayload === "object" && !String(firstPayload.id || "").trim()) {
+        return { ...firstPayload, id: sessionId };
+      }
+      return firstPayload;
+    }
+    if (firstError) throw firstError;
+    return {};
   }
 
   async listModels() {

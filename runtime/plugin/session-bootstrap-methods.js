@@ -214,8 +214,16 @@ const sessionBootstrapMethods = {
 
   async createSession(title) {
     const created = await this.opencodeClient.createSession(title || "");
+    const sessionId = String(
+      (created && (created.id || created.sessionID || created.sessionId))
+      || (created && created.session && (created.session.id || created.session.sessionID || created.session.sessionId))
+      || "",
+    ).trim();
+    if (!sessionId) {
+      throw new Error("OpenCode 创建会话失败：返回数据缺少会话 ID");
+    }
     const session = {
-      id: created.id,
+      id: sessionId,
       title: created.title || title || "新会话",
       updatedAt: Date.now(),
     };

@@ -91,6 +91,8 @@ async function pollAssistantPayload(options) {
   let completionSeen = false;
   let byIdSeen = false;
   let lastLatestAt = 0;
+  let questionPending = false;
+  let lastQuestionCheckAt = 0;
 
   const emit = () => {
     if (typeof cfg.onToken === "function") cfg.onToken(String(payload.text || ""));
@@ -113,11 +115,33 @@ async function pollAssistantPayload(options) {
     return completionSeen;
   };
 
+  const checkQuestionPending = async (force = false) => {
+    if (typeof cfg.isQuestionPending !== "function") return false;
+    const now = Date.now();
+    if (!force && now - lastQuestionCheckAt < 800) return questionPending;
+    lastQuestionCheckAt = now;
+    try {
+      questionPending = Boolean(await cfg.isQuestionPending(cfg.signal));
+    } catch {
+      questionPending = false;
+    }
+    return questionPending;
+  };
+
   while (Date.now() - startedAt < maxTotalMs && Date.now() - lastProgressAt < quietTimeoutMs) {
     if (cfg.signal && cfg.signal.aborted) {
       throw new Error("用户取消了请求");
     }
     pollCount += 1;
+
+    if (
+      pollCount % 4 === 0
+      && !messageId
+      && !hasRenderablePayload(payload)
+      && await checkQuestionPending()
+    ) {
+      lastProgressAt = Date.now();
+    }
 
     let byIdUpdated = false;
 
@@ -181,10 +205,14 @@ async function pollAssistantPayload(options) {
       if (statusIndicatesTerminalNoWork(lastStatus)) {
         const hasRenderable = hasRenderablePayload(payload);
         if (!hasRenderable) {
+          if (await checkQuestionPending(true)) {
+            lastProgressAt = Date.now();
+          } else {
           const elapsedMs = Date.now() - startedAt;
           const allowShortTimeoutFastExit = noMessageTimeoutMs <= 2000;
           if (messageId || allowShortTimeoutFastExit || elapsedMs >= terminalNoPayloadGraceMs) {
             break;
+          }
           }
         } else {
           // Keep waiting for explicit assistant completion signal.
@@ -197,10 +225,11 @@ async function pollAssistantPayload(options) {
       !hasRenderablePayload(payload) &&
       Date.now() - startedAt >= noMessageTimeoutMs
     ) {
-      if (statusIndicatesTerminalNoWork(lastStatus)) {
+      if (await checkQuestionPending()) {
+        lastProgressAt = Date.now();
+      } else if (statusIndicatesTerminalNoWork(lastStatus)) {
         break;
-      }
-      if (!lastStatus && typeof cfg.getSessionStatus !== "function") {
+      } else if (!lastStatus && typeof cfg.getSessionStatus !== "function") {
         break;
       }
     }

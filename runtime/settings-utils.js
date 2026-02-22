@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = {
   defaultModel: "",
   requestTimeoutMs: 120000,
   enableStreaming: true,
-  debugLogs: false,
+  debugLogs: true,
   opencodeHomeDir: ".opencode-runtime",
   launchStrategy: "auto",
   wslDistro: "",

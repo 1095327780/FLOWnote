@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"Platform\\\\.isMobile\\\\|Platform\\\\.isDesktop\\\\|isMobile\\\\|isDesktop\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/runtime --include=\"*.js\" 2>/dev/null | head -20)",
+      "Bash(grep -r \"process\\\\.platform\\\\|win32\\\\|darwin\\\\|linux\" /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant/runtime --include=\"*.js\" 2>/dev/null | head -30)",
+      "Bash(find /Users/shanghao/Desktop/FLOWnote/.obsidian/plugins/opencode-assistant -name \"manifest.json\" -o -name \"package.json\" | xargs cat 2>/dev/null | head -50)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "filesystem",
+    "serena"
+  ]
+}

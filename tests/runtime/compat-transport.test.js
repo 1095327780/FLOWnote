@@ -393,6 +393,55 @@ test("extractMessageList should keep info-only envelope even when parts is missi
   assert.equal(list[0].parts.length, 0);
 });
 
+test("createSession should normalize session id aliases from response payload", async () => {
+  const transport = createTransport();
+  const calls = [];
+  transport.request = async (method, endpoint, _body, query) => {
+    calls.push({ method, endpoint, query });
+    if (method === "POST" && endpoint === "/session") {
+      return { sessionID: "ses_alias", title: "alias" };
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+
+  const session = await transport.createSession("alias");
+  assert.equal(session.id, "ses_alias");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].query && calls[0].query.directory, "/vault");
+  assert.equal(transport.getSessionScopedDirectory("ses_alias"), "/vault");
+});
+
+test("createSession should fallback directories in wsl mode when primary response lacks session id", async () => {
+  const transport = createTransport();
+  transport.launchContext = {
+    mode: "wsl",
+    directory: "/home/me/.opencode-assistant-workspace",
+  };
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.resolveWslDirectory = () => "/home/me/projects/FLOWnote";
+  transport.buildWslDirectoryCandidates = () => ["/home/me/projects/FLOWnote"];
+
+  const attemptedDirectories = [];
+  transport.request = async (method, endpoint, _body, query) => {
+    if (method !== "POST" || endpoint !== "/session") {
+      throw new Error(`unexpected request: ${method} ${endpoint}`);
+    }
+    const directory = String((query && query.directory) || "");
+    attemptedDirectories.push(directory);
+    if (directory === "/vault") return {};
+    if (directory === "/home/me/.opencode-assistant-workspace") return { sessionId: "ses_wsl_ok", title: "wsl" };
+    return {};
+  };
+
+  const session = await transport.createSession("");
+  assert.equal(session.id, "ses_wsl_ok");
+  assert.equal(attemptedDirectories[0], "/vault");
+  assert.equal(attemptedDirectories.length, 2);
+  assert.equal(Boolean(attemptedDirectories[1]), true);
+  const normalizedHint = transport.normalizeDirectoryForService(attemptedDirectories[1]);
+  assert.equal(transport.getSessionScopedDirectory("ses_wsl_ok"), normalizedHint);
+});
+
 test("fetchSessionMessages should fallback to unbounded list when limited window misses latest assistant", async () => {
   const transport = createTransport();
   const state = transport.createMessageListFetchState({ fallbackCooldownMs: 0 });
@@ -481,6 +530,140 @@ test("fetchSessionMessages should keep using unbounded strategy after detecting 
   assert.equal(second.strategy, "unbounded");
   assert.equal(limitedCalls, 1);
   assert.equal(unboundedCalls, 2);
+});
+
+test("fetchSessionMessages should fallback directory in wsl mode and cache session hint", async () => {
+  const transport = createTransport();
+  transport.launchContext = {
+    mode: "wsl",
+    directory: "/home/me/.opencode-assistant-workspace",
+    label: "wsl(sh)",
+    distro: "Ubuntu",
+    wslHome: "/home/me/.opencode-assistant-home",
+    wslUserHome: "/home/me",
+  };
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.resolveWslDirectory = (value) => String(value || "");
+  transport.buildWslDirectoryCandidates = () => ["/home/me/.opencode-assistant-workspace"];
+
+  transport.request = async (_method, endpoint, _body, query) => {
+    if (endpoint !== "/session/ses_1/message") throw new Error(`unexpected endpoint: ${endpoint}`);
+    if (query && query.directory === "/vault") {
+      return { messages: [] };
+    }
+    if (query && query.directory === "/home/me/.opencode-assistant-workspace") {
+      return {
+        messages: [
+          {
+            info: { id: "a_1", role: "assistant", time: { created: 1001, completed: 1002 } },
+            parts: [{ type: "text", text: "hello from hint dir" }],
+          },
+        ],
+      };
+    }
+    return { messages: [] };
+  };
+
+  const fetched = await transport.fetchSessionMessages("ses_1", {
+    limit: 20,
+    requireRecentTail: true,
+  });
+
+  assert.equal(fetched.strategy, "limited-directory-fallback");
+  assert.equal(Array.isArray(fetched.list), true);
+  assert.equal(fetched.list.length, 1);
+  assert.equal(transport.getSessionScopedDirectory("ses_1"), "/home/me/.opencode-assistant-workspace");
+});
+
+test("sendMessage should use session directory hint for history session", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = false;
+  transport.rememberSessionDirectoryHint("ses_1", "/home/me/.opencode-assistant-workspace");
+
+  transport.request = async (method, endpoint, _body, query) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      assert.equal(query && query.directory, "/home/me/.opencode-assistant-workspace");
+      return {
+        info: {
+          id: "a_1",
+          role: "assistant",
+          time: { created: 1001, completed: 1002 },
+          finish: "stop",
+        },
+        parts: [{ type: "text", text: "ok" }],
+      };
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(result.messageId, "a_1");
+  assert.equal(result.text, "ok");
+});
+
+test("sendMessage should route by session alias mapping", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = false;
+  transport.rememberSessionAlias("ses_old", "ses_new", "test");
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_new/message") {
+      return {
+        info: {
+          id: "a_new_1",
+          role: "assistant",
+          time: { created: 1001, completed: 1002 },
+          finish: "stop",
+        },
+        parts: [{ type: "text", text: "aliased session ok" }],
+      };
+    }
+    if (method === "GET" && endpoint === "/question") return [];
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_old",
+    prompt: "hello",
+  });
+
+  assert.equal(result.messageId, "a_new_1");
+  assert.equal(result.text, "aliased session ok");
+  assert.equal(transport.resolveSessionAlias("ses_old"), "ses_new");
+});
+
+test("hasPendingQuestionsForSession should fallback directory in wsl mode", async () => {
+  const transport = createTransport();
+  transport.launchContext = {
+    mode: "wsl",
+    directory: "/home/me/.opencode-assistant-workspace",
+    label: "wsl(sh)",
+    distro: "Ubuntu",
+    wslHome: "/home/me/.opencode-assistant-home",
+    wslUserHome: "/home/me",
+  };
+  transport.getDefaultWslWorkspaceDir = () => "/home/me/.opencode-assistant-workspace";
+  transport.resolveWslDirectory = (value) => String(value || "");
+  transport.buildWslDirectoryCandidates = () => ["/home/me/.opencode-assistant-workspace"];
+
+  transport.request = async (method, endpoint, _body, query) => {
+    if (method === "GET" && endpoint === "/question") {
+      if (query && query.directory === "/vault") return [];
+      if (query && query.directory === "/home/me/.opencode-assistant-workspace") {
+        return [{ id: "que_1", sessionID: "ses_1", questions: [{ id: "q1" }] }];
+      }
+      return [];
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+
+  const hasPending = await transport.hasPendingQuestionsForSession("ses_1");
+  assert.equal(hasPending, true);
+  assert.equal(transport.getSessionScopedDirectory("ses_1"), "/home/me/.opencode-assistant-workspace");
 });
 
 test("trySyncMessageRecovery should reuse placeholder parent message id", async () => {
@@ -728,6 +911,61 @@ test("sendMessage should fallback to polling stream callbacks when event stream 
   assert.equal(tokenUpdates.includes("polling"), true);
 });
 
+test("sendMessage should not fallback to polling when event stream is internally aborted after request", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+  let pollingFallbackCalled = 0;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_direct",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100, completed: 101 },
+          finish: "stop",
+        },
+        parts: [{ type: "text", text: "direct response" }],
+      };
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async (_sessionId, _startedAt, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal && typeof signal.addEventListener === "function") {
+        signal.addEventListener(
+          "abort",
+          () => reject(new Error("用户取消了请求")),
+          { once: true },
+        );
+      } else {
+        reject(new Error("用户取消了请求"));
+      }
+    });
+  transport.streamAssistantFromPolling = async () => {
+    pollingFallbackCalled += 1;
+    return {
+      messageId: "msg_poll_should_not_run",
+      text: "polling",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: true,
+    };
+  };
+  transport.trySyncMessageRecovery = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(pollingFallbackCalled, 0);
+  assert.equal(result.messageId, "msg_direct");
+  assert.equal(result.text, "direct response");
+});
+
 test("sendMessage should recover from request timeout when streaming payload is complete", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
@@ -790,6 +1028,209 @@ test("sendMessage should reject response without completion signal", async () =>
   );
 });
 
+test("sendMessage should not fail with idle empty payload when question request is pending", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_q_wait",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100 },
+        },
+        parts: [],
+      };
+    }
+    if (method === "GET" && endpoint === "/question") {
+      return [
+        {
+          id: "que_1",
+          sessionID: "ses_1",
+          questions: [{ question: "继续前请确认目标？", options: ["确认"] }],
+        },
+      ];
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => null;
+  transport.trySyncMessageRecovery = async () => null;
+  transport.reconcileAssistantResponseQuick = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.match(String(result.text || ""), /等待问题回答后继续生成/);
+});
+
+test("sendMessage should allow incomplete payload while question request is pending", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_q_partial",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100 },
+        },
+        parts: [
+          { type: "text", text: "请先回答以下问题后继续。" },
+        ],
+      };
+    }
+    if (method === "GET" && endpoint === "/question") {
+      return [
+        {
+          id: "que_2",
+          sessionID: "ses_1",
+          questions: [{ question: "你希望我重点优化什么？", options: ["架构", "性能"] }],
+        },
+      ];
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => ({
+    messageId: "msg_q_partial",
+    text: "请先回答以下问题后继续。",
+    reasoning: "",
+    meta: "",
+    blocks: [{ id: "tool_q_1", type: "tool", status: "running", title: "question", summary: "工具: question" }],
+    completed: false,
+  });
+  transport.trySyncMessageRecovery = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(result.messageId, "msg_q_partial");
+  assert.match(String(result.text || ""), /请先回答/);
+});
+
+test("sendMessage should retry quick reconcile before failing on idle empty response", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_retry_empty",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100 },
+        },
+        parts: [],
+      };
+    }
+    if (method === "GET" && endpoint === "/question") {
+      return [];
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => null;
+  transport.trySyncMessageRecovery = async () => null;
+  transport.fetchSessionMessages = async () => ({ list: [] });
+  transport.getSessionStatus = async () => ({ type: "idle" });
+
+  let reconcileCalls = 0;
+  transport.reconcileAssistantResponseQuick = async () => {
+    reconcileCalls += 1;
+    if (reconcileCalls < 2) return null;
+    return {
+      messageId: "msg_retry_done",
+      text: "late finalized answer",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: true,
+    };
+  };
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(result.messageId, "msg_retry_done");
+  assert.equal(result.text, "late finalized answer");
+  assert.equal(reconcileCalls >= 2, true);
+});
+
+test("sendMessage should auto-recreate stale session when idle and empty list persists", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = false;
+
+  let createSessionCalls = 0;
+  let postOldCalls = 0;
+  let postNewCalls = 0;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "GET" && endpoint === "/question") return [];
+
+    if (method === "POST" && endpoint === "/session/ses_old/message") {
+      postOldCalls += 1;
+      return {
+        info: {
+          id: "msg_old_empty",
+          role: "assistant",
+          sessionID: "ses_old",
+          time: { created: 100 },
+        },
+        parts: [],
+      };
+    }
+    if (method === "POST" && endpoint === "/session") {
+      createSessionCalls += 1;
+      return { id: "ses_new", title: "Recovered session", time: { created: 200, updated: 200 } };
+    }
+    if (method === "POST" && endpoint === "/session/ses_new/message") {
+      postNewCalls += 1;
+      return {
+        info: {
+          id: "msg_new_ok",
+          role: "assistant",
+          sessionID: "ses_new",
+          time: { created: 201, completed: 202 },
+          finish: "stop",
+        },
+        parts: [{ type: "text", text: "recreated session response" }],
+      };
+    }
+    if (method === "GET" && endpoint === "/session/status") {
+      return { type: "idle" };
+    }
+    if (method === "GET" && endpoint === "/session/ses_old/message") {
+      return { messages: [] };
+    }
+    if (method === "GET" && endpoint === "/session/ses_new/message") {
+      return { messages: [] };
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.trySyncMessageRecovery = async () => null;
+  transport.reconcileAssistantResponseQuick = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_old",
+    prompt: "hello",
+  });
+
+  assert.equal(createSessionCalls, 1);
+  assert.equal(postOldCalls, 1);
+  assert.equal(postNewCalls, 1);
+  assert.equal(result.text, "recreated session response");
+  assert.equal(transport.resolveSessionAlias("ses_old"), "ses_new");
+});
+
 test("reconcileAssistantResponseQuick should promote latest completed assistant message", async () => {
   const transport = createTransport();
   const startedAt = 1000;
@@ -831,6 +1272,52 @@ test("reconcileAssistantResponseQuick should promote latest completed assistant 
 
   assert.equal(reconciled.messageId, "msg_final");
   assert.equal(reconciled.text, "final from list");
+  assert.equal(Boolean(reconciled.completed), true);
+});
+
+test("reconcileAssistantResponseQuick should recover latest assistant by user anchor when startedAt is skewed", async () => {
+  const transport = createTransport();
+  const startedAt = Date.now() + 10 * 60 * 1000;
+
+  transport.request = async (method, endpoint, _body, query) => {
+    if (method === "GET" && endpoint === "/session/ses_1/message") {
+      if (!query || !Object.prototype.hasOwnProperty.call(query, "directory")) {
+        throw new Error("directory query is required");
+      }
+      return {
+        messages: [
+          {
+            info: { id: "u_old", role: "user", time: { created: 1000 } },
+            parts: [{ type: "text", text: "old user" }],
+          },
+          {
+            info: { id: "a_old", role: "assistant", parentID: "u_old", time: { created: 1001, completed: 1002 } },
+            parts: [{ type: "text", text: "old answer" }],
+          },
+          {
+            info: { id: "u_new", role: "user", time: { created: 2000 } },
+            parts: [{ type: "text", text: "new user" }],
+          },
+          {
+            info: { id: "a_new", role: "assistant", parentID: "u_new", time: { created: 2001, completed: 2002 } },
+            parts: [{ type: "text", text: "anchored response" }],
+          },
+        ],
+      };
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint} ${JSON.stringify(query || {})}`);
+  };
+
+  const reconciled = await transport.reconcileAssistantResponseQuick(
+    "ses_1",
+    { messageId: "", text: "", reasoning: "", meta: "", blocks: [], completed: false },
+    startedAt,
+    undefined,
+    "",
+  );
+
+  assert.equal(reconciled.messageId, "a_new");
+  assert.equal(reconciled.text, "anchored response");
   assert.equal(Boolean(reconciled.completed), true);
 });
 

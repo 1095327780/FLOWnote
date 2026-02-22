@@ -121,11 +121,13 @@ function createTransportHandlers(view, sessionId, draftId) {
     onQuestionRequest: (questionRequest) => {
       const request = view.upsertPendingQuestionRequest(questionRequest || {});
       if (!request) return;
-      console.log("[opencode-assistant] question requested", {
-        id: request.id,
-        sessionId: request.sessionId,
-        count: Array.isArray(request.questions) ? request.questions.length : 0,
-      });
+      if (view.plugin && typeof view.plugin.log === "function") {
+        view.plugin.log(`question requested ${JSON.stringify({
+          id: request.id,
+          sessionId: request.sessionId,
+          count: Array.isArray(request.questions) ? request.questions.length : 0,
+        })}`);
+      }
       view.setRuntimeStatus("请在下方问题面板中回答。", "info");
       view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
     },

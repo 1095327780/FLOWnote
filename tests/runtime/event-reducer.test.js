@@ -120,6 +120,40 @@ test("event reducer should stop on idle when no message was produced", () => {
   assert.equal(reducer.isDone(), true);
 });
 
+test("event reducer should keep waiting when question is pending even if session turns idle", () => {
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt: Date.now(),
+  });
+
+  reducer.consume({
+    type: "question.asked",
+    properties: {
+      requestID: "que_1",
+      sessionID: "ses_1",
+      request: { id: "que_1", sessionID: "ses_1" },
+    },
+  });
+  reducer.consume({
+    type: "session.idle",
+    properties: { sessionID: "ses_1" },
+  });
+  assert.equal(reducer.isDone(), false);
+
+  reducer.consume({
+    type: "question.replied",
+    properties: {
+      requestID: "que_1",
+      sessionID: "ses_1",
+    },
+  });
+  reducer.consume({
+    type: "session.idle",
+    properties: { sessionID: "ses_1" },
+  });
+  assert.equal(reducer.isDone(), true);
+});
+
 test("event reducer should reset completion state when newer assistant message starts", () => {
   const startedAt = Date.now();
   const reducer = createTransportEventReducer({

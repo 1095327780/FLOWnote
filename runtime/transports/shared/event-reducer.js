@@ -36,6 +36,7 @@ function createTransportEventReducer(options) {
   const partKindById = new Map();
   const promptedPermissionIds = new Set();
   const promptedQuestionIds = new Set();
+  const activeQuestionIds = new Set();
 
   let messageId = "";
   let activeMessageCreatedAt = 0;
@@ -132,6 +133,7 @@ function createTransportEventReducer(options) {
       (typeof props.sessionID === "string" && props.sessionID) ||
       "";
     if (!requestId || (reqSession && reqSession !== sessionId)) return;
+    activeQuestionIds.add(requestId);
     if (promptedQuestionIds.has(requestId)) return;
     promptedQuestionIds.add(requestId);
     call(cfg.onQuestionRequest, request || {});
@@ -142,6 +144,8 @@ function createTransportEventReducer(options) {
     const requestId = typeof props.requestID === "string" ? props.requestID : "";
     const reqSession = typeof props.sessionID === "string" ? props.sessionID : "";
     if (reqSession && reqSession !== sessionId) return;
+    if (requestId) activeQuestionIds.delete(requestId);
+    else activeQuestionIds.clear();
     call(cfg.onQuestionResolved, {
       requestId,
       sessionId: reqSession || sessionId,
@@ -339,6 +343,7 @@ function createTransportEventReducer(options) {
     if (event.type === "session.idle") {
       const sid = extractSessionIdFromEventProperties(event.properties);
       if (sid === sessionId) {
+        if (activeQuestionIds.size > 0) return done;
         const hasAnyPayload = Boolean(String(text || "").trim()
           || String(reasoning || "").trim()
           || String(meta || "").trim()
@@ -358,6 +363,7 @@ function createTransportEventReducer(options) {
         extractSessionStatusFromEventProperties(event.properties),
       );
       if (sid === sessionId && status === "idle") {
+        if (activeQuestionIds.size > 0) return done;
         const hasAnyPayload = Boolean(String(text || "").trim()
           || String(reasoning || "").trim()
           || String(meta || "").trim()
