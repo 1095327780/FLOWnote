@@ -65,7 +65,6 @@ class CaptureModal extends Modal {
           try {
             finalText = await cleanupCapture(raw, mc);
           } catch (e) {
-            console.warn("[FLOWnote] AI cleanup failed, using raw text:", e);
             statusEl.textContent = "⚠️ AI 清理失败，使用原文";
             finalText = raw;
           }

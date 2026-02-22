@@ -10,67 +10,7 @@ const {
   requestUrl = async () => ({ status: 500, text: "", json: null }),
 } = obsidianModule;
 
-// Node.js modules — loaded lazily inside desktop-only code paths.
-// MUST NOT be required at module top-level; mobile Obsidian has no Node.js runtime
-// and Platform flags may not be initialised during module evaluation.
-let fs, Module, path;
-
-function loadNodeModules() {
-  if (fs) return;
-  fs = require("fs");
-  Module = require("module");
-  path = require("path");
-}
-
 const DEFAULT_VIEW_TYPE = "flownote-view";
-let obsidianRequireShimInstalled = false;
-
-function installObsidianRequireShim() {
-  if (obsidianRequireShimInstalled) return;
-  if (!Module || typeof Module._load !== "function") return;
-
-  const previousLoad = Module._load;
-  Module._load = function patchedModuleLoad(request, parent, isMain) {
-    if (request === "obsidian") return obsidianModule;
-    return previousLoad.call(this, request, parent, isMain);
-  };
-
-  obsidianRequireShimInstalled = true;
-}
-
-function resolvePluginRootDir(plugin) {
-  const candidates = [];
-  if (plugin && plugin.manifest && plugin.manifest.dir) {
-    candidates.push(String(plugin.manifest.dir));
-  }
-
-  const vaultPath = plugin && typeof plugin.getVaultPath === "function"
-    ? plugin.getVaultPath()
-    : "";
-  const configDir = plugin && plugin.app && plugin.app.vault && plugin.app.vault.configDir
-    ? String(plugin.app.vault.configDir)
-    : ".obsidian";
-  const pluginId = plugin && plugin.manifest && plugin.manifest.id
-    ? String(plugin.manifest.id)
-    : "flownote";
-  if (vaultPath) {
-    candidates.push(path.join(vaultPath, configDir, "plugins", pluginId));
-  }
-  if (typeof __dirname === "string" && __dirname) {
-    candidates.push(__dirname);
-  }
-
-  for (const candidate of candidates.map((item) => String(item || "").trim()).filter(Boolean)) {
-    if (fs.existsSync(path.join(candidate, "manifest.json"))) return candidate;
-  }
-  return candidates[0] || process.cwd();
-}
-
-function requireFromPluginRoot(plugin, relativePath) {
-  const pluginRoot = resolvePluginRootDir(plugin);
-  const absolutePath = path.join(pluginRoot, relativePath);
-  return require(absolutePath);
-}
 
 /* =========================================================================
  * Mobile-only code (inlined — mobile Obsidian has no Node.js require)
@@ -777,7 +717,6 @@ async function enrichUrlsWithAiFallback(text, mcSettings) {
 async function enrichUrlsInText(text, mcSettings, options = {}) {
   const onStatus = typeof options.onStatus === "function" ? options.onStatus : () => {};
   const urls = extractUrlsFromText(text);
-  console.log("[FLOWnote] enrichUrlsInText: found urls:", urls);
   if (urls.length === 0) return { text, statusHint: "" };
 
   const linkResolver = normalizeLinkResolver(mcSettings && mcSettings.linkResolver);
@@ -832,37 +771,15 @@ async function enrichUrlsInText(text, mcSettings, options = {}) {
     }
   }
 
-  const failureSummary = failures
-    .slice(0, 6)
-    .map((f) => ({
-      provider: f && f.providerId ? String(f.providerId) : "unknown",
-      status: Number(f && f.status) || 0,
-      error: String((f && f.error) || "").slice(0, 140),
-    }));
-  console.log("[FLOWnote] url resolver result:", {
-    total: urls.length,
-    success: urlContents.length,
-    failed: failures.length,
-    failures: failureSummary,
-  });
-
   if (urlContents.length === 0) {
     const failureHint = buildResolverFailureHint(failures);
     if (aiReady) {
       const hint = `⚠️ ${failureHint}，已回退 AI`;
-      console.warn("[FLOWnote] URL resolver fallback -> AI:", {
-        failureHint,
-        failures: failureSummary,
-      });
       onStatus(hint);
       const fallback = await enrichUrlsWithAiFallback(text, mcSettings);
       const fallbackText = fallback || appendLinesToText(text, buildResolverSummaryLines([], urls));
       return { text: fallbackText, statusHint: hint };
     }
-    console.warn("[FLOWnote] URL resolver fallback -> plain text:", {
-      failureHint,
-      failures: failureSummary,
-    });
     return {
       text: appendLinesToText(text, buildResolverSummaryLines([], urls)),
       statusHint: `⚠️ ${failureHint}，已回退纯文本`,
@@ -1084,7 +1001,6 @@ class CaptureModal extends Modal {
           try {
             finalText = await cleanupCapture(raw, mc);
           } catch (e) {
-            console.warn("[FLOWnote] AI cleanup failed, using raw text:", e);
             statusEl.textContent = "⚠️ AI 清理失败，使用原文";
             finalText = raw;
           }
@@ -1093,7 +1009,6 @@ class CaptureModal extends Modal {
         if (mc.enableUrlSummary !== false) {
           const hasUrl = URL_REGEX.test(finalText);
           URL_REGEX.lastIndex = 0;
-          console.log("[FLOWnote] URL summary check — enableUrlSummary:", mc.enableUrlSummary, "hasUrl:", hasUrl, "text:", finalText.slice(0, 100));
           if (hasUrl) {
             statusEl.textContent = "🔗 解析链接内容…";
             try {
@@ -1105,11 +1020,9 @@ class CaptureModal extends Modal {
               finalText = enriched.text;
               if (enriched.statusHint) statusEl.textContent = enriched.statusHint;
             } catch (e) {
-              console.warn("[FLOWnote] URL enrichment failed:", e);
+              statusEl.textContent = `⚠️ 链接解析失败，已回退原文：${e instanceof Error ? e.message : String(e)}`;
             }
           }
-        } else {
-          console.log("[FLOWnote] URL summary skipped — enableUrlSummary:", mc.enableUrlSummary);
         }
 
         statusEl.textContent = "📝 写入日记…";
@@ -1187,7 +1100,7 @@ class MobileSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "移动端快速捕获设置" });
+    if (typeof this.setHeading === "function") this.setHeading();
     containerEl.createEl("p", { text: "配置 AI 服务和日记路径，用于移动端快速捕获想法。" });
 
     const mc = this.plugin.settings.mobileCapture;
@@ -1409,30 +1322,30 @@ class FLOWnoteAssistantPlugin extends Plugin {
 
   ensureFacadeMethodsLoaded() {
     if (this.__pluginFacadeMethodsLoaded) return;
-    loadNodeModules();
-    installObsidianRequireShim();
 
     const {
       createModuleLoaderMethods,
-    } = requireFromPluginRoot(this, "runtime/plugin/module-loader-methods");
+    } = require("./runtime/plugin/module-loader-methods");
     const {
       runtimeStateMethods,
-    } = requireFromPluginRoot(this, "runtime/plugin/runtime-state-methods");
+    } = require("./runtime/plugin/runtime-state-methods");
     const {
       modelCatalogMethods,
-    } = requireFromPluginRoot(this, "runtime/plugin/model-catalog-methods");
+    } = require("./runtime/plugin/model-catalog-methods");
     const {
       createBundledSkillsMethods,
-    } = requireFromPluginRoot(this, "runtime/plugin/bundled-skills-methods");
+    } = require("./runtime/plugin/bundled-skills-methods");
     const {
       sessionBootstrapMethods,
-    } = requireFromPluginRoot(this, "runtime/plugin/session-bootstrap-methods");
+    } = require("./runtime/plugin/session-bootstrap-methods");
 
     const moduleLoaderMethods = createModuleLoaderMethods({
       defaultViewType: DEFAULT_VIEW_TYPE,
     });
     const bundledSkillsMethods = createBundledSkillsMethods({
-      pluginDirname: resolvePluginRootDir(this),
+      pluginDirname: this.manifest && this.manifest.dir
+        ? String(this.manifest.dir)
+        : (typeof __dirname === "string" ? __dirname : ""),
     });
 
     Object.assign(
@@ -1454,8 +1367,6 @@ class FLOWnoteAssistantPlugin extends Plugin {
     }
 
     try {
-      const manifestVersion = this.manifest && this.manifest.version ? String(this.manifest.version) : "dev";
-      console.log(`[FLOWnote] runtime main.js v${manifestVersion} loaded`);
       this.ensureFacadeMethodsLoaded();
 
       this.runtimeStateMigrationDirty = false;
@@ -1489,13 +1400,13 @@ class FLOWnoteAssistantPlugin extends Plugin {
 
       this.addCommand({
         id: "open-flownote",
-        name: "打开 FLOWnote",
+        name: "打开",
         callback: () => this.activateView(),
       });
 
       this.addCommand({
         id: "flownote-send-selected-text",
-        name: "发送选中文本到 FLOWnote",
+        name: "发送选中文本",
         editorCallback: async (editor) => {
           const text = editor.getSelection().trim();
           if (!text) return new Notice("请先选择文本");
@@ -1508,7 +1419,7 @@ class FLOWnoteAssistantPlugin extends Plugin {
 
       this.addCommand({
         id: "flownote-new-session",
-        name: "FLOWnote: 新建会话",
+        name: "新建会话",
         callback: async () => {
           const session = await this.createSession("");
           this.sessionStore.setActiveSession(session.id);
@@ -1559,9 +1470,6 @@ class FLOWnoteAssistantPlugin extends Plugin {
 
   async _onloadMobile() {
     try {
-      const v = this.manifest && this.manifest.version ? String(this.manifest.version) : "dev";
-      console.log(`[FLOWnote] mobile runtime v${v} loaded`);
-
       await this._loadMobileData();
 
       this.addRibbonIcon("lightbulb", "快速捕获想法", () => this._openCaptureModal());

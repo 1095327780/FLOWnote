@@ -1,17 +1,23 @@
 {
   "name": "flownote",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "echo \"No build step. Runtime is shipped from main.js + runtime/.\"",
+    "build": "npm run build:release",
+    "build:release": "node scripts/build-release.mjs",
     "guard:repo-hygiene": "node scripts/guard-repo-hygiene.js",
     "guard:source-of-truth": "node scripts/guard-source-of-truth.js",
     "guard:runtime-contract": "node scripts/guard-runtime-contract.js",
     "verify:version-sync": "node scripts/verify-version-sync.js",
+    "check:submission": "node scripts/check-submission-readiness.mjs",
     "check": "node --check main.js",
     "check:runtime": "find runtime -type f -name '*.js' -print0 | xargs -0 -n1 node --check",
     "test": "node --test tests/runtime/*.test.js",
-    "ci": "npm run guard:repo-hygiene && npm run guard:source-of-truth && npm run guard:runtime-contract && npm run verify:version-sync && npm run check && npm run check:runtime && npm run test"
+    "ci": "npm run guard:repo-hygiene && npm run guard:source-of-truth && npm run guard:runtime-contract && npm run verify:version-sync && npm run check && npm run check:runtime && npm run test",
+    "release:check": "npm run ci && npm run build:release && npm run check:submission"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
   }
 }

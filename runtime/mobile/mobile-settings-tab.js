@@ -11,7 +11,7 @@ class MobileSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "移动端快速捕获设置" });
+    if (typeof this.setHeading === "function") this.setHeading();
     containerEl.createEl("p", {
       text: "配置 AI 服务和日记路径，用于移动端快速捕获想法。",
     });

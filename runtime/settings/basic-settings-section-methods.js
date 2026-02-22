@@ -1,4 +1,4 @@
-const { Setting, Notice } = require("obsidian");
+const { Setting, Notice, Platform = {} } = require("obsidian");
 const {
   LINK_RESOLVER_DEFAULTS,
   normalizeLinkResolver,
@@ -62,16 +62,24 @@ function setResolverProviderKey(linkResolver, providerId, nextValue) {
   }
 }
 
+function isWindowsUiPlatform() {
+  if (typeof Platform.isWin === "boolean") return Platform.isWin;
+  if (typeof navigator !== "undefined" && typeof navigator.userAgent === "string") {
+    return /windows/i.test(navigator.userAgent);
+  }
+  return false;
+}
+
 class BasicSettingsSectionMethods {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "FLOWnote 设置" });
+    if (typeof this.setHeading === "function") this.setHeading();
     containerEl.createEl("p", {
       text: "常用情况下只需要确认连接状态和 Provider 登录。其余高级项一般保持默认即可。",
     });
 
-    const isWindows = typeof process !== "undefined" && process.platform === "win32";
+    const isWindows = isWindowsUiPlatform();
     const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
     const launchStrategyForUi = !isWindows && launchStrategyValue === "wsl" ? "auto" : launchStrategyValue;
     new Setting(containerEl)
@@ -140,7 +148,9 @@ class BasicSettingsSectionMethods {
 
     this.renderProviderAuthSection(containerEl);
 
-    containerEl.createEl("h3", { text: "高级设置" });
+    new Setting(containerEl)
+      .setName("高级设置")
+      .setHeading();
 
     new Setting(containerEl)
       .setName("实验功能：启用 SDK 传输")
@@ -274,7 +284,9 @@ class BasicSettingsSectionMethods {
       return; // mobile module not available
     }
 
-    containerEl.createEl("h3", { text: "移动端快速捕获" });
+    new Setting(containerEl)
+      .setName("移动端快速捕获")
+      .setHeading();
     containerEl.createEl("p", {
       text: "在桌面端预先配置移动端捕获设置。同步到移动端后即可使用。",
       cls: "setting-item-description",

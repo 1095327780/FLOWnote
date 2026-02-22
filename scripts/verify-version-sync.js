@@ -12,19 +12,26 @@ function readJson(relativePath) {
 function main() {
   const pkg = readJson("package.json");
   const manifest = readJson("manifest.json");
-  const mainCode = fs.readFileSync(path.join(process.cwd(), "main.js"), "utf8");
+  const versions = readJson("versions.json");
 
   const errors = [];
   if (String(pkg.version || "") !== String(manifest.version || "")) {
     errors.push(`package.json(${pkg.version}) 与 manifest.json(${manifest.version}) 版本不一致`);
   }
 
-  if (/runtime main\.js v\d+\.\d+\.\d+ loaded/.test(mainCode)) {
-    errors.push("main.js 仍存在硬编码版本日志");
-  }
-
-  if (!/this\.manifest\s*&&\s*this\.manifest\.version/.test(mainCode)) {
-    errors.push("main.js 未使用 manifest 动态版本");
+  if (!versions || typeof versions !== "object" || Array.isArray(versions)) {
+    errors.push("versions.json 必须是 JSON 对象");
+  } else {
+    const manifestVersion = String(manifest.version || "");
+    const mappedMinApp = String(versions[manifestVersion] || "");
+    const manifestMinApp = String(manifest.minAppVersion || "");
+    if (!mappedMinApp) {
+      errors.push(`versions.json 缺少当前版本映射: ${manifestVersion}`);
+    } else if (mappedMinApp !== manifestMinApp) {
+      errors.push(
+        `versions.json(${manifestVersion} => ${mappedMinApp}) 与 manifest.minAppVersion(${manifestMinApp}) 不一致`,
+      );
+    }
   }
 
   if (errors.length) {

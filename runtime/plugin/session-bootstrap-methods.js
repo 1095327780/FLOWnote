@@ -194,8 +194,8 @@ const sessionBootstrapMethods = {
     if (!this.skillService) return;
     const vaultPath = this.getVaultPath();
     const syncResult = this.syncBundledSkills(vaultPath, { force: true });
-    console.log(
-      `[FLOWnote] bundled skills reload: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
+    this.log(
+      `bundled skills reload: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
       `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
     );
     if (syncResult.errors.length) this.log(`bundled skills sync: ${syncResult.errors.join("; ")}`);
@@ -354,8 +354,8 @@ const sessionBootstrapMethods = {
     const vaultPath = this.getVaultPath();
     const syncResult = this.syncBundledSkills(vaultPath, { force: Boolean(options.force) });
     if (!syncResult.errors.length && !syncResult.skipped) {
-      console.log(
-        `[FLOWnote] bundled skills bootstrap: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
+      this.log(
+        `bundled skills bootstrap: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
         `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
       );
     }

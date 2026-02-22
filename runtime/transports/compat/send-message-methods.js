@@ -192,12 +192,6 @@ function createSendMessageMethods(deps = {}) {
     const emitNoRenderableDiag = (label, payload) => {
       const line = `${label} ${safeJson(payload)}`;
       this.log(line);
-      try {
-        if (typeof console !== "undefined" && typeof console.error === "function") {
-          console.error("[FLOWnote]", line);
-        }
-      } catch {
-      }
     };
     try {
       const startedAt = Date.now();

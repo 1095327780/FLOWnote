@@ -9,10 +9,6 @@ const mobileCaptureMethodsMixin = {
    */
   async onloadMobile() {
     try {
-      const manifestVersion =
-        this.manifest && this.manifest.version ? String(this.manifest.version) : "dev";
-      console.log(`[FLOWnote] mobile runtime v${manifestVersion} loaded`);
-
       await this.loadMobilePersistedData();
 
       // Ribbon icon
