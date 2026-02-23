@@ -1,93 +1,151 @@
 # FLOWnote
 
-FLOWnote 是一个由 OpenCode 驱动的笔记管理插件，目标是让用户用 AI 完成“捕获 -> 整理 -> 连接 -> 输出”的闭环。
+FLOWnote is an OpenCode-powered plugin for AI-assisted note management.
 
-1. 桌面端：连接 OpenCode 后直接使用内置技能体系进行笔记管理与执行。
-2. 移动端：一键快速捕获，支持链接解析、AI 清理并写入每日笔记。
+It is designed as an end-to-end workflow for:
 
-## 主要功能
+- Capture -> Cultivate -> Connect -> Create
+- Daily execution + weekly/monthly review
+- Skill-driven structured writing, not generic chat only
 
-- 会话侧栏：新建、切换、持久化历史会话。
-- 聊天面板：流式渲染、重试、取消、权限请求处理。
-- 技能系统：扫描 `/.opencode/skills/*/SKILL.md` 并按策略注入。
-- 连接诊断：检测可执行文件、启动方式、连接状态。
-- 移动捕获：一键记录想法到每日笔记，可选 AI 清理和 URL 解析。
+## What Makes FLOWnote Different
 
-## 安装与升级
+FLOWnote is inspired by [Claudian](https://github.com/YishenTu/claudian), which embeds Claude Code into Obsidian.
 
-## 社区仓库安装
-1. Obsidian -> 设置 -> 第三方插件 -> 浏览。
-2. 搜索 `FLOWnote` 并安装。
-3. 启用插件后打开设置完成初始化。
+FLOWnote takes a different path:
 
-## 手动安装（开发/测试）
-1. 将 `main.js`、`manifest.json`、`styles.css` 放入：  
-   `Vault/.obsidian/plugins/flownote/`
-2. 重新加载 Obsidian 并启用插件。
+- Integrates **OpenCode** runtime into Obsidian
+- Ships a **domain-specific skill pack** for knowledge workflows
+- Focuses on **note management loops**, not just agent access
 
-## 核心设置
+In short: this is not only "OpenCode inside Obsidian", but "OpenCode + a complete note-management skill system".
 
-## 桌面端
-- `FLOWnote CLI 路径（可选）`：通常留空自动探测。
-- `连接启动方式`：自动 / Windows 本机 / WSL。
-- `技能注入方式`：`summary`（推荐）/`full`/`off`。
+## Core Capabilities
 
-## 移动端
-- AI 提供商、API Key、Base URL、模型名。
-- 链接解析服务：`TianAPI` / `ShowAPI` / `咕咕数据` 三选一。
-- 每日笔记路径与“想法区域标题”。
+### Desktop AI workspace
 
-## 命令
+- Session sidebar with persistent history
+- Streaming chat responses and retry/cancel flows
+- Model/provider switching and provider auth handling
+- Connection diagnostics for executable path, runtime mode, and startup failures
+
+### Built-in skills (bundled and auto-synced)
+
+- Built-in skills are packaged in `bundled-skills/`
+- On startup, FLOWnote syncs bundled skills into your vault skills directory (default: `.opencode/skills`)
+- Only bundled skill IDs are enabled for execution in FLOWnote's skill menu
+- Skill injection modes: `summary` (recommended), `full`, `off`
+
+### Mobile quick capture
+
+- One-tap capture modal to write into daily note
+- Optional AI cleanup for spoken/raw text
+- URL enrichment pipeline with fallback:
+  - Resolver provider (choose one): `TianAPI` / `ShowAPI` / `Gugudata`
+  - If resolver unavailable and AI configured: AI fallback
+  - If no resolver and no AI key: keep plain text
+- Original URL is preserved in output
+- iOS keyboard avoidance fallback is included for focus visibility
+
+## Built-in Skill Pack
+
+FLOWnote currently bundles these skills:
+
+| Skill | Purpose |
+|---|---|
+| `ah` | Router/entrypoint: menu + intent-based dispatch |
+| `ah-note` | Create today's daily note with planning context |
+| `ah-capture` | Low-friction idea capture into daily note |
+| `ah-inbox` | Batch process captured ideas into actions/cards |
+| `ah-read` | Reading-note processing and highlight consolidation |
+| `ah-card` | Turn insights into permanent notes with link recommendations |
+| `ah-think` | Thinking models toolkit (Feynman, first principles, inversion, etc.) |
+| `ah-review` | Daily review and reflection flow |
+| `ah-week` | Weekly review with metrics + residual idea handling |
+| `ah-month` | Monthly review and strategy-level reflection |
+| `ah-project` | Create structured project scaffold and templates |
+| `ah-archive` | Archive completed projects with lessons extracted |
+| `ah-index` | Build/update AI-readable vault index |
+| `ah-memory` | Cross-skill memory/progress state conventions |
+
+## Commands
 
 - `打开`
 - `发送选中文本`
 - `新建会话`
-- `快速捕获想法`（移动端）
+- `快速捕获想法` (mobile)
 
-## 常见问题
+## Installation
 
-## 1) `spawn opencode ENOENT`
-- 在设置中先使用自动探测。
-- 如失败，手动填写 CLI 绝对路径（例如 `/Users/xxx/.opencode/bin/opencode`）。
-- 运行“连接诊断”查看具体失败点。
+### Community plugin directory
 
-## 2) 链接解析失败
-- 检查所选解析服务 Key 是否可用、是否限流。
-- 若未配置解析服务，插件会回退到 AI 或纯文本保留。
+After approval, install from Community Plugins by searching `FLOWnote`.
 
-## 开发者政策与数据披露
+### Manual installation
 
-## 账户要求
-- 插件本身不要求单独注册 FLOWnote 账户。
-- 如启用 AI 或 URL 解析，需用户自行配置第三方服务凭据。
+Put these files into:
 
-## 联网与第三方服务
-- 仅在用户触发相关功能时请求外网。
-- 可能访问的服务类别：
-  - AI 推理服务（例如 DeepSeek、通义千问、Moonshot、智谱、SiliconFlow 或用户自定义兼容 OpenAI 接口）。
-  - URL 解析服务（TianAPI、ShowAPI、咕咕数据）。
-  - 本地 FLOWnote/Opencode 运行时服务（桌面端会话能力）。
+`<Vault>/.obsidian/plugins/flownote/`
 
-## 数据存储位置
-- 配置与会话状态写入插件 `data.json`（Obsidian 插件标准存储）。
-- 移动端捕获内容写入用户指定的每日笔记文件。
-- 不会主动写入插件目录外的任意路径。
+- `main.js`
+- `manifest.json`
+- `styles.css`
 
-## 遥测声明
-- 插件不包含独立遥测上报或行为统计代码。
-- 调试日志仅在开启 `debugLogs` 时输出到控制台。
+Then reload plugins in Obsidian.
 
-## 付费项说明
-- 插件本身不收费。
-- 第三方 AI/解析服务可能产生调用费用，计费规则由服务商决定。
+## Setup
 
-## 外部文件访问说明
-- 读取：当前 Vault 文件、技能目录。
-- 写入：插件状态文件、用户确认后的目标笔记（如每日笔记）。
+### Desktop setup
 
-## 开发与发布
+1. Install OpenCode locally.
+2. Open FLOWnote settings.
+3. Keep CLI path empty first (auto-detect), or set explicit path if needed.
+4. Choose launch strategy (`auto` / native Windows / WSL) when applicable.
 
-## 本地检查
+### Mobile setup
+
+1. Configure AI provider (or custom OpenAI-compatible endpoint).
+2. Configure URL resolver provider and key if link parsing is needed.
+3. Set daily note path and idea section header.
+
+## Privacy, Data, and Network Disclosure
+
+### Account requirements
+
+- FLOWnote itself does not require a separate FLOWnote account.
+- Third-party AI or URL resolver usage requires user-provided credentials.
+
+### Data storage
+
+- Plugin state is stored in plugin `data.json` (Obsidian standard behavior).
+- Capture output is written to user notes (for example, daily notes).
+
+### Telemetry
+
+- No standalone telemetry/analytics pipeline is implemented by FLOWnote.
+- Debug logs are local console output and controlled by `debugLogs`.
+
+### External network destinations (when features are enabled by user)
+
+- AI endpoints (examples):
+  - `api.deepseek.com`
+  - `dashscope.aliyuncs.com`
+  - `api.moonshot.cn`
+  - `open.bigmodel.cn`
+  - `api.siliconflow.cn`
+  - user-defined custom endpoint
+- URL resolver endpoints:
+  - `apis.tianapi.com`
+  - `route.showapi.com`
+  - `api.gugudata.com`
+- Local runtime communication to OpenCode service on local machine
+
+### Paid services
+
+- FLOWnote plugin itself is free.
+- Third-party APIs may charge by their own pricing plans.
+
+## Development
 
 ```bash
 npm run ci
@@ -95,10 +153,25 @@ npm run build:release
 npm run check:submission
 ```
 
-## Release 资产
+Release assets are generated in `release/`:
 
 - `release/main.js`
 - `release/manifest.json`
 - `release/styles.css`
 
-发布到 Obsidian 社区仓库时，GitHub Release 仅上传以上三个文件。
+## Acknowledgements
+
+- Inspired by [Claudian](https://github.com/YishenTu/claudian) by YishenTu.
+- Claudian is MIT licensed, and FLOWnote also uses MIT license for this project.
+
+---
+
+## 中文说明（简版）
+
+FLOWnote 的核心不是“把 OpenCode 接进来就结束”，而是提供一整套围绕知识管理的技能工作流：
+
+- 桌面端：OpenCode 会话 + 模型/技能协作
+- 移动端：快速捕获 + 链接解析 + AI 清理 + 每日笔记落盘
+- 技能层：从 `/ah` 统一入口，到日记、阅读、制卡、回顾、项目、归档、索引、记忆管理的完整闭环
+
+另外，项目确实参考了 Claudian 的思路，但 FLOWnote 重点做的是“针对笔记管理场景的技能体系与流程约束”。
