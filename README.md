@@ -1,5 +1,7 @@
 # FLOWnote
 
+Language: **English** | [简体中文](README.zh-CN.md)
+
 FLOWnote is an OpenCode-powered plugin for AI-assisted note management.
 
 It is designed as an end-to-end workflow for:
@@ -163,15 +165,3 @@ Release assets are generated in `release/`:
 
 - Inspired by [Claudian](https://github.com/YishenTu/claudian) by YishenTu.
 - Claudian is MIT licensed, and FLOWnote also uses MIT license for this project.
-
----
-
-## 中文说明（简版）
-
-FLOWnote 的核心不是“把 OpenCode 接进来就结束”，而是提供一整套围绕知识管理的技能工作流：
-
-- 桌面端：OpenCode 会话 + 模型/技能协作
-- 移动端：快速捕获 + 链接解析 + AI 清理 + 每日笔记落盘
-- 技能层：从 `/ah` 统一入口，到日记、阅读、制卡、回顾、项目、归档、索引、记忆管理的完整闭环
-
-另外，项目确实参考了 Claudian 的思路，但 FLOWnote 重点做的是“针对笔记管理场景的技能体系与流程约束”。
