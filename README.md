@@ -163,5 +163,6 @@ Release assets are generated in `release/`:
 
 ## Acknowledgements
 
-- Inspired by [Claudian](https://github.com/YishenTu/claudian) by YishenTu.
-- Claudian is MIT licensed, and FLOWnote also uses MIT license for this project.
+- FLOWnote is inspired by [Claudian](https://github.com/YishenTu/claudian) by YishenTu.
+- FLOWnote is an independent implementation focused on OpenCode integration and note-management skills.
+- Both Claudian and FLOWnote are distributed under the MIT License.

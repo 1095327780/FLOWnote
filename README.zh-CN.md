@@ -161,5 +161,6 @@ Release 产物位于 `release/`：
 
 ## 致谢
 
-- 本项目受 [Claudian](https://github.com/YishenTu/claudian) 启发
-- Claudian 采用 MIT 许可，FLOWnote 也采用 MIT 许可
+- FLOWnote 受 [Claudian](https://github.com/YishenTu/claudian) 启发
+- FLOWnote 是独立实现，重点在 OpenCode 集成与笔记管理技能闭环
+- Claudian 与 FLOWnote 均采用 MIT 许可证
