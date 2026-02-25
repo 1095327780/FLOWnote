@@ -1024,7 +1024,7 @@ test("sendMessage should reject response without completion signal", async () =>
         sessionId: "ses_1",
         prompt: "hello",
       }),
-    /未收到明确完成信号/,
+    /未收到明确完成信号|did not receive an explicit completion signal/i,
   );
 });
 
@@ -1064,7 +1064,7 @@ test("sendMessage should not fail with idle empty payload when question request 
     prompt: "hello",
   });
 
-  assert.match(String(result.text || ""), /等待问题回答后继续生成/);
+  assert.match(String(result.text || ""), /等待问题回答后继续生成|Waiting for question response/i);
 });
 
 test("sendMessage should allow incomplete payload while question request is pending", async () => {

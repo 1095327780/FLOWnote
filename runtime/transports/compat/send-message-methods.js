@@ -10,6 +10,10 @@ function createSendMessageMethods(deps = {}) {
     payloadLooksInProgress,
     extractAssistantPayloadFromEnvelope,
     sessionStatusLooksAuthFailure,
+    rt = (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+      const v = params[k];
+      return v === undefined || v === null ? "" : String(v);
+    }),
   } = deps;
 
   function isRecoverableRequestError(error) {
@@ -142,7 +146,7 @@ function createSendMessageMethods(deps = {}) {
   async sendMessage(options) {
     const requestedSessionId = String(options && options.sessionId ? options.sessionId : "").trim();
     const sessionId = this.resolveSessionAlias(requestedSessionId) || requestedSessionId;
-    if (!sessionId) throw new Error("sessionId 不能为空");
+    if (!sessionId) throw new Error(rt("sessionId 不能为空", "sessionId is required"));
     this.log(`sendMessage start ${JSON.stringify({
       sessionId,
       requestedSessionId: requestedSessionId && requestedSessionId !== sessionId ? requestedSessionId : "",
@@ -419,7 +423,7 @@ function createSendMessageMethods(deps = {}) {
 
     if (!hasRenderablePayload(finalized)) {
       if (await checkWaitingForQuestion()) {
-        const hint = "等待问题回答后继续生成。";
+        const hint = rt("等待问题回答后继续生成。", "Waiting for question response before continuing generation.");
         finalized = {
           messageId: String(finalized.messageId || ""),
           text: hint,
@@ -432,7 +436,9 @@ function createSendMessageMethods(deps = {}) {
       const status = await this.getSessionStatus(sessionId, options.signal);
       const statusText = formatSessionStatusText(status);
       const activeModel = String(this.settings && this.settings.defaultModel ? this.settings.defaultModel : "").trim();
-      const modelText = activeModel ? `模型 ${activeModel}` : "当前模型";
+      const modelText = activeModel
+        ? rt("模型 {activeModel}", "Model {activeModel}", { activeModel })
+        : rt("当前模型", "Current model");
       let noRenderableDiagHint = "";
       let noRenderableListSummary = null;
       emitNoRenderableDiag("no-renderable snapshot", {
@@ -446,7 +452,11 @@ function createSendMessageMethods(deps = {}) {
         streamed: summarizePayload(streamed),
       });
       if (sessionStatusLooksAuthFailure(status)) {
-        throw new Error(`${modelText} 鉴权失败（session.status=${statusText}）。请检查 Provider 登录或 API Key。`);
+        throw new Error(rt(
+          "{modelText} 鉴权失败（session.status={statusText}）。请检查 Provider 登录或 API Key。",
+          "{modelText} authentication failed (session.status={statusText}). Check Provider login or API Key.",
+          { modelText, statusText },
+        ));
       }
 
       try {
@@ -481,11 +491,11 @@ function createSendMessageMethods(deps = {}) {
             : {};
           const err = extractErrorText(info.error);
           if (err) {
-            throw new Error(`模型返回错误：${err}`);
+            throw new Error(rt("模型返回错误：{err}", "Model returned an error: {err}", { err }));
           }
         }
       } catch (error) {
-        if (error instanceof Error && /^模型返回错误：/.test(error.message)) throw error;
+        if (error instanceof Error && /^(模型返回错误：|Model returned an error:)/.test(error.message)) throw error;
         this.log(`no-renderable inspect failed: ${error instanceof Error ? error.message : String(error)}`);
       }
 
@@ -528,25 +538,39 @@ function createSendMessageMethods(deps = {}) {
       }
 
       if (noRenderableDiagHint) {
-        throw new Error(`${modelText} 未返回可用消息（session.status=${statusText}; ${noRenderableDiagHint}）。`);
+        throw new Error(rt(
+          "{modelText} 未返回可用消息（session.status={statusText}; {hint}）。",
+          "{modelText} did not return a usable message (session.status={statusText}; {hint}).",
+          { modelText, statusText, hint: noRenderableDiagHint },
+        ));
       }
-      throw new Error(`${modelText} 未返回可用消息（session.status=${statusText}）。`);
+      throw new Error(rt(
+        "{modelText} 未返回可用消息（session.status={statusText}）。",
+        "{modelText} did not return a usable message (session.status={statusText}).",
+        { modelText, statusText },
+      ));
       }
     }
 
     const explicitModelErrorText = String(finalized && finalized.text ? finalized.text : "").trim();
-    if (/^模型返回错误：/.test(explicitModelErrorText)) {
+    if (/^(模型返回错误：|Model returned an error:)/.test(explicitModelErrorText)) {
       throw new Error(explicitModelErrorText);
     }
 
     if (payloadLooksInProgress(finalized)) {
       if (!(await checkWaitingForQuestion())) {
-        throw new Error("模型响应未完成且已超时，请切换模型或检查该 Provider 鉴权。");
+        throw new Error(rt(
+          "模型响应未完成且已超时，请切换模型或检查该 Provider 鉴权。",
+          "Model response is incomplete and timed out. Switch model or check Provider authentication.",
+        ));
       }
     }
     if (!Boolean(finalized && finalized.completed)) {
       if (!(await checkWaitingForQuestion())) {
-        throw new Error("模型响应未收到明确完成信号（message.updated.completed/finish），已终止以避免截断。");
+        throw new Error(rt(
+          "模型响应未收到明确完成信号（message.updated.completed/finish），已终止以避免截断。",
+          "Model response did not receive an explicit completion signal (message.updated.completed/finish); aborted to avoid truncation.",
+        ));
       }
     }
 

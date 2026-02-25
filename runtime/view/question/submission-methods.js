@@ -2,6 +2,7 @@ const {
   buildQuestionAnswerArrays: buildQuestionAnswerArraysRuntime,
   tokenizeQuestionAnswer: tokenizeQuestionAnswerRuntime,
 } = require("../../question-runtime");
+const { tFromContext } = require("../../i18n-runtime");
 
 function buildQuestionAnswerPayload(questions, state) {
   const list = Array.isArray(questions) ? questions : [];
@@ -82,7 +83,7 @@ async function submitQuestionAnswers(interactionKey, questions, state, directPay
     }
 
     if (!requestId) {
-      throw new Error("未找到可回复的 question 请求 ID");
+      throw new Error(tFromContext(this, "view.question.requestMissing", "No pending question request ID found"));
     }
 
     const answers = providedAnswers && providedAnswers.length
@@ -95,11 +96,11 @@ async function submitQuestionAnswers(interactionKey, questions, state, directPay
       signal: this.currentAbort ? this.currentAbort.signal : undefined,
     });
     this.removePendingQuestionRequest(sessionId, requestId);
-    this.setRuntimeStatus("已提交问题回答，等待模型继续执行…", "info");
+    this.setRuntimeStatus(tFromContext(this, "view.question.submitted", "Answers submitted, waiting for model to continue..."), "info");
   } catch (e) {
     state.submitted = false;
     const msg = e instanceof Error ? e.message : String(e);
-    this.setRuntimeStatus(`提交回答失败：${msg}`, "error");
+    this.setRuntimeStatus(tFromContext(this, "view.question.submitFailed", "Failed to submit answers: {message}", { message: msg }), "error");
   } finally {
     state.sending = false;
     if (interactionKey) this.questionAnswerStates.set(interactionKey, state);

@@ -1,3 +1,5 @@
+const { tFromContext } = require("../i18n-runtime");
+
 function runtimeStatusFromBlocks(rawBlocks) {
   const blocks = this.visibleAssistantBlocks(rawBlocks);
   const reasoningBlocks = blocks.filter((block) => block && String(block.type || "").trim().toLowerCase() === "reasoning");
@@ -6,13 +8,13 @@ function runtimeStatusFromBlocks(rawBlocks) {
     return status === "running" || status === "pending";
   });
   if (reasoningRunning) {
-    return { tone: "working", text: "模型思考中…" };
+    return { tone: "working", text: tFromContext(this, "view.runtime.reasoning", "Model is reasoning...") };
   }
 
   const tools = blocks.filter((block) => block && String(block.type || "").trim().toLowerCase() === "tool");
   if (!tools.length) {
     if (reasoningBlocks.length) {
-      return { tone: "info", text: "思考完成，正在整理回复…" };
+      return { tone: "info", text: tFromContext(this, "view.runtime.reasoningDone", "Reasoning complete, preparing response...") };
     }
     return null;
   }
@@ -20,21 +22,27 @@ function runtimeStatusFromBlocks(rawBlocks) {
   const names = [...new Set(tools.map((block) => this.toolDisplayName(block)).filter(Boolean))];
   const shortNames = names.slice(0, 3).join(", ");
   const suffix = names.length > 3 ? "…" : "";
-  const statusText = shortNames || "工具";
+  const statusText = shortNames || tFromContext(this, "view.runtime.tool", "Tools");
   const running = tools.some((block) => {
     const status = this.normalizeBlockStatus(block && block.status);
     return status === "running" || status === "pending";
   });
   if (running) {
-    return { tone: "working", text: `正在调用：${statusText}${suffix}` };
+    return {
+      tone: "working",
+      text: tFromContext(this, "view.runtime.toolRunning", "Running: {statusText}{suffix}", { statusText, suffix }),
+    };
   }
 
   const failed = tools.some((block) => this.normalizeBlockStatus(block && block.status) === "error");
   if (failed) {
-    return { tone: "error", text: `工具执行失败：${statusText}${suffix}` };
+    return {
+      tone: "error",
+      text: tFromContext(this, "view.runtime.toolFailed", "Tool failed: {statusText}{suffix}", { statusText, suffix }),
+    };
   }
 
-  return { tone: "info", text: "工具调用完成，正在整理回复…" };
+  return { tone: "info", text: tFromContext(this, "view.runtime.toolDone", "Tool finished, preparing response...") };
 }
 
 function syncRuntimeStatusToPendingTail() {

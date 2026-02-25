@@ -1,5 +1,10 @@
 const { PluginSettingTab, Setting, Notice } = require("obsidian");
 const { PROVIDER_PRESETS, testConnection } = require("./mobile-ai-service");
+const { tFromContext } = require("../i18n-runtime");
+
+function getAiProviderDisplayName(providerId, fallbackName, t) {
+  return t(`mobile.providers.${String(providerId || "").trim().toLowerCase()}`, fallbackName || String(providerId || ""));
+}
 
 class MobileSettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
@@ -8,23 +13,48 @@ class MobileSettingsTab extends PluginSettingTab {
   }
 
   display() {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     const { containerEl } = this;
     containerEl.empty();
 
     if (typeof this.setHeading === "function") this.setHeading();
     containerEl.createEl("p", {
-      text: "配置 AI 服务和日记路径，用于移动端快速捕获想法。",
+      text: t("settings.mobile.intro", "配置 AI 服务和日记路径，用于移动端快速捕获想法。"),
     });
 
+    new Setting(containerEl)
+      .setName(t("settings.language.name", "界面语言"))
+      .setDesc(t(
+        "settings.language.desc",
+        "默认跟随设备语言。切换后界面即时刷新；命令名与 Ribbon 提示重载后生效。",
+      ))
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("auto", t("settings.language.optionAuto", "跟随系统（推荐）"))
+          .addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"))
+          .addOption("en", t("settings.language.optionEn", "English"))
+          .setValue(String(this.plugin.settings.uiLanguage || "auto"))
+          .onChange(async (value) => {
+            this.plugin.settings.uiLanguage = String(value || "auto");
+            await this.plugin.saveSettings();
+            this.display();
+            new Notice(t(
+              "notices.languageAppliedReloadTip",
+              "界面语言已更新。命令名和 Ribbon 提示将在重载插件后生效。",
+            ));
+          });
+      });
+
     const mc = this.plugin.settings.mobileCapture;
+    const locale = typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "zh-CN";
 
     // --- AI Provider ---
     new Setting(containerEl)
-      .setName("AI 提供商")
-      .setDesc("选择一个预设提供商，或选择自定义填写地址。")
+      .setName(t("mobile.settings.providerName", "AI 提供商"))
+      .setDesc(t("mobile.settings.providerDesc", "选择一个预设提供商，或选择自定义填写地址。"))
       .addDropdown((d) => {
         for (const [id, preset] of Object.entries(PROVIDER_PRESETS)) {
-          d.addOption(id, preset.name);
+          d.addOption(id, getAiProviderDisplayName(id, preset.name, t));
         }
         d.setValue(mc.provider).onChange(async (v) => {
           mc.provider = v;
@@ -35,8 +65,8 @@ class MobileSettingsTab extends PluginSettingTab {
 
     // --- API Key ---
     new Setting(containerEl)
-      .setName("API Key")
-      .setDesc("对应提供商的 API 密钥。留空则跳过 AI 清理，直接记录原文。")
+      .setName(t("mobile.settings.apiKeyName", "API Key"))
+      .setDesc(t("mobile.settings.apiKeyDesc", "对应提供商的 API 密钥。留空则跳过 AI 清理，直接记录原文。"))
       .addText((text) => {
         text.inputEl.type = "password";
         text.inputEl.style.width = "100%";
@@ -51,10 +81,10 @@ class MobileSettingsTab extends PluginSettingTab {
 
     // --- Base URL ---
     const preset = PROVIDER_PRESETS[mc.provider] || PROVIDER_PRESETS.deepseek;
-    const effectiveUrl = mc.baseUrl || preset.baseUrl || "(未设置)";
+    const effectiveUrl = mc.baseUrl || preset.baseUrl || "(Not set)";
     new Setting(containerEl)
-      .setName("Base URL（可选）")
-      .setDesc(`留空使用预设地址。当前生效: ${effectiveUrl}`)
+      .setName(t("mobile.settings.baseUrlName", "Base URL（可选）"))
+      .setDesc(t("mobile.settings.baseUrlDesc", "留空使用预设地址。当前生效: {value}", { value: effectiveUrl }))
       .addText((text) => {
         text
           .setPlaceholder(preset.baseUrl || "https://api.example.com")
@@ -66,10 +96,10 @@ class MobileSettingsTab extends PluginSettingTab {
       });
 
     // --- Model ---
-    const effectiveModel = mc.model || preset.defaultModel || "(未设置)";
+    const effectiveModel = mc.model || preset.defaultModel || "(Not set)";
     new Setting(containerEl)
-      .setName("模型名（可选）")
-      .setDesc(`留空使用预设模型。当前生效: ${effectiveModel}`)
+      .setName(t("mobile.settings.modelName", "模型名（可选）"))
+      .setDesc(t("mobile.settings.modelDesc", "留空使用预设模型。当前生效: {value}", { value: effectiveModel }))
       .addText((text) => {
         text
           .setPlaceholder(preset.defaultModel || "model-name")
@@ -82,8 +112,8 @@ class MobileSettingsTab extends PluginSettingTab {
 
     // --- AI Cleanup Toggle ---
     new Setting(containerEl)
-      .setName("启用 AI 清理")
-      .setDesc("开启后自动去除语气词（嗯、啊、那个等）。关闭则直接记录原文。")
+      .setName(t("mobile.settings.aiCleanupName", "启用 AI 清理"))
+      .setDesc(t("mobile.settings.aiCleanupDesc", "开启后自动去除语气词（嗯、啊、那个等）。关闭则直接记录原文。"))
       .addToggle((toggle) => {
         toggle.setValue(mc.enableAiCleanup).onChange(async (v) => {
           mc.enableAiCleanup = v;
@@ -93,46 +123,46 @@ class MobileSettingsTab extends PluginSettingTab {
 
     // --- Daily Note Path ---
     new Setting(containerEl)
-      .setName("每日笔记路径")
-      .setDesc("日记文件夹的相对路径（不含文件名）。")
+      .setName(t("mobile.settings.dailyPathName", "每日笔记路径"))
+      .setDesc(t("mobile.settings.dailyPathDesc", "日记文件夹的相对路径（不含文件名）。"))
       .addText((text) => {
         text
-          .setPlaceholder("01-捕获层/每日笔记")
+          .setPlaceholder(locale === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes")
           .setValue(mc.dailyNotePath)
           .onChange(async (v) => {
-            mc.dailyNotePath = v.trim() || "01-捕获层/每日笔记";
+            mc.dailyNotePath = v.trim() || (locale === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes");
             await this.plugin.saveSettings();
           });
       });
 
     // --- Section Header ---
     new Setting(containerEl)
-      .setName("想法区域标题")
-      .setDesc("日记中用于存放想法的区域标题。")
+      .setName(t("mobile.settings.headerName", "想法区域标题"))
+      .setDesc(t("mobile.settings.headerDesc", "日记中用于存放想法的区域标题。"))
       .addText((text) => {
         text
-          .setPlaceholder("### 💡 想法和灵感")
+          .setPlaceholder(locale === "zh-CN" ? "### 💡 想法和灵感" : "### 💡 Ideas")
           .setValue(mc.ideaSectionHeader)
           .onChange(async (v) => {
-            mc.ideaSectionHeader = v.trim() || "### 💡 想法和灵感";
+            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "### 💡 想法和灵感" : "### 💡 Ideas");
             await this.plugin.saveSettings();
           });
       });
 
     // --- Test Connection ---
     new Setting(containerEl)
-      .setName("测试连接")
-      .setDesc("验证 AI 服务是否可用。")
+      .setName(t("mobile.settings.testName", "测试连接"))
+      .setDesc(t("mobile.settings.testDesc", "验证 AI 服务是否可用。"))
       .addButton((b) => {
-        b.setButtonText("测试").onClick(async () => {
+        b.setButtonText(t("mobile.settings.testBtn", "测试")).onClick(async () => {
           if (!mc.apiKey) {
-            new Notice("请先填写 API Key");
+            new Notice(t("notices.needApiKeyFirst", "请先填写 API Key"));
             return;
           }
           b.setDisabled(true);
-          b.setButtonText("测试中...");
+          b.setButtonText(t("mobile.settings.testBusy", "测试中..."));
           try {
-            const result = await testConnection(mc);
+            const result = await testConnection(mc, { locale });
             if (result.ok) {
               new Notice(`✅ ${result.message}`);
             } else {
@@ -142,7 +172,7 @@ class MobileSettingsTab extends PluginSettingTab {
             new Notice(`❌ ${e instanceof Error ? e.message : String(e)}`);
           } finally {
             b.setDisabled(false);
-            b.setButtonText("测试");
+            b.setButtonText(t("mobile.settings.testBtn", "测试"));
           }
         });
       });

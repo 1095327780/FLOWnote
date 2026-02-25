@@ -1,4 +1,5 @@
 const { Modal, Notice } = require("obsidian");
+const { tFromContext } = require("../i18n-runtime");
 const { cleanupCapture } = require("./mobile-ai-service");
 const {
   findOrCreateDailyNote,
@@ -16,14 +17,16 @@ class CaptureModal extends Modal {
   }
 
   onOpen() {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     const { contentEl } = this;
     contentEl.addClass("oc-capture-modal");
+    const locale = typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "zh-CN";
 
-    contentEl.createEl("h2", { text: "💡 快速捕获想法" });
+    contentEl.createEl("h2", { text: t("mobile.capture.title", "💡 快速捕获想法") });
 
     const inputEl = contentEl.createEl("textarea", {
       cls: "oc-capture-input",
-      attr: { placeholder: "输入你的想法...", rows: "5" },
+      attr: { placeholder: t("mobile.capture.inputPlaceholder", "输入你的想法..."), rows: "5" },
     });
 
     const statusEl = contentEl.createEl("div", { cls: "oc-capture-status" });
@@ -31,12 +34,12 @@ class CaptureModal extends Modal {
     const actionsEl = contentEl.createEl("div", { cls: "oc-capture-actions" });
 
     const cancelBtn = actionsEl.createEl("button", {
-      text: "取消",
+      text: t("mobile.capture.cancel", "取消"),
       cls: "oc-capture-btn oc-capture-btn-cancel",
     });
 
     const submitBtn = actionsEl.createEl("button", {
-      text: "捕获",
+      text: t("mobile.capture.submit", "捕获"),
       cls: "oc-capture-btn oc-capture-btn-submit",
     });
 
@@ -46,14 +49,14 @@ class CaptureModal extends Modal {
       if (captureInFlight) return;
       const raw = inputEl.value.trim();
       if (!raw) {
-        new Notice("请输入内容");
+        new Notice(t("mobile.capture.emptyInput", "请输入内容"));
         return;
       }
 
       captureInFlight = true;
       submitBtn.disabled = true;
       cancelBtn.disabled = true;
-      submitBtn.textContent = "处理中...";
+      submitBtn.textContent = t("mobile.capture.submitBusy", "处理中...");
 
       try {
         const mc = this.plugin.settings.mobileCapture;
@@ -61,36 +64,36 @@ class CaptureModal extends Modal {
 
         // AI cleanup if enabled and configured
         if (mc.enableAiCleanup && mc.apiKey) {
-          statusEl.textContent = "🤖 AI 清理中...";
+          statusEl.textContent = t("mobile.capture.statusAiCleanup", "🤖 AI 清理中...");
           try {
-            finalText = await cleanupCapture(raw, mc);
+            finalText = await cleanupCapture(raw, mc, { locale });
           } catch (e) {
-            statusEl.textContent = "⚠️ AI 清理失败，使用原文";
+            statusEl.textContent = t("mobile.capture.statusAiCleanupFailed", "⚠️ AI 清理失败，使用原文");
             finalText = raw;
           }
         }
 
         // Find or create daily note
-        statusEl.textContent = "📝 写入日记...";
+        statusEl.textContent = t("mobile.capture.statusWriteNote", "📝 写入日记...");
         const vault = this.app.vault;
-        const dailyNote = await findOrCreateDailyNote(vault, mc.dailyNotePath);
+        const dailyNote = await findOrCreateDailyNote(vault, mc.dailyNotePath, undefined, { locale });
 
         // Format and append
         const timeStr = formatTimeStr();
-        const entry = formatCaptureEntry(timeStr, finalText);
+        const entry = formatCaptureEntry(timeStr, finalText, { locale });
         await appendToIdeaSection(vault, dailyNote, entry, mc.ideaSectionHeader);
 
-        new Notice("✅ 想法已捕获");
+        new Notice(t("notices.captureSaved", "✅ 想法已捕获"));
         this.close();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         statusEl.textContent = `❌ ${msg}`;
-        new Notice(`捕获失败: ${msg}`);
+        new Notice(t("notices.captureFailed", "捕获失败: {message}", { message: msg }));
       } finally {
         captureInFlight = false;
         submitBtn.disabled = false;
         cancelBtn.disabled = false;
-        submitBtn.textContent = "捕获";
+        submitBtn.textContent = t("mobile.capture.submit", "捕获");
       }
     };
 

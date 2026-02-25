@@ -2,6 +2,7 @@ const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils")
 const { MARKDOWN_RENDER_STATE } = require("./markdown-methods");
 const { domUtils } = require("./dom-utils");
 const { blockUtilsMethods, blockUtilsInternal } = require("./block-utils");
+const { tFromContext } = require("../../i18n-runtime");
 
 const {
   setNodeText,
@@ -30,7 +31,7 @@ function renderReasoningPart(container, block, messagePending) {
   details.setAttr("data-part-type", "reasoning");
 
   const summary = details.createEl("summary", { cls: "oc-thinking-header" });
-  summary.createSpan({ cls: "oc-thinking-label", text: "Thought" });
+  summary.createSpan({ cls: "oc-thinking-label", text: tFromContext(this, "view.block.reasoningShort", "Thought") });
   summary.createSpan({
     cls: "oc-thinking-state",
     text: this.blockStatusLabel(status),
@@ -50,7 +51,7 @@ function renderReasoningPart(container, block, messagePending) {
     }
   } else {
     MARKDOWN_RENDER_STATE.delete(body);
-    setNodeText(body, "...");
+    setNodeText(body, tFromContext(this, "view.block.empty", "..."));
   }
 
   details.open = Boolean(messagePending && (status === "running" || status === "pending"));
@@ -58,7 +59,7 @@ function renderReasoningPart(container, block, messagePending) {
 
 function renderToolPart(container, block, messagePending) {
   const status = this.resolveDisplayBlockStatus(block, messagePending);
-  const toolName = this.toolDisplayName(block) || "tool";
+  const toolName = this.toolDisplayName(block) || tFromContext(this, "view.block.tool", "tool");
   const normalizedToolName = String((block && block.tool) || toolName || "tool").trim().toLowerCase();
   let summaryText = inferToolSummary(block, normalizedToolName || toolName);
   const questionItems = normalizedToolName === "question"
@@ -94,7 +95,7 @@ function renderToolPart(container, block, messagePending) {
   if (questionItems.length) {
     content.createDiv({
       cls: "oc-question-inline-note",
-      text: "请在下方面板中回答。",
+      text: tFromContext(this, "view.question.answerInPanel", "Please answer in the panel below."),
     });
     const firstQuestion = String((questionItems[0] && questionItems[0].question) || "").trim();
     if (firstQuestion) {
@@ -111,7 +112,7 @@ function renderToolPart(container, block, messagePending) {
   } else if (summaryText) {
     content.createDiv({ cls: "oc-tool-result-text", text: summaryText });
   } else {
-    content.createDiv({ cls: "oc-tool-result-text", text: "暂无返回内容" });
+    content.createDiv({ cls: "oc-tool-result-text", text: tFromContext(this, "view.block.noResult", "No result yet") });
   }
 }
 
@@ -128,7 +129,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
     ? `${changeSummary}${shortHash ? ` · ${shortHash}` : ""}`
     : shortHash
       ? `hash ${shortHash}`
-      : "文件变更";
+      : tFromContext(this, "view.block.patchLabel", "File change");
 
   const details = container.createEl("details", { cls: "oc-tool-call oc-tool-patch" });
   details.addClass(`is-${status}`);
@@ -139,7 +140,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   const header = details.createEl("summary", { cls: "oc-tool-header" });
   const iconEl = header.createSpan({ cls: "oc-tool-icon" });
   safeSetIcon(iconEl, "git-commit-horizontal");
-  header.createSpan({ cls: "oc-tool-name", text: "文件变更" });
+  header.createSpan({ cls: "oc-tool-name", text: tFromContext(this, "view.block.patchLabel", "File change") });
   header.createSpan({ cls: "oc-tool-summary", text: summaryText });
   const statusEl = header.createSpan({ cls: "oc-tool-status" });
   applyToolStatusIcon(statusEl, status);
@@ -153,7 +154,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
     const list = content.createDiv({ cls: "oc-tool-file-list" });
     entries.forEach((entry) => {
       const label = patchChangeLabel();
-      const displayPath = patchFileDisplayPath(entry) || "(未提供路径)";
+      const displayPath = patchFileDisplayPath(entry) || tFromContext(this, "view.block.pathMissing", "(path missing)");
       const text = `[${label}] ${displayPath}`;
       const item = list.createDiv({ cls: "oc-tool-file-item", text });
       item.setAttr("title", text);
@@ -163,7 +164,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
     const pre = content.createEl("pre", { cls: "oc-tool-detail", text: detailText });
     pre.setAttr("dir", "auto");
   } else {
-    content.createDiv({ cls: "oc-tool-result-text", text: "未检测到文件变更详情" });
+    content.createDiv({ cls: "oc-tool-result-text", text: tFromContext(this, "view.block.patchNoDetail", "No patch details detected") });
   }
 }
 
@@ -195,7 +196,7 @@ function renderGenericPart(container, block, messagePending) {
   const detail = typeof block.detail === "string" ? block.detail.trim() : "";
   if (detail) {
     const details = card.createEl("details", { cls: "oc-part-details" });
-    details.createEl("summary", { text: "查看详情" });
+    details.createEl("summary", { text: tFromContext(this, "view.block.viewDetail", "View details") });
     details.createEl("pre", { cls: "oc-part-detail", text: detail });
   }
 }

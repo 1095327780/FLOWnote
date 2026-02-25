@@ -2,6 +2,18 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { execFile } = require("child_process");
+const { rt } = (() => {
+  try {
+    return require("./runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
 
 function expandHome(p) {
   if (!p) return p;
@@ -214,15 +226,28 @@ class ExecutableResolver {
     if (process.platform === "win32") {
       const home = os.homedir();
       return [
-        "未找到可执行文件。",
-        "请在设置里填写 FLOWnote CLI 的绝对路径（优先 .exe，其次 cli.js），例如：",
+        rt("未找到可执行文件。", "Executable not found."),
+        rt(
+          "请在设置里填写 FLOWnote CLI 的绝对路径（优先 .exe，其次 cli.js），例如：",
+          "Set the absolute FLOWnote CLI path in settings (prefer .exe, then cli.js), for example:",
+        ),
         `${path.join(home, ".opencode", "bin", "opencode.exe")}`,
         `${path.join(home, "AppData", "Roaming", "npm", "node_modules", "@opencode-ai", "opencode", "dist", "cli.js")}`,
-        "Windows 下请避免填写 opencode.cmd 包装脚本。",
-        "如果你只在 WSL 里安装了 opencode，也可以保持自动探测，插件会尝试通过 wsl.exe 启动。",
+        rt(
+          "Windows 下请避免填写 opencode.cmd 包装脚本。",
+          "On Windows, avoid using the opencode.cmd wrapper script.",
+        ),
+        rt(
+          "如果你只在 WSL 里安装了 opencode，也可以保持自动探测，插件会尝试通过 wsl.exe 启动。",
+          "If opencode is only installed in WSL, keep auto-detect enabled and the plugin will try wsl.exe launch.",
+        ),
       ].join(" ");
     }
-    return `未找到可执行文件。请在设置里填写绝对路径，例如 ${expandHome("~/.opencode/bin/opencode")}`;
+    return rt(
+      "未找到可执行文件。请在设置里填写绝对路径，例如 {example}",
+      "Executable not found. Set the absolute path in settings, e.g. {example}",
+      { example: expandHome("~/.opencode/bin/opencode") },
+    );
   }
 
   async resolve(cliPath, options = {}) {

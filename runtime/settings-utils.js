@@ -59,6 +59,7 @@ function normalizeLinkResolver(raw) {
 }
 
 const DEFAULT_SETTINGS = {
+  uiLanguage: "auto",
   transportMode: "compat",
   experimentalSdkEnabled: false,
   cliPath: "",
@@ -112,6 +113,13 @@ function migrateLegacySettings(raw) {
 
 function normalizeSettings(raw) {
   const merged = Object.assign({}, DEFAULT_SETTINGS, migrateLegacySettings(raw));
+  {
+    const lang = String(merged.uiLanguage || "").trim().toLowerCase();
+    if (lang === "auto") merged.uiLanguage = "auto";
+    else if (lang === "zh-cn" || lang === "zh_cn" || lang === "zh") merged.uiLanguage = "zh-CN";
+    else if (lang.startsWith("en")) merged.uiLanguage = "en";
+    else merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
+  }
 
   if (!["sdk", "compat"].includes(String(merged.transportMode || "").trim().toLowerCase())) {
     merged.transportMode = "compat";

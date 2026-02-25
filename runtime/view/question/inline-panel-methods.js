@@ -1,4 +1,5 @@
 const { InlineAskUserQuestionPanel } = require("../../inline-ask-user-question-panel");
+const { tFromContext } = require("../../i18n-runtime");
 
 function clearInlineQuestionWidget(silent = true) {
   if (this.inlineQuestionWidget && typeof this.inlineQuestionWidget.destroy === "function") {
@@ -116,14 +117,14 @@ function renderInlineQuestionPanel(messages) {
     (result) => {
       if (!result) {
         this.clearInlineQuestionWidget(true);
-        this.setRuntimeStatus("已取消提问回答", "info");
+        this.setRuntimeStatus(tFromContext(this, "view.question.canceled", "Question response canceled"), "info");
         return;
       }
       void this.submitInlineQuestionResult(interaction, result);
     },
     this.currentAbort ? this.currentAbort.signal : undefined,
     {
-      title: "FLOWnote has a question",
+      title: tFromContext(this, "view.question.title", "FLOWnote has a question"),
       showCustomInput: true,
       immediateSelect: interaction.questions.length === 1 && Array.isArray(interaction.questions[0].options) && interaction.questions[0].options.length > 0,
     },

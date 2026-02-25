@@ -38,3 +38,19 @@ test("normalizeSettings should drop legacy plugin-side auth fields", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(out, "customApiKey"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(out, "customBaseUrl"), false);
 });
+
+test("normalizeSettings should default uiLanguage to auto", () => {
+  const out = normalizeSettings({});
+  assert.equal(out.uiLanguage, "auto");
+});
+
+test("normalizeSettings should normalize uiLanguage aliases", () => {
+  assert.equal(normalizeSettings({ uiLanguage: "zh" }).uiLanguage, "zh-CN");
+  assert.equal(normalizeSettings({ uiLanguage: "zh_cn" }).uiLanguage, "zh-CN");
+  assert.equal(normalizeSettings({ uiLanguage: "en-US" }).uiLanguage, "en");
+});
+
+test("normalizeSettings should fallback invalid uiLanguage to auto", () => {
+  const out = normalizeSettings({ uiLanguage: "fr-FR" });
+  assert.equal(out.uiLanguage, "auto");
+});

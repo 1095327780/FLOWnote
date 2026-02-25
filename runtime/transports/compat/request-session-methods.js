@@ -8,6 +8,10 @@ function createRequestSessionMethods(deps = {}) {
     resolveCommandFromSet,
     findLatestAssistantMessage,
     looksLikeRetryableConnectionError,
+    rt = (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+      const v = params[k];
+      return v === undefined || v === null ? "" : String(v);
+    }),
   } = deps;
 
   class RequestSessionMethods {
@@ -179,7 +183,11 @@ function createRequestSessionMethods(deps = {}) {
         });
       }
       const hint = `${this.buildWslDirectoryHint(message)}${this.buildWslSqliteHint(message)}`;
-      throw new Error(`FLOWnote 连接失败: ${message}${hint}`);
+      throw new Error(rt(
+        "FLOWnote 连接失败: {message}{hint}",
+        "FLOWnote connection failed: {message}{hint}",
+        { message, hint },
+      ));
     }
     const text = resp.text;
     let parsed = null;
@@ -199,7 +207,11 @@ function createRequestSessionMethods(deps = {}) {
         });
       }
       const hint = `${this.buildWslDirectoryHint(detail)}${this.buildWslSqliteHint(detail)}`;
-      throw new Error(`FLOWnote 请求失败 (${resp.status}): ${detail}${hint}`);
+      throw new Error(rt(
+        "FLOWnote 请求失败 ({status}): {detail}{hint}",
+        "FLOWnote request failed ({status}): {detail}{hint}",
+        { status: resp.status, detail, hint },
+      ));
     }
 
     return parsed;
@@ -683,10 +695,10 @@ function createRequestSessionMethods(deps = {}) {
 
   async authorizeProviderOauth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const method = Number(options.method);
-    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+    if (!Number.isFinite(method) || method < 0) throw new Error(rt("OAuth method 无效", "Invalid OAuth method"));
 
     const res = await this.request(
       "POST",
@@ -700,10 +712,10 @@ function createRequestSessionMethods(deps = {}) {
 
   async completeProviderOauth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const method = Number(options.method);
-    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+    if (!Number.isFinite(method) || method < 0) throw new Error(rt("OAuth method 无效", "Invalid OAuth method"));
 
     const body = { method: Number(method) };
     const code = String(options.code || "").trim();
@@ -722,10 +734,10 @@ function createRequestSessionMethods(deps = {}) {
 
   async setProviderApiKeyAuth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const key = String(options.key || "").trim();
-    if (!key) throw new Error("API Key 不能为空");
+    if (!key) throw new Error(rt("API Key 不能为空", "API Key is required"));
 
     await this.request(
       "PUT",
@@ -739,7 +751,7 @@ function createRequestSessionMethods(deps = {}) {
 
   async clearProviderAuth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     await this.request(
       "DELETE",

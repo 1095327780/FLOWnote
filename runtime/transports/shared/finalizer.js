@@ -11,6 +11,18 @@ const {
   extractSessionStatusHint,
   isSessionStatusTerminal,
 } = require("./completion-signals");
+const { rt } = (() => {
+  try {
+    return require("../../runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
 
 function buildProgressKey(messageId, payload) {
   const p = payload && typeof payload === "object" ? payload : {};
@@ -56,7 +68,7 @@ function buildStatusErrorPayload(statusHint, payload) {
   const current = payload && typeof payload === "object" ? payload : {};
   if (hasRenderablePayload(current)) return current;
   return {
-    text: `模型返回错误：${hint}`,
+    text: rt("模型返回错误：{hint}", "Model returned an error: {hint}", { hint }),
     reasoning: "",
     meta: hint,
     blocks: [],
@@ -130,7 +142,7 @@ async function pollAssistantPayload(options) {
 
   while (Date.now() - startedAt < maxTotalMs && Date.now() - lastProgressAt < quietTimeoutMs) {
     if (cfg.signal && cfg.signal.aborted) {
-      throw new Error("用户取消了请求");
+      throw new Error(rt("用户取消了请求", "Request was cancelled by user"));
     }
     pollCount += 1;
 
@@ -271,7 +283,11 @@ async function ensureRenderablePayload(options) {
   const statusText = formatSessionStatusText(status);
   return {
     ...payload,
-    text: `(无文本返回：session.status=${statusText}。可能是模型仍在排队/执行，或当前模型不可用；请在 FLOWnote 诊断中查看状态详情。)`,
+    text: rt(
+      "(无文本返回：session.status={statusText}。可能是模型仍在排队/执行，或当前模型不可用；请在 FLOWnote 诊断中查看状态详情。)",
+      "(No text returned: session.status={statusText}. The model may still be queued/running, or current model is unavailable; check FLOWnote diagnostics for details.)",
+      { statusText },
+    ),
   };
 }
 

@@ -1,4 +1,10 @@
 const { Modal } = require("obsidian");
+const { interpolateTemplate } = require("./i18n-runtime");
+
+function tr(tFn, key, fallback, params = {}) {
+  if (typeof tFn === "function") return tFn(key, params, { defaultValue: fallback });
+  return interpolateTemplate(fallback, params);
+}
 
 function defaultFormatForDisplay(value, maxLen = 2200) {
   if (value === undefined || value === null) return "";
@@ -17,36 +23,47 @@ function defaultFormatForDisplay(value, maxLen = 2200) {
 }
 
 class DiagnosticsModal extends Modal {
-  constructor(app, result) {
+  constructor(app, result, t) {
     super(app);
     this.result = result;
+    this.t = t;
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("oc-diagnostics-modal");
-    contentEl.createEl("h2", { text: "FLOWnote 诊断" });
+    contentEl.createEl("h2", { text: tr(this.t, "modals.diagnostics.title", "FLOWnote Diagnostics") });
 
     if (!this.result) {
-      contentEl.createEl("p", { text: "尚未运行诊断。" });
+      contentEl.createEl("p", { text: tr(this.t, "modals.diagnostics.notRun", "Diagnostics has not run yet.") });
       return;
     }
 
     const conn = this.result.connection;
     const exe = this.result.executable;
 
-    contentEl.createEl("h3", { text: "连接状态" });
-    contentEl.createEl("p", { text: conn.ok ? `正常 (${conn.mode})` : `失败 (${conn.mode})` });
+    contentEl.createEl("h3", { text: tr(this.t, "modals.diagnostics.connection", "Connection") });
+    contentEl.createEl("p", {
+      text: conn.ok
+        ? tr(this.t, "modals.diagnostics.connectionOk", "OK ({mode})", conn)
+        : tr(this.t, "modals.diagnostics.connectionFailed", "Failed ({mode})", conn),
+    });
     if (conn.error) contentEl.createEl("pre", { text: conn.error });
 
-    contentEl.createEl("h3", { text: "可执行文件探测" });
-    contentEl.createEl("p", { text: exe.ok ? `找到: ${exe.path}` : "未找到" });
+    contentEl.createEl("h3", { text: tr(this.t, "modals.diagnostics.executable", "Executable Detection") });
+    contentEl.createEl("p", {
+      text: exe.ok
+        ? tr(this.t, "modals.diagnostics.executableFound", "Found: {path}", exe)
+        : tr(this.t, "modals.diagnostics.executableMissing", "Not found"),
+    });
     if (exe.hint) contentEl.createEl("p", { text: exe.hint });
 
     const attempts = contentEl.createEl("details");
-    attempts.createEl("summary", { text: `已尝试路径 (${(exe.attempted || []).length})` });
-    attempts.createEl("pre", { text: (exe.attempted || []).join("\n") || "(无)" });
+    attempts.createEl("summary", {
+      text: tr(this.t, "modals.diagnostics.attempted", "Attempted Paths ({count})", { count: (exe.attempted || []).length }),
+    });
+    attempts.createEl("pre", { text: (exe.attempted || []).join("\n") || tr(this.t, "modals.none", "(none)") });
   }
 
   onClose() {
@@ -55,11 +72,12 @@ class DiagnosticsModal extends Modal {
 }
 
 class PermissionRequestModal extends Modal {
-  constructor(app, permission, onResolve, formatForDisplay) {
+  constructor(app, permission, onResolve, formatForDisplay, t) {
     super(app);
     this.permission = permission || {};
     this.onResolve = onResolve;
     this.formatForDisplay = typeof formatForDisplay === "function" ? formatForDisplay : defaultFormatForDisplay;
+    this.t = t;
     this.resolved = false;
   }
 
@@ -74,34 +92,36 @@ class PermissionRequestModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("oc-perm-modal");
-    contentEl.createEl("h2", { text: "FLOWnote 权限请求" });
+    contentEl.createEl("h2", { text: tr(this.t, "modals.permission.title", "FLOWnote Permission Request") });
 
     const title =
       (typeof this.permission.title === "string" && this.permission.title.trim()) ||
-      "模型请求执行受限操作";
+      tr(this.t, "modals.permission.defaultTitle", "Model requested a restricted operation");
     contentEl.createDiv({ cls: "oc-perm-title", text: title });
 
     const meta = [];
     if (typeof this.permission.type === "string" && this.permission.type) {
-      meta.push(`类型: ${this.permission.type}`);
+      meta.push(tr(this.t, "modals.permission.type", "Type: {value}", { value: this.permission.type }));
     }
     if (this.permission.pattern) {
-      meta.push(`模式: ${this.formatForDisplay(this.permission.pattern, 400)}`);
+      meta.push(tr(this.t, "modals.permission.pattern", "Pattern: {value}", {
+        value: this.formatForDisplay(this.permission.pattern, 400),
+      }));
     }
     if (meta.length) {
       contentEl.createEl("pre", { cls: "oc-perm-meta", text: meta.join("\n") });
     }
 
     const details = contentEl.createEl("details", { cls: "oc-perm-details" });
-    details.createEl("summary", { text: "查看完整 metadata" });
+    details.createEl("summary", { text: tr(this.t, "modals.permission.metadata", "View full metadata") });
     details.createEl("pre", {
-      text: this.formatForDisplay(this.permission.metadata || {}, 2400) || "(empty)",
+      text: this.formatForDisplay(this.permission.metadata || {}, 2400) || tr(this.t, "modals.empty", "(empty)"),
     });
 
     const actions = contentEl.createDiv({ cls: "oc-perm-actions" });
-    const rejectBtn = actions.createEl("button", { cls: "mod-muted", text: "拒绝" });
-    const onceBtn = actions.createEl("button", { cls: "mod-cta", text: "本次允许" });
-    const alwaysBtn = actions.createEl("button", { text: "始终允许(本会话)" });
+    const rejectBtn = actions.createEl("button", { cls: "mod-muted", text: tr(this.t, "modals.permission.reject", "Reject") });
+    const onceBtn = actions.createEl("button", { cls: "mod-cta", text: tr(this.t, "modals.permission.once", "Allow Once") });
+    const alwaysBtn = actions.createEl("button", { text: tr(this.t, "modals.permission.always", "Always Allow (Session)") });
 
     rejectBtn.addEventListener("click", () => this.resolveAndClose("reject"));
     onceBtn.addEventListener("click", () => this.resolveAndClose("once"));
@@ -117,20 +137,25 @@ class PermissionRequestModal extends Modal {
 }
 
 class PromptAppendModal extends Modal {
-  constructor(app, promptText, onSubmit) {
+  constructor(app, promptText, onSubmit, t) {
     super(app);
     this.promptText = String(promptText || "");
     this.onSubmit = onSubmit;
+    this.t = t;
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("oc-prompt-modal");
-    contentEl.createEl("h2", { text: "模型请求补充输入" });
+    contentEl.createEl("h2", { text: tr(this.t, "modals.append.title", "Model Requested Additional Input") });
     contentEl.createDiv({
       cls: "oc-prompt-desc",
-      text: "FLOWnote 通过 question/tool 触发了补充输入请求。你可以编辑后放入输入框继续。",
+      text: tr(
+        this.t,
+        "modals.append.desc",
+        "FLOWnote requested more input via question/tool. You can edit and insert into the input box.",
+      ),
     });
 
     const input = contentEl.createEl("textarea", {
@@ -139,8 +164,8 @@ class PromptAppendModal extends Modal {
     });
 
     const actions = contentEl.createDiv({ cls: "oc-prompt-actions" });
-    const cancelBtn = actions.createEl("button", { cls: "mod-muted", text: "取消" });
-    const useBtn = actions.createEl("button", { cls: "mod-cta", text: "填入输入框" });
+    const cancelBtn = actions.createEl("button", { cls: "mod-muted", text: tr(this.t, "modals.cancel", "Cancel") });
+    const useBtn = actions.createEl("button", { cls: "mod-cta", text: tr(this.t, "modals.append.useInput", "Insert into Input") });
 
     cancelBtn.addEventListener("click", () => this.close());
     useBtn.addEventListener("click", () => {
@@ -169,15 +194,16 @@ class ModelSelectorModal extends Modal {
     contentEl.empty();
     contentEl.addClass("oc-model-modal");
 
-    contentEl.createEl("h2", { text: "选择模型" });
+    const tFn = this.options && typeof this.options.t === "function" ? this.options.t : null;
+    contentEl.createEl("h2", { text: tr(tFn, "modals.model.title", "Select Model") });
     contentEl.createDiv({
       cls: "oc-model-modal-subtitle",
-      text: "使用官方模型列表（来自 FLOWnote provider 配置）",
+      text: tr(tFn, "modals.model.subtitle", "Use official model list from FLOWnote provider configuration"),
     });
 
     const search = contentEl.createEl("input", {
       cls: "oc-model-search",
-      attr: { type: "text", placeholder: "搜索 provider/model…" },
+      attr: { type: "text", placeholder: tr(tFn, "modals.model.search", "Search provider/model...") },
     });
     search.addEventListener("input", () => {
       this.filterText = String(search.value || "").trim().toLowerCase();
@@ -185,22 +211,22 @@ class ModelSelectorModal extends Modal {
     });
 
     const actions = contentEl.createDiv({ cls: "oc-model-modal-actions" });
-    const refreshBtn = actions.createEl("button", { text: "刷新列表" });
+    const refreshBtn = actions.createEl("button", { text: tr(tFn, "modals.model.refresh", "Refresh List") });
     refreshBtn.addEventListener("click", async () => {
       if (typeof this.options.onRefresh !== "function") return;
       refreshBtn.disabled = true;
-      refreshBtn.setText("刷新中...");
+      refreshBtn.setText(tr(tFn, "modals.model.refreshing", "Refreshing..."));
       try {
         const refreshed = await this.options.onRefresh();
         if (Array.isArray(refreshed)) this.options.models = refreshed;
       } finally {
         refreshBtn.disabled = false;
-        refreshBtn.setText("刷新列表");
+        refreshBtn.setText(tr(tFn, "modals.model.refresh", "Refresh List"));
         this.renderList();
       }
     });
 
-    const clearBtn = actions.createEl("button", { text: "恢复默认" });
+    const clearBtn = actions.createEl("button", { text: tr(tFn, "modals.model.resetDefault", "Reset Default") });
     clearBtn.addEventListener("click", async () => {
       if (typeof this.options.onSelect === "function") await this.options.onSelect("");
       this.close();
@@ -221,7 +247,8 @@ class ModelSelectorModal extends Modal {
     });
 
     if (!filtered.length) {
-      this.listEl.createDiv({ cls: "oc-model-empty", text: "未找到匹配模型" });
+      const tFn = this.options && typeof this.options.t === "function" ? this.options.t : null;
+      this.listEl.createDiv({ cls: "oc-model-empty", text: tr(tFn, "modals.model.notFound", "No matching models") });
       return;
     }
 
@@ -229,7 +256,13 @@ class ModelSelectorModal extends Modal {
       const row = this.listEl.createDiv({ cls: "oc-model-item" });
       if (model === this.options.currentModel) row.addClass("is-active");
       row.createDiv({ cls: "oc-model-item-id", text: model });
-      row.createDiv({ cls: "oc-model-item-meta", text: model === this.options.currentModel ? "当前使用" : "点击切换" });
+      const tFn = this.options && typeof this.options.t === "function" ? this.options.t : null;
+      row.createDiv({
+        cls: "oc-model-item-meta",
+        text: model === this.options.currentModel
+          ? tr(tFn, "modals.model.current", "Current")
+          : tr(tFn, "modals.model.clickToSwitch", "Click to switch"),
+      });
 
       row.addEventListener("click", async () => {
         if (typeof this.options.onSelect === "function") await this.options.onSelect(model);
@@ -249,4 +282,3 @@ module.exports = {
   PermissionRequestModal,
   PromptAppendModal,
 };
-

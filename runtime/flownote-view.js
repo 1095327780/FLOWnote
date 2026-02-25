@@ -10,6 +10,7 @@ const {
   stringifyForDisplay,
 } = require("./assistant-payload-utils");
 const { runSendPrompt } = require("./chat/chat-orchestrator");
+const { tFromContext } = require("./i18n-runtime");
 const { commandRouterMethods } = require("./view/command-router");
 const { layoutRendererMethods } = require("./view/layout-renderer");
 const { messageRendererMethods } = require("./view/message-renderer");
@@ -62,11 +63,12 @@ class FLOWnoteAssistantView extends ItemView {
   }
 
   async onOpen() {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     this.selectedModel = this.plugin.settings.defaultModel || "";
     try {
       await this.plugin.bootstrapData({ waitRemote: false });
     } catch (e) {
-      new Notice(`初始化失败: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t("view.bootstrapFailed", "初始化失败: {message}", { message: e instanceof Error ? e.message : String(e) }));
     }
     this.render();
     const activeSessionId = String(this.plugin.sessionStore.state().activeSessionId || "").trim();
@@ -114,6 +116,7 @@ class FLOWnoteAssistantView extends ItemView {
         permission,
         (answer) => resolve(answer || null),
         stringifyForDisplay,
+        typeof this.plugin.t === "function" ? this.plugin.t.bind(this.plugin) : null,
       );
       modal.open();
     });
@@ -122,14 +125,15 @@ class FLOWnoteAssistantView extends ItemView {
   showPromptAppendModal(appendText) {
     const modal = new PromptAppendModal(this.app, appendText, (value) => {
       this.prefillComposerInput(value);
-    });
+    }, typeof this.plugin.t === "function" ? this.plugin.t.bind(this.plugin) : null);
     modal.open();
   }
 
   handleToastEvent(toast) {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     const title = typeof toast.title === "string" ? toast.title.trim() : "";
     const message = typeof toast.message === "string" ? toast.message.trim() : "";
-    const text = [title, message].filter(Boolean).join("：") || "FLOWnote 提示";
+    const text = [title, message].filter(Boolean).join(": ") || t("view.toastFallback", "FLOWnote 提示");
     new Notice(text, 4000);
   }
 
@@ -152,11 +156,12 @@ class FLOWnoteAssistantView extends ItemView {
   }
 
   cancelSending() {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     if (this.currentAbort) {
       this.currentAbort.abort();
       this.currentAbort = null;
       this.setBusy(false);
-      new Notice("已取消发送");
+      new Notice(t("view.sendCanceled", "已取消发送"));
     }
   }
 

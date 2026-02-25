@@ -5,6 +5,11 @@ const {
   deriveSessionTitleFromPrompt: deriveSessionTitleFromPromptFromDomain,
   resolveSessionDisplayTitle,
 } = require("../domain/session-title");
+const { tFromContext } = require("../i18n-runtime");
+
+function tr(view, key, fallback, params = {}) {
+  return tFromContext(view, key, fallback, params);
+}
 
 function openSettings() {
   this.app.setting.open();
@@ -35,10 +40,10 @@ function isFreeModel(modelName) {
 
 function extractModelProvider(modelName) {
   const raw = String(modelName || "").trim().toLowerCase();
-  if (!raw) return "未标注厂商";
+  if (!raw) return "Unspecified Provider";
   const slashIndex = raw.indexOf("/");
-  if (slashIndex <= 0) return "未标注厂商";
-  return raw.slice(0, slashIndex) || "未标注厂商";
+  if (slashIndex <= 0) return "Unspecified Provider";
+  return raw.slice(0, slashIndex) || "Unspecified Provider";
 }
 
 function splitModelsByFree(models) {
@@ -56,11 +61,13 @@ function splitModelsByFree(models) {
   }, { free: [], byProvider: {} });
 }
 
-function appendGroupedModelOptions(selectEl, models) {
+function appendGroupedModelOptions(selectEl, models, view) {
   const grouped = splitModelsByFree(models);
 
   if (grouped.free.length) {
-    const freeGroup = selectEl.createEl("optgroup", { attr: { label: `免费模型 (${grouped.free.length})` } });
+    const freeGroup = selectEl.createEl("optgroup", {
+      attr: { label: tr(view, "view.model.freeGroup", "Free Models ({count})", { count: grouped.free.length }) },
+    });
     grouped.free.forEach((m) => freeGroup.createEl("option", { value: m, text: m }));
   }
 
@@ -83,8 +90,8 @@ function updateModelSelectOptions() {
   const normalizedModels = [...new Set(models.map((model) => String(model || "").trim()).filter(Boolean))];
 
   modelSelect.empty();
-  modelSelect.createEl("option", { value: "", text: "模型 /models" });
-  appendGroupedModelOptions(modelSelect, normalizedModels);
+  modelSelect.createEl("option", { value: "", text: tr(this, "view.model.placeholder", "Model /models") });
+  appendGroupedModelOptions(modelSelect, normalizedModels, this);
 
   const canRestoreSelection = selectedBefore && normalizedModels.includes(selectedBefore);
   modelSelect.value = canRestoreSelection ? selectedBefore : "";
@@ -143,13 +150,13 @@ function deriveSessionTitleFromPrompt(prompt) {
 }
 
 function sessionDisplayTitle(session) {
-  return resolveSessionDisplayTitle(session, "未命名会话");
+  return resolveSessionDisplayTitle(session, tr(this, "view.session.untitled", "Untitled Session"));
 }
 
 function activeSessionLabel() {
   const st = this.plugin.sessionStore.state();
   const session = st.sessions.find((s) => s.id === st.activeSessionId);
-  if (!session) return "未选择会话";
+  if (!session) return tr(this, "view.session.noneSelected", "No session selected");
   return this.sessionDisplayTitle(session);
 }
 
@@ -186,7 +193,7 @@ function renderHeader(header) {
   brand.createDiv({ cls: "oc-brand-title", text: "FLOWnote" });
 
   const actions = header.createDiv({ cls: "oc-header-actions" });
-  actions.createDiv({ cls: "oc-header-meta", text: "Chat Runtime" });
+  actions.createDiv({ cls: "oc-header-meta", text: tr(this, "view.header.runtime", "Chat Runtime") });
 }
 
 function renderSidebar(side) {
@@ -194,13 +201,17 @@ function renderSidebar(side) {
   side.toggleClass("is-collapsed", this.isSidebarCollapsed);
 
   const header = side.createDiv({ cls: "oc-side-header" });
-  header.createEl("h3", { text: "会话" });
+  header.createEl("h3", { text: tr(this, "view.session.heading", "Sessions") });
 
   const sideActions = header.createDiv({ cls: "oc-side-actions" });
   const toggleBtn = sideActions.createEl("button", { cls: "oc-side-toggle" });
   toggleBtn.setAttr("type", "button");
-  toggleBtn.setAttr("aria-label", this.isSidebarCollapsed ? "展开会话列表" : "收起会话列表");
-  toggleBtn.setAttr("title", this.isSidebarCollapsed ? "展开会话列表" : "收起会话列表");
+  toggleBtn.setAttr("aria-label", this.isSidebarCollapsed
+    ? tr(this, "view.session.expandList", "Expand session list")
+    : tr(this, "view.session.collapseList", "Collapse session list"));
+  toggleBtn.setAttr("title", this.isSidebarCollapsed
+    ? tr(this, "view.session.expandList", "Expand session list")
+    : tr(this, "view.session.collapseList", "Collapse session list"));
   this.renderSidebarToggleIcon(toggleBtn);
   toggleBtn.addEventListener("click", () => this.toggleSidebarCollapsed());
 
@@ -210,8 +221,8 @@ function renderSidebar(side) {
 
   const addBtn = sideActions.createEl("button", { cls: "oc-side-add" });
   addBtn.setAttr("type", "button");
-  addBtn.setAttr("aria-label", "新建会话");
-  addBtn.setAttr("title", "新建会话");
+  addBtn.setAttr("aria-label", tr(this, "view.session.new", "New session"));
+  addBtn.setAttr("title", tr(this, "view.session.new", "New session"));
   try {
     setIcon(addBtn, "plus");
   } catch {
@@ -230,11 +241,14 @@ function renderSidebar(side) {
 
   const sessions = this.plugin.sessionStore.state().sessions;
   const active = this.plugin.sessionStore.state().activeSessionId;
-  side.createDiv({ cls: "oc-side-count", text: `${sessions.length} 个会话` });
+  side.createDiv({
+    cls: "oc-side-count",
+    text: tr(this, "view.session.count", "{count} sessions", { count: sessions.length }),
+  });
   const list = side.createDiv({ cls: "oc-session-list" });
 
   if (!sessions.length) {
-    list.createDiv({ cls: "oc-empty", text: "暂无会话，点击“+”开始。" });
+    list.createDiv({ cls: "oc-empty", text: tr(this, "view.session.empty", "No sessions yet. Click \"+\" to start.") });
     return;
   }
 
@@ -262,22 +276,22 @@ function renderSidebar(side) {
 
     const renameBtn = actions.createEl("button", { cls: "oc-session-item-action" });
     renameBtn.setAttr("type", "button");
-    renameBtn.setAttr("aria-label", "重命名会话");
-    renameBtn.setAttr("title", "重命名");
+    renameBtn.setAttr("aria-label", tr(this, "view.session.rename", "Rename session"));
+    renameBtn.setAttr("title", tr(this, "view.session.rename", "Rename session"));
     setIcon(renameBtn, "pencil");
     renameBtn.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const next = window.prompt("重命名会话", displayTitle);
+      const next = window.prompt(tr(this, "view.session.renamePrompt", "Rename session"), displayTitle);
       if (next === null) return;
       const normalized = normalizeSessionTitle(next);
       if (!normalized) {
-        new Notice("会话名称不能为空");
+        new Notice(tr(this, "view.session.renameEmpty", "Session name cannot be empty"));
         return;
       }
       const renamed = this.plugin.sessionStore.renameSession(s.id, normalized);
       if (!renamed) {
-        new Notice("未找到要重命名的会话");
+        new Notice(tr(this, "view.session.renameMissing", "Session to rename was not found"));
         return;
       }
       await this.plugin.persistState();
@@ -286,19 +300,19 @@ function renderSidebar(side) {
 
     const deleteBtn = actions.createEl("button", { cls: "oc-session-item-action is-danger" });
     deleteBtn.setAttr("type", "button");
-    deleteBtn.setAttr("aria-label", "删除会话");
-    deleteBtn.setAttr("title", "删除会话");
+    deleteBtn.setAttr("aria-label", tr(this, "view.session.delete", "Delete session"));
+    deleteBtn.setAttr("title", tr(this, "view.session.delete", "Delete session"));
     setIcon(deleteBtn, "trash-2");
     deleteBtn.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const confirmed = window.confirm(`确认删除会话「${displayTitle}」？`);
+      const confirmed = window.confirm(tr(this, "view.session.deleteConfirm", "Delete session \"{title}\"?", { title: displayTitle }));
       if (!confirmed) return;
       const removed = typeof this.plugin.deleteSession === "function"
         ? await this.plugin.deleteSession(s.id)
         : this.plugin.sessionStore.removeSession(s.id);
       if (!removed) {
-        new Notice("删除失败：未找到该会话");
+        new Notice(tr(this, "view.session.deleteFailed", "Delete failed: session not found"));
         return;
       }
       if (typeof this.plugin.deleteSession !== "function") {
@@ -317,7 +331,7 @@ function renderSidebar(side) {
 
   side.createDiv({
     cls: "oc-side-footer",
-    text: "兼容 FLOWnote 会话、技能注入、模型切换与诊断。",
+    text: tr(this, "view.session.footer", "FLOWnote sessions, skills, model switch, and diagnostics."),
   });
 }
 
@@ -330,10 +344,10 @@ function renderMain(main) {
 
   const connectionIndicator = toolbarLeft.createDiv({ cls: "oc-connection-indicator" });
   this.elements.statusDot = connectionIndicator.createDiv({ cls: "oc-connection-dot warn" });
-  this.elements.statusDot.setAttribute("aria-label", "连接状态未知");
-  this.elements.statusDot.setAttribute("title", "连接状态未知");
+  this.elements.statusDot.setAttribute("aria-label", tr(this, "view.connection.unknown", "Connection status unknown"));
+  this.elements.statusDot.setAttribute("title", tr(this, "view.connection.unknown", "Connection status unknown"));
 
-  const settingsBtn = this.buildIconButton(toolbarRight, "settings", "设置", () => this.openSettings());
+  const settingsBtn = this.buildIconButton(toolbarRight, "settings", tr(this, "view.settings", "Settings"), () => this.openSettings());
   settingsBtn.addClass("oc-toolbar-btn");
 
   const messagesWrapper = main.createDiv({ cls: "oc-messages-wrapper" });
@@ -346,8 +360,8 @@ function renderMain(main) {
   const navSidebar = messagesWrapper.createDiv({ cls: "oc-nav-sidebar visible" });
   const topBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-top" });
   topBtn.setAttr("type", "button");
-  topBtn.setAttr("aria-label", "滚动到顶部");
-  topBtn.setAttr("title", "回到顶部");
+  topBtn.setAttr("aria-label", tr(this, "view.scroll.top", "Scroll to top"));
+  topBtn.setAttr("title", tr(this, "view.scroll.topShort", "Top"));
   try {
     setIcon(topBtn, "chevron-up");
   } catch {
@@ -356,8 +370,8 @@ function renderMain(main) {
   topBtn.addEventListener("click", () => this.scrollMessagesTo("top"));
   const bottomBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-bottom" });
   bottomBtn.setAttr("type", "button");
-  bottomBtn.setAttr("aria-label", "滚动到底部");
-  bottomBtn.setAttr("title", "到底部");
+  bottomBtn.setAttr("aria-label", tr(this, "view.scroll.bottom", "Scroll to bottom"));
+  bottomBtn.setAttr("title", tr(this, "view.scroll.bottomShort", "Bottom"));
   try {
     setIcon(bottomBtn, "chevron-down");
   } catch {
@@ -366,7 +380,10 @@ function renderMain(main) {
   bottomBtn.addEventListener("click", () => this.scrollMessagesTo("bottom"));
 
   const contextFooter = main.createDiv({ cls: "oc-context-footer" });
-  contextFooter.createDiv({ cls: "oc-context-session", text: `当前会话：${this.activeSessionLabel()}` });
+  contextFooter.createDiv({
+    cls: "oc-context-session",
+    text: tr(this, "view.session.current", "Current session: {title}", { title: this.activeSessionLabel() }),
+  });
 
   const composer = main.createDiv({ cls: "oc-composer" });
   this.elements.composer = composer;
@@ -383,20 +400,20 @@ function renderMain(main) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       modelSelect.value = this.selectedModel || "";
-      new Notice(`模型切换失败: ${msg}`);
+      new Notice(tr(this, "view.model.switchFailed", "Model switch failed: {message}", { message: msg }));
     }
   });
 
   const skillPicker = quick.createDiv({ cls: "oc-skill-picker" });
   const skillSelect = skillPicker.createEl("select", { cls: "oc-skill-select" });
   this.elements.skillSelect = skillSelect;
-  skillSelect.setAttr("title", "选择技能");
-  skillSelect.createEl("option", { value: "", text: "技能 /skills" });
+  skillSelect.setAttr("title", tr(this, "view.skill.selectTitle", "Select skill"));
+  skillSelect.createEl("option", { value: "", text: tr(this, "view.skill.placeholder", "Skill /skills") });
 
   const skills = this.plugin.skillService.getSkills();
   const setSkillSelectTitle = (skill) => {
     if (!skill) {
-      skillSelect.setAttr("title", "选择技能");
+      skillSelect.setAttr("title", tr(this, "view.skill.selectTitle", "Select skill"));
       return;
     }
     const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
@@ -418,7 +435,7 @@ function renderMain(main) {
 
   if (!skills.length) {
     skillSelect.disabled = true;
-    skillSelect.setAttr("title", "当前未发现可用技能，请检查 Skills 目录设置。");
+    skillSelect.setAttr("title", tr(this, "view.skill.noneFound", "No available skills found. Check Skills directory."));
   } else {
     skillSelect.addEventListener("change", () => {
       const selectedId = String(skillSelect.value || "");
@@ -433,11 +450,11 @@ function renderMain(main) {
         this.elements.input.value = `/${picked.id} `;
         this.elements.input.focus();
       }
-      this.setRuntimeStatus(`已填入技能命令：/${picked.id}`, "info");
+      this.setRuntimeStatus(tr(this, "view.skill.commandFilled", "Skill command inserted: /{id}", { id: picked.id }), "info");
     });
   }
 
-  navRow.createDiv({ cls: "oc-nav-row-meta", text: "Ctrl/Cmd + Enter 发送" });
+  navRow.createDiv({ cls: "oc-nav-row-meta", text: tr(this, "view.shortcut.send", "Ctrl/Cmd + Enter to send") });
 
   const inputContainer = composer.createDiv({ cls: "oc-input-container" });
   const inputWrapper = inputContainer.createDiv({ cls: "oc-input-wrapper" });
@@ -456,7 +473,7 @@ function renderMain(main) {
 
   this.elements.input = inputWrapper.createEl("textarea", {
     cls: "oc-input",
-    attr: { placeholder: "输入消息…支持技能注入和模型切换" },
+    attr: { placeholder: tr(this, "view.input.placeholder", "Type a message... supports skill injection and model switching") },
   });
   this.elements.input.addEventListener("keydown", (ev) => {
     if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
@@ -469,8 +486,8 @@ function renderMain(main) {
   inputToolbar.createDiv({ cls: "oc-input-meta", text: "FLOWnote Compat Runtime" });
 
   const actions = inputToolbar.createDiv({ cls: "oc-actions" });
-  this.elements.sendBtn = actions.createEl("button", { cls: "mod-cta oc-send-btn", text: "发送" });
-  this.elements.cancelBtn = actions.createEl("button", { cls: "mod-muted oc-cancel-btn", text: "取消" });
+  this.elements.sendBtn = actions.createEl("button", { cls: "mod-cta oc-send-btn", text: tr(this, "view.action.send", "Send") });
+  this.elements.cancelBtn = actions.createEl("button", { cls: "mod-muted oc-cancel-btn", text: tr(this, "view.action.cancel", "Cancel") });
   this.elements.cancelBtn.disabled = true;
 
   this.elements.sendBtn.addEventListener("click", () => this.handleSend());
@@ -478,7 +495,11 @@ function renderMain(main) {
 
   composer.createDiv({
     cls: "oc-hint",
-    text: "支持会话切换、技能/模型下拉、Provider 登录管理与错误恢复。可通过 /skills、/model 快速切换；模型无响应时会给出报错并自动隐藏不可用项。",
+    text: tr(
+      this,
+      "view.hint",
+      "Supports session switching, skill/model dropdowns, provider auth, and error recovery. Use /skills and /model for quick switch.",
+    ),
   });
 
   this.renderInlineQuestionPanel(this.plugin.sessionStore.getActiveMessages());
@@ -502,21 +523,21 @@ function applyStatus(result) {
 
   if (!result || !result.connection) {
     dot.addClass("warn");
-    dot.setAttribute("aria-label", "连接状态未知");
-    dot.setAttribute("title", "连接状态未知");
+    dot.setAttribute("aria-label", tr(this, "view.connection.unknown", "Connection status unknown"));
+    dot.setAttribute("title", tr(this, "view.connection.unknown", "Connection status unknown"));
     return;
   }
 
   if (result.connection.ok) {
     dot.addClass("ok");
-    const label = `连接正常 (${result.connection.mode})`;
+    const label = tr(this, "view.connection.ok", "Connected ({mode})", result.connection);
     dot.setAttribute("aria-label", label);
     dot.setAttribute("title", label);
     return;
   }
 
   dot.addClass("error");
-  const label = `连接异常 (${result.connection.mode})`;
+  const label = tr(this, "view.connection.error", "Connection error ({mode})", result.connection);
   dot.setAttribute("aria-label", label);
   dot.setAttribute("title", label);
 }

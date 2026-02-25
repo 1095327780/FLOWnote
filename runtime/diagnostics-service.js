@@ -1,3 +1,16 @@
+const { rt } = (() => {
+  try {
+    return require("./runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
+
 class DiagnosticsService {
   constructor(plugin, ResolverCtor) {
     this.plugin = plugin;
@@ -9,7 +22,7 @@ class DiagnosticsService {
           ok: false,
           path: "",
           attempted: [],
-          hint: "Resolver 未注入",
+          hint: rt("Resolver 未注入", "Resolver is not initialized"),
         }),
       };
     this.lastResult = null;

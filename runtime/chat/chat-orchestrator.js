@@ -1,4 +1,9 @@
 const { Notice } = require("obsidian");
+const { tFromContext } = require("../i18n-runtime");
+
+function tr(view, key, fallback, params = {}) {
+  return tFromContext(view, key, fallback, params);
+}
 
 function createMessageId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -58,7 +63,7 @@ function createTransportHandlers(view, sessionId, draftId) {
     onToken: (partial) => {
       view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, partial);
       if (String(partial || "").trim()) {
-        view.setRuntimeStatus("正在生成回复…", "working");
+        view.setRuntimeStatus(tr(view, "view.runtime.generating", "Generating response..."), "working");
       }
 
       const messages = view.elements.messages;
@@ -74,7 +79,7 @@ function createTransportHandlers(view, sessionId, draftId) {
     onReasoning: (partialReasoning) => {
       view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, partialReasoning);
       if (String(partialReasoning || "").trim()) {
-        view.setRuntimeStatus("模型思考中…", "working");
+        view.setRuntimeStatus(tr(view, "view.runtime.reasoning", "Model is reasoning..."), "working");
       }
 
       const messages = view.elements.messages;
@@ -109,7 +114,7 @@ function createTransportHandlers(view, sessionId, draftId) {
     },
 
     onPermissionRequest: async (permission) => {
-      view.setRuntimeStatus("等待权限确认…", "info");
+      view.setRuntimeStatus(tr(view, "view.permission.waiting", "Waiting for permission confirmation..."), "info");
       const decision = await view.showPermissionRequestModal(permission || {});
       if (!decision) return "reject";
       if (decision === "always" || decision === "once" || decision === "reject") {
@@ -128,7 +133,7 @@ function createTransportHandlers(view, sessionId, draftId) {
           count: Array.isArray(request.questions) ? request.questions.length : 0,
         })}`);
       }
-      view.setRuntimeStatus("请在下方问题面板中回答。", "info");
+      view.setRuntimeStatus(tr(view, "view.question.answerInPanel", "Please answer in the panel below."), "info");
       view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
     },
 
@@ -142,9 +147,9 @@ function createTransportHandlers(view, sessionId, draftId) {
     },
 
     onPromptAppend: (appendText) => {
-      view.setRuntimeStatus("等待补充输入…", "info");
+      view.setRuntimeStatus(tr(view, "view.promptAppend.waiting", "Waiting for additional input..."), "info");
       if (view.hasVisibleQuestionToolCard()) {
-        view.setRuntimeStatus("请在下方问题面板中回答并提交。", "info");
+        view.setRuntimeStatus(tr(view, "view.question.answerAndSubmit", "Please answer and submit in the panel below."), "info");
         return;
       }
       view.showPromptAppendModal(appendText);
@@ -188,7 +193,7 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
       },
       "",
     );
-    view.setRuntimeStatus("等待问题回答…", "info");
+    view.setRuntimeStatus(tr(view, "view.question.waiting", "Waiting for question answers..."), "info");
     return { shouldRerenderModelPicker: false };
   }
 
@@ -206,12 +211,17 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
         } catch {
         }
       }
-      new Notice(`模型可能不可用，已从列表暂时隐藏：${activeModel}`);
+      new Notice(tr(view, "view.model.hiddenUnavailable", "Model may be unavailable and has been hidden: {model}", { model: activeModel }));
     }
   }
 
-  view.setRuntimeStatus(`请求失败：${msg}`, "error");
-  view.plugin.sessionStore.finalizeAssistantDraft(sessionId, draftId, `请求失败: ${msg}`, msg);
+  view.setRuntimeStatus(tr(view, "view.request.failed", "Request failed: {message}", { message: msg }), "error");
+  view.plugin.sessionStore.finalizeAssistantDraft(
+    sessionId,
+    draftId,
+    tr(view, "view.request.failed", "Request failed: {message}", { message: msg }),
+    msg,
+  );
   new Notice(msg);
   return { shouldRerenderModelPicker };
 }
@@ -273,7 +283,7 @@ async function runSendPrompt(view, userText, options = {}) {
 
   view.currentAbort = new AbortController();
   view.setBusy(true);
-  view.setRuntimeStatus("正在等待 FLOWnote 响应…", "working");
+  view.setRuntimeStatus(tr(view, "view.runtime.waitingResponse", "Waiting for FLOWnote response..."), "working");
   let shouldRerenderModelPicker = false;
 
   try {

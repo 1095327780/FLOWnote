@@ -1,6 +1,7 @@
 const { Notice, MarkdownRenderer, Keymap } = require("obsidian");
 const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils");
 const { domUtils } = require("./dom-utils");
+const { tFromContext } = require("../../i18n-runtime");
 
 const {
   setNodeText,
@@ -31,14 +32,14 @@ function ensureCodeWrapper(pre) {
   return wrapper;
 }
 
-function ensureCodeCopyButton(wrapper, codeText) {
+function ensureCodeCopyButton(wrapper, codeText, context) {
   if (!wrapper) return;
   let btn = wrapper.querySelector(".oc-code-copy-btn");
   if (!btn) {
     btn = document.createElement("button");
     btn.className = "oc-code-copy-btn";
     btn.type = "button";
-    btn.setAttribute("aria-label", "复制代码");
+    btn.setAttribute("aria-label", tFromContext(context, "view.message.copyCode", "Copy code"));
     wrapper.appendChild(btn);
   }
 
@@ -52,7 +53,7 @@ function ensureCodeCopyButton(wrapper, codeText) {
         applyCopyGlyph(btn);
       });
     } catch {
-      new Notice("复制失败");
+      new Notice(tFromContext(context, "view.message.copyFailed", "Copy failed"));
     }
   };
 }
@@ -66,7 +67,7 @@ function enhanceCodeBlocks(container) {
     const codeEl = pre.querySelector("code");
     const codeText = codeEl ? codeEl.innerText : pre.innerText;
 
-    ensureCodeCopyButton(wrapper, codeText);
+    ensureCodeCopyButton(wrapper, codeText, this);
 
     const obsidianCopy = wrapper.querySelector(".copy-code-button");
     if (obsidianCopy) obsidianCopy.remove();

@@ -1,6 +1,7 @@
 const { Notice } = require("obsidian");
 const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils");
 const { domUtils } = require("./dom-utils");
+const { tFromContext } = require("../../i18n-runtime");
 
 const {
   safeSetIcon,
@@ -24,8 +25,14 @@ function renderMessages(options = {}) {
   this.pruneQuestionAnswerStates(messages);
   if (!messages.length) {
     const welcome = container.createDiv({ cls: "oc-welcome" });
-    welcome.createDiv({ cls: "oc-welcome-greeting", text: "今天想整理什么？" });
-    welcome.createDiv({ cls: "oc-empty", text: "发送一条消息，或先从技能下拉中选择一个技能。" });
+    welcome.createDiv({
+      cls: "oc-welcome-greeting",
+      text: tFromContext(this, "view.welcome.greeting", "What would you like to organize today?"),
+    });
+    welcome.createDiv({
+      cls: "oc-empty",
+      text: tFromContext(this, "view.welcome.empty", "Send a message, or pick a skill from the dropdown first."),
+    });
     this.renderInlineQuestionPanel(messages);
     if (shouldStickToBottom) {
       this.scheduleScrollMessagesToBottom(true);
@@ -52,16 +59,16 @@ function renderUserActions(row, message) {
   const copyBtn = actions.createEl("button", { cls: "oc-inline-action" });
   copyBtn.setAttr("type", "button");
   safeSetIcon(copyBtn, "copy");
-  copyBtn.setAttr("aria-label", "复制消息");
+  copyBtn.setAttr("aria-label", tFromContext(this, "view.message.copy", "Copy message"));
   copyBtn.addEventListener("click", async () => {
     await copyTextToClipboard(message.text || "");
-    new Notice("用户消息已复制");
+    new Notice(tFromContext(this, "view.message.copied", "Message copied"));
   });
 
   const retryBtn = actions.createEl("button", { cls: "oc-inline-action" });
   retryBtn.setAttr("type", "button");
   safeSetIcon(retryBtn, "rotate-ccw");
-  retryBtn.setAttr("aria-label", "基于此消息重试");
+  retryBtn.setAttr("aria-label", tFromContext(this, "view.message.retry", "Retry from this message"));
   retryBtn.addEventListener("click", async () => {
     await this.sendPrompt(message.text || "");
   });
@@ -71,7 +78,7 @@ function addTextCopyButton(textBlock, sourceText) {
   if (!textBlock || textBlock.querySelector(".oc-text-copy-btn")) return;
   const copyBtn = textBlock.createEl("button", { cls: "oc-text-copy-btn" });
   copyBtn.setAttr("type", "button");
-  copyBtn.setAttr("aria-label", "复制文本块");
+  copyBtn.setAttr("aria-label", tFromContext(this, "view.message.copyBlock", "Copy text block"));
   applyCopyGlyph(copyBtn);
 
   copyBtn.addEventListener("click", async (event) => {
@@ -83,7 +90,7 @@ function addTextCopyButton(textBlock, sourceText) {
         applyCopyGlyph(copyBtn);
       });
     } catch {
-      new Notice("复制失败");
+      new Notice(tFromContext(this, "view.message.copyFailed", "Copy failed"));
     }
   });
 }
@@ -137,7 +144,10 @@ function renderMessageItem(parent, message) {
   const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
   const hasBlocks = this.visibleAssistantBlocks(message.blocks).length > 0;
   const fallbackText = hasReasoning || hasBlocks ? "(结构化输出已返回，可展开下方详情查看。)" : "";
-  const finalText = textForRender || fallbackText;
+  const localizedFallback = hasReasoning || hasBlocks
+    ? tFromContext(this, "view.message.structuredFallback", "(Structured output returned. Expand details below.)")
+    : "";
+  const finalText = textForRender || localizedFallback;
 
   if (finalText) {
     const textBlock = body.createDiv({ cls: "oc-text-block" });

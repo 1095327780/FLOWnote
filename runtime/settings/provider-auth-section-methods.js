@@ -1,10 +1,15 @@
 const { Notice } = require("obsidian");
+const { tFromContext } = require("../i18n-runtime");
 
 class ProviderAuthSectionMethods {
   renderProviderAuthSection(containerEl) {
-    containerEl.createEl("h3", { text: "Provider 登录管理（OAuth / API Key）" });
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
+    containerEl.createEl("h3", { text: t("settings.providerAuth.heading", "Provider 登录管理（OAuth / API Key）") });
     containerEl.createEl("p", {
-      text: "用于在插件内连接官方/第三方模型 provider。完成后会写入当前插件运行时的 FLOWnote 凭据。",
+      text: t(
+        "settings.providerAuth.intro",
+        "用于在插件内连接官方/第三方模型 provider。完成后会写入当前插件运行时的 FLOWnote 凭据。",
+      ),
     });
 
     const controls = containerEl.createDiv();
@@ -14,20 +19,20 @@ class ProviderAuthSectionMethods {
     controls.style.gap = "8px";
     controls.style.marginBottom = "8px";
 
-    const refreshBtn = controls.createEl("button", { text: "刷新 Provider 状态" });
-    const expandBtn = controls.createEl("button", { text: "全部展开" });
-    const collapseBtn = controls.createEl("button", { text: "全部收起" });
+    const refreshBtn = controls.createEl("button", { text: t("settings.providerAuth.refresh", "刷新 Provider 状态") });
+    const expandBtn = controls.createEl("button", { text: t("settings.providerAuth.expandAll", "全部展开") });
+    const collapseBtn = controls.createEl("button", { text: t("settings.providerAuth.collapseAll", "全部收起") });
     const searchInput = controls.createEl("input", {
       attr: {
         type: "search",
-        placeholder: "搜索 Provider / ID / 鉴权方式 / 模型数",
+        placeholder: t("settings.providerAuth.searchPlaceholder", "搜索 Provider / ID / 鉴权方式 / 模型数"),
       },
     });
     searchInput.style.flex = "1 1 260px";
     searchInput.style.minWidth = "220px";
     searchInput.value = String(this.providerSearchQuery || "");
 
-    const statusEl = containerEl.createDiv({ text: "加载中..." });
+    const statusEl = containerEl.createDiv({ text: t("settings.providerAuth.loading", "加载中...") });
     statusEl.style.fontSize = "12px";
     statusEl.style.color = "var(--text-muted)";
     statusEl.style.marginBottom = "6px";
@@ -43,7 +48,7 @@ class ProviderAuthSectionMethods {
 
       const snapshot = this.providerAuthSnapshot;
       if (!snapshot) {
-        statusEl.setText("尚未加载 Provider 信息。");
+        statusEl.setText(t("settings.providerAuth.notLoaded", "尚未加载 Provider 信息。"));
         return;
       }
 
@@ -60,31 +65,59 @@ class ProviderAuthSectionMethods {
       const visibleCount = entries.length;
       if (!entries.length) {
         statusEl.setText(query
-          ? `已加载 ${totalProviders} 个 Provider，搜索“${this.providerSearchQuery}”无结果。`
-          : `已加载 ${totalProviders} 个 Provider。`);
+          ? t(
+            "settings.providerAuth.loadedNoResult",
+            "已加载 {totalProviders} 个 Provider，搜索“{query}”无结果。",
+            { totalProviders, query: this.providerSearchQuery },
+          )
+          : t("settings.providerAuth.loaded", "已加载 {totalProviders} 个 Provider。", { totalProviders }));
         listEl.createDiv({
-          text: query ? "没有匹配的 Provider，请尝试更换关键词。" : "当前没有可显示的 Provider。",
+          text: query
+            ? t("settings.providerAuth.noMatch", "没有匹配的 Provider，请尝试更换关键词。")
+            : t("settings.providerAuth.empty", "当前没有可显示的 Provider。"),
           cls: "setting-item-description",
         });
         return;
       }
 
       const connectedCount = entries.filter((entry) => entry.isConnected).length;
-      statusEl.setText(`已加载 ${totalProviders} 个 Provider，当前显示 ${visibleCount} 个；已连接 ${connectedCount} 个。`);
+      statusEl.setText(t(
+        "settings.providerAuth.loadedWithCount",
+        "已加载 {totalProviders} 个 Provider，当前显示 {visibleCount} 个；已连接 {connectedCount} 个。",
+        { totalProviders, visibleCount, connectedCount },
+      ));
 
-      const regionGroups = [
-        { key: "domestic", label: "国产厂商", pick: (entry) => entry.region === "domestic" },
-        { key: "global", label: "海外厂商", pick: (entry) => entry.region === "global" },
-      ];
+      const locale = this.plugin && typeof this.plugin.getEffectiveLocale === "function"
+        ? String(this.plugin.getEffectiveLocale() || "")
+        : "en";
+      const countryGroupsMap = new Map();
+      entries.forEach((entry) => {
+        const key = String(entry.countryCode || "ZZ");
+        let group = countryGroupsMap.get(key);
+        if (!group) {
+          group = {
+            key,
+            label: String(entry.countryLabel || this.resolveProviderCountryLabel(key)),
+            entries: [],
+          };
+          countryGroupsMap.set(key, group);
+        }
+        group.entries.push(entry);
+      });
 
-      regionGroups.forEach((group) => {
-        const inGroup = entries.filter(group.pick);
-        if (!inGroup.length) return;
+      const countryGroups = Array.from(countryGroupsMap.values()).sort((a, b) => {
+        if (a.key === "ZZ" && b.key !== "ZZ") return 1;
+        if (a.key !== "ZZ" && b.key === "ZZ") return -1;
+        return a.label.localeCompare(b.label, locale || undefined);
+      });
+
+      countryGroups.forEach((group) => {
+        const inGroup = group.entries;
 
         inGroup.sort((a, b) => a.providerName.localeCompare(b.providerName));
 
         const groupDetails = listEl.createEl("details");
-        groupDetails.open = Boolean(query) || group.key === "domestic";
+        groupDetails.open = Boolean(query);
         groupDetails.style.border = "1px solid var(--background-modifier-border)";
         groupDetails.style.borderRadius = "8px";
         groupDetails.style.padding = "2px 0";
@@ -118,10 +151,10 @@ class ProviderAuthSectionMethods {
 
     const loadProviders = async () => {
       refreshBtn.disabled = true;
-      refreshBtn.setText("刷新中...");
+      refreshBtn.setText(t("settings.providerAuth.refreshBusy", "刷新中..."));
       expandBtn.disabled = true;
       collapseBtn.disabled = true;
-      statusEl.setText("正在读取 Provider 配置...");
+      statusEl.setText(t("settings.providerAuth.loadingProviders", "正在读取 Provider 配置..."));
       listEl.empty();
 
       try {
@@ -148,11 +181,14 @@ class ProviderAuthSectionMethods {
         renderFromSnapshot();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        statusEl.setText(`读取失败：${msg}`);
-        listEl.createDiv({ text: `读取 Provider 信息失败：${msg}`, cls: "setting-item-description" });
+        statusEl.setText(t("settings.providerAuth.readFailed", "读取失败：{message}", { message: msg }));
+        listEl.createDiv({
+          text: t("settings.providerAuth.readFailedDetail", "读取 Provider 信息失败：{message}", { message: msg }),
+          cls: "setting-item-description",
+        });
       } finally {
         refreshBtn.disabled = false;
-        refreshBtn.setText("刷新 Provider 状态");
+        refreshBtn.setText(t("settings.providerAuth.refresh", "刷新 Provider 状态"));
         expandBtn.disabled = false;
         collapseBtn.disabled = false;
       }
@@ -169,6 +205,7 @@ class ProviderAuthSectionMethods {
   }
 
   renderProviderRow(context) {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     const { listEl, entry, reload } = context;
     const {
       providerID,
@@ -202,13 +239,19 @@ class ProviderAuthSectionMethods {
     titleLeft.createSpan({ text: `(${providerID})`, cls: "setting-item-description" });
 
     const statusBadge = titleRow.createSpan({
-      text: isConnected ? "已连接" : "未连接",
+      text: isConnected
+        ? t("settings.providerAuth.connected", "已连接")
+        : t("settings.providerAuth.disconnected", "未连接"),
       cls: "setting-item-description",
     });
     statusBadge.style.color = isConnected ? "var(--text-success)" : "var(--text-muted)";
 
     const desc = row.createDiv({ cls: "setting-item-description" });
-    desc.setText(`模型数：${modelCount}；鉴权方式：${methodText}`);
+    desc.setText(t(
+      "settings.providerAuth.providerMeta",
+      "模型数：{modelCount}；鉴权方式：{methodText}",
+      { modelCount, methodText },
+    ));
 
     const actionRow = row.createDiv();
     actionRow.style.display = "flex";
@@ -227,8 +270,8 @@ class ProviderAuthSectionMethods {
         await action();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        rowStatus.setText(`操作失败：${msg}`);
-        new Notice(`操作失败: ${msg}`);
+        rowStatus.setText(t("settings.providerAuth.actionFailed", "操作失败：{message}", { message: msg }));
+        new Notice(t("settings.providerAuth.actionFailed", "操作失败：{message}", { message: msg }));
       } finally {
         button.disabled = false;
         button.setText(originalText);
@@ -236,9 +279,9 @@ class ProviderAuthSectionMethods {
     };
 
     if (oauthMethods.length) {
-      const oauthBtn = actionRow.createEl("button", { text: "OAuth 登录" });
+      const oauthBtn = actionRow.createEl("button", { text: t("settings.providerAuth.oauthLogin", "OAuth 登录") });
       oauthBtn.addEventListener("click", () => {
-        void runAction(oauthBtn, "处理中...", async () => {
+        void runAction(oauthBtn, t("settings.providerAuth.pending", "处理中..."), async () => {
           await this.handleOauthLogin({
             providerID,
             providerName,
@@ -254,9 +297,9 @@ class ProviderAuthSectionMethods {
     }
 
     if (supportsApi || !methodsRaw.length) {
-      const apiBtn = actionRow.createEl("button", { text: "设置 API Key" });
+      const apiBtn = actionRow.createEl("button", { text: t("settings.providerAuth.setApiKey", "设置 API Key") });
       apiBtn.addEventListener("click", () => {
-        void runAction(apiBtn, "保存中...", async () => {
+        void runAction(apiBtn, t("settings.providerAuth.saving", "保存中..."), async () => {
           await this.handleApiKeySet({
             providerID,
             providerName,
@@ -271,21 +314,21 @@ class ProviderAuthSectionMethods {
     }
 
     if (isConnected) {
-      const clearBtn = actionRow.createEl("button", { text: "清除登录" });
+      const clearBtn = actionRow.createEl("button", { text: t("settings.providerAuth.clearLogin", "清除登录") });
       clearBtn.addEventListener("click", () => {
-        void runAction(clearBtn, "清除中...", async () => {
+        void runAction(clearBtn, t("settings.providerAuth.clearing", "清除中..."), async () => {
           const confirmed = await this.showConfirmModal({
-            title: `清除 ${providerName} 登录`,
-            description: "确认清除该 Provider 的登录凭据？",
-            submitText: "清除",
+            title: t("settings.providerAuth.clearTitle", "清除 {providerName} 登录", { providerName }),
+            description: t("settings.providerAuth.clearDesc", "确认清除该 Provider 的登录凭据？"),
+            submitText: t("settings.providerAuth.clearSubmit", "清除"),
           });
           if (!confirmed) return;
           await this.plugin.opencodeClient.clearProviderAuth({ providerID });
           if (typeof this.plugin.clearUnavailableModels === "function") {
             this.plugin.clearUnavailableModels({ providerID });
           }
-          rowStatus.setText("已清除登录凭据。");
-          new Notice(`${providerName} 凭据已清除`);
+          rowStatus.setText(t("settings.providerAuth.clearDone", "已清除登录凭据。"));
+          new Notice(t("settings.providerAuth.clearNotice", "{providerName} 凭据已清除", { providerName }));
           await reload();
         });
       });

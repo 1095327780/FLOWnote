@@ -8,6 +8,10 @@ function createProcessLifecycleMethods(deps = {}) {
     WSL_STARTUP_TIMEOUT_MS,
     collectOutputTail,
     appendOutputHint,
+    rt = (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+      const v = params[k];
+      return v === undefined || v === null ? "" : String(v);
+    }),
   } = deps;
 
   class ProcessLifecycleMethods {
@@ -81,7 +85,11 @@ function createProcessLifecycleMethods(deps = {}) {
       try {
         this.process = spawn(launch.command, Array.isArray(launch.args) ? launch.args : [], launch.options || {});
       } catch (e) {
-        finish(new Error(`无法启动 FLOWnote 服务 (${label}): ${e instanceof Error ? e.message : String(e)}`));
+        finish(new Error(rt(
+          "无法启动 FLOWnote 服务 ({label}): {message}",
+          "Failed to start FLOWnote service ({label}): {message}",
+          { label, message: e instanceof Error ? e.message : String(e) },
+        )));
         return;
       }
 
@@ -107,7 +115,11 @@ function createProcessLifecycleMethods(deps = {}) {
 
       onError = (err) => {
         const message = err instanceof Error ? err.message : String(err);
-        finish(new Error(appendOutputHint(`无法启动 FLOWnote 服务 (${label}): ${message}`, outputTail)));
+        finish(new Error(appendOutputHint(rt(
+          "无法启动 FLOWnote 服务 ({label}): {message}",
+          "Failed to start FLOWnote service ({label}): {message}",
+          { label, message },
+        ), outputTail)));
       };
 
       onExit = (code) => {
@@ -117,10 +129,17 @@ function createProcessLifecycleMethods(deps = {}) {
         }
         const exitCode = Number(code);
         const armHint = exitCode === 3221225477
-          ? "（Windows 0xC0000005：进程崩溃，常见于架构不匹配或运行时异常）"
+          ? rt(
+            "（Windows 0xC0000005：进程崩溃，常见于架构不匹配或运行时异常）",
+            "(Windows 0xC0000005: process crash, often caused by architecture mismatch or runtime failure)",
+          )
           : "";
         finish(new Error(appendOutputHint(
-          `FLOWnote 服务提前退出 (${label})，退出码: ${String(code)}${armHint}`,
+          rt(
+            "FLOWnote 服务提前退出 ({label})，退出码: {code}{armHint}",
+            "FLOWnote service exited early ({label}), exit code: {code}{armHint}",
+            { label, code: String(code), armHint },
+          ),
           outputTail,
         )));
       };
@@ -133,7 +152,11 @@ function createProcessLifecycleMethods(deps = {}) {
       startupTimeout = setTimeout(() => {
         if (!this.baseUrl) {
           finish(new Error(appendOutputHint(
-            `等待 FLOWnote 服务启动超时 (${label}, ${startupTimeoutMs}ms)`,
+            rt(
+              "等待 FLOWnote 服务启动超时 ({label}, {startupTimeoutMs}ms)",
+              "Timed out waiting for FLOWnote service startup ({label}, {startupTimeoutMs}ms)",
+              { label, startupTimeoutMs },
+            ),
             outputTail,
           )));
         }
@@ -149,8 +172,12 @@ function createProcessLifecycleMethods(deps = {}) {
     const attempts = this.buildLaunchAttempts(resolved, runtimeHome);
 
     if (!attempts.length) {
-      const hint = resolved && resolved.hint ? resolved.hint : "opencode 未找到";
-      throw new Error(`无法启动 FLOWnote 服务: ${hint}`);
+      const hint = resolved && resolved.hint ? resolved.hint : rt("opencode 未找到", "opencode not found");
+      throw new Error(rt(
+        "无法启动 FLOWnote 服务: {hint}",
+        "Failed to start FLOWnote service: {hint}",
+        { hint },
+      ));
     }
 
     const failed = [];
@@ -167,8 +194,14 @@ function createProcessLifecycleMethods(deps = {}) {
       }
     }
 
-    const hint = resolved && resolved.hint ? `\n提示: ${resolved.hint}` : "";
-    throw new Error(`无法启动 FLOWnote 服务，已尝试 ${attempts.length} 种方式:\n${failed.join("\n")}${hint}`);
+    const hint = resolved && resolved.hint
+      ? `\n${rt("提示", "Hint")}: ${resolved.hint}`
+      : "";
+    throw new Error(rt(
+      "无法启动 FLOWnote 服务，已尝试 {count} 种方式:\n{failed}{hint}",
+      "Failed to start FLOWnote service after {count} attempts:\n{failed}{hint}",
+      { count: attempts.length, failed: failed.join("\n"), hint },
+    ));
   }
 
   clearProcessState() {

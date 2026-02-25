@@ -1,4 +1,5 @@
 const { requestUrl } = require("obsidian");
+const { normalizeSupportedLocale } = require("../i18n-locale-utils");
 
 const PROVIDER_PRESETS = {
   deepseek: {
@@ -45,13 +46,30 @@ const CAPTURE_SYSTEM_PROMPT = [
   "6. 直接返回清理后的文本，不要任何解释或前缀",
 ].join("\n");
 
+const CAPTURE_SYSTEM_PROMPT_EN = [
+  "You are a text cleanup assistant. Remove filler words from spoken text (such as um, uh, like, you know).",
+  "Rules:",
+  "1. Only remove filler words",
+  "2. Do not rewrite or polish text",
+  "3. Do not add new content",
+  "4. Keep original meaning and wording",
+  "5. Preserve all substantive content",
+  "6. Return cleaned text only, no explanation",
+].join("\n");
+
+function getCaptureSystemPrompt(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN" ? CAPTURE_SYSTEM_PROMPT : CAPTURE_SYSTEM_PROMPT_EN;
+}
+
 /**
  * Call AI to clean up captured text (remove filler words).
  * @param {string} text - raw captured text
  * @param {object} mcSettings - mobileCapture settings object
+ * @param {object} [options]
  * @returns {Promise<string>} cleaned text
  */
-async function cleanupCapture(text, mcSettings) {
+async function cleanupCapture(text, mcSettings, options = {}) {
+  const locale = normalizeSupportedLocale(options.locale || (mcSettings && mcSettings.locale) || "en");
   const providerId = mcSettings.provider || "deepseek";
   const preset = PROVIDER_PRESETS[providerId] || PROVIDER_PRESETS.deepseek;
   const baseUrl = (mcSettings.baseUrl || preset.baseUrl).replace(/\/+$/, "");
@@ -59,7 +77,9 @@ async function cleanupCapture(text, mcSettings) {
   const apiKey = mcSettings.apiKey;
 
   if (!baseUrl || !apiKey) {
-    throw new Error("AI 服务未配置：缺少 Base URL 或 API Key");
+    throw new Error(locale === "zh-CN"
+      ? "AI 服务未配置：缺少 Base URL 或 API Key"
+      : "AI is not configured: missing Base URL or API Key");
   }
 
   const url = `${baseUrl}/v1/chat/completions`;
@@ -75,7 +95,7 @@ async function cleanupCapture(text, mcSettings) {
       model,
       temperature: 0.1,
       messages: [
-        { role: "system", content: CAPTURE_SYSTEM_PROMPT },
+        { role: "system", content: getCaptureSystemPrompt(locale) },
         { role: "user", content: text },
       ],
     }),
@@ -84,7 +104,10 @@ async function cleanupCapture(text, mcSettings) {
   });
 
   if (response.status !== 200) {
-    throw new Error(`AI 请求失败 (${response.status}): ${JSON.stringify(response.json || response.text).slice(0, 200)}`);
+    if (locale === "zh-CN") {
+      throw new Error(`AI 请求失败 (${response.status}): ${JSON.stringify(response.json || response.text).slice(0, 200)}`);
+    }
+    throw new Error(`AI request failed (${response.status}): ${JSON.stringify(response.json || response.text).slice(0, 200)}`);
   }
 
   const data = response.json;
@@ -96,7 +119,7 @@ async function cleanupCapture(text, mcSettings) {
     data.choices[0].message.content;
 
   if (!content) {
-    throw new Error("AI 返回内容为空");
+    throw new Error(locale === "zh-CN" ? "AI 返回内容为空" : "AI returned empty content");
   }
 
   return content.trim();
@@ -105,12 +128,18 @@ async function cleanupCapture(text, mcSettings) {
 /**
  * Quick test of AI connectivity.
  * @param {object} mcSettings
+ * @param {object} [options]
  * @returns {Promise<{ok: boolean, message: string}>}
  */
-async function testConnection(mcSettings) {
+async function testConnection(mcSettings, options = {}) {
+  const locale = normalizeSupportedLocale(options.locale || (mcSettings && mcSettings.locale) || "en");
   try {
-    const result = await cleanupCapture("嗯，这是一个测试", mcSettings);
-    return { ok: true, message: `连接成功，返回: "${result}"` };
+    const probe = locale === "zh-CN" ? "嗯，这是一个测试" : "um, this is a test";
+    const result = await cleanupCapture(probe, mcSettings, { locale });
+    return {
+      ok: true,
+      message: locale === "zh-CN" ? `连接成功，返回: "${result}"` : `Connected. Response: "${result}"`,
+    };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
@@ -119,6 +148,8 @@ async function testConnection(mcSettings) {
 module.exports = {
   PROVIDER_PRESETS,
   CAPTURE_SYSTEM_PROMPT,
+  CAPTURE_SYSTEM_PROMPT_EN,
+  getCaptureSystemPrompt,
   cleanupCapture,
   testConnection,
 };

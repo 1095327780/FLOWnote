@@ -20,6 +20,10 @@ function createResponseRecoveryMethods(deps = {}) {
     payloadLooksInProgress,
     hasTerminalPayload,
     chooseRicherResponse,
+    rt = (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+      const v = params[k];
+      return v === undefined || v === null ? "" : String(v);
+    }),
   } = deps;
 
   function normalizeTimestampMs(value) {
@@ -165,8 +169,14 @@ function createResponseRecoveryMethods(deps = {}) {
     if (polled.timedOut && !hadRenderablePayload) {
       const statusText = formatSessionStatusText(polled.lastStatus);
       const activeModel = String(this.settings && this.settings.defaultModel ? this.settings.defaultModel : "").trim();
-      const modelText = activeModel ? `模型 ${activeModel}` : "当前模型";
-      throw new Error(`${modelText} 长时间无响应，可能不受当前账号/API Key 支持（session.status=${statusText}）。请切换模型或检查登录配置。`);
+      const modelText = activeModel
+        ? rt("模型 {activeModel}", "Model {activeModel}", { activeModel })
+        : rt("当前模型", "Current model");
+      throw new Error(rt(
+        "{modelText} 长时间无响应，可能不受当前账号/API Key 支持（session.status={statusText}）。请切换模型或检查登录配置。",
+        "{modelText} has not responded for a long time and may not be supported by current account/API key (session.status={statusText}). Switch model or check login configuration.",
+        { modelText, statusText },
+      ));
     }
 
     let payload = await ensureRenderablePayload({
@@ -369,7 +379,7 @@ function createResponseRecoveryMethods(deps = {}) {
     }
 
     if (lastError) throw lastError;
-    throw new Error("FLOWnote 事件流连接失败");
+    throw new Error(rt("FLOWnote 事件流连接失败", "FLOWnote event stream connection failed"));
   }
 
   buildEventStreamUrlCandidates(baseUrl, directory) {
@@ -489,7 +499,7 @@ function createResponseRecoveryMethods(deps = {}) {
   isUnknownStatusFallbackText(text) {
     const value = String(text || "").trim();
     if (!value) return false;
-    return /^\(无文本返回：session\.status=/i.test(value);
+    return /^\((无文本返回：|No text returned: )session\.status=/i.test(value);
   }
 
   async trySyncMessageRecovery(sessionId, messageBody, signal, streamedMessageId = "") {

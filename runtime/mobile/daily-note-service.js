@@ -1,9 +1,10 @@
 const { normalizePath } = require("obsidian");
+const { normalizeSupportedLocale } = require("../i18n-locale-utils");
 
 const URL_REGEX = /https?:\/\/[^\s)\]>，。！？]+/g;
 const URL_TRAILING_ASCII_PUNCTUATION_REGEX = /[.,;:!?]+$/;
-const URL_SUMMARY_LINE_REGEX = /^\s*>\s*📎\s*(https?:\/\/\S+|原始URL)\s*-\s*(.+?)\s*$/i;
-const INLINE_URL_SUMMARY_REGEX = />\s*📎\s*(https?:\/\/\S+|原始URL)\s*-\s*(.+?)\s*$/i;
+const URL_SUMMARY_LINE_REGEX = /^\s*>\s*📎\s*(https?:\/\/\S+|原始URL|OriginalURL)\s*-\s*(.+?)\s*$/i;
+const INLINE_URL_SUMMARY_REGEX = />\s*📎\s*(https?:\/\/\S+|原始URL|OriginalURL)\s*-\s*(.+?)\s*$/i;
 
 const DAILY_NOTE_TEMPLATE = `# {{date}}
 
@@ -21,11 +22,48 @@ const DAILY_NOTE_TEMPLATE = `# {{date}}
 - 明天计划：
 `;
 
-/**
- * Format a date as YYYY-MM-DD.
- * @param {Date} [date]
- * @returns {string}
- */
+const DAILY_NOTE_TEMPLATE_EN = `# {{date}}
+
+## 📋 Today Plan
+- [ ]
+
+## 📝 Today Notes
+
+### 💡 Ideas
+
+### 📖 Learning Notes
+
+## 🔄 Daily Review
+- What I did today:
+- Plan for tomorrow:
+`;
+
+function summaryFallback(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN"
+    ? "暂无法解析，已保留原始链接"
+    : "Unable to resolve, original URL preserved";
+}
+
+function summaryPrefix(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN" ? "链接摘要" : "URL Summary";
+}
+
+function emptyValue(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN" ? "（空）" : "(Empty)";
+}
+
+function originalPrefix(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN" ? "原文" : "Original";
+}
+
+function linkLabel(index, locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN" ? `链接${index}` : `Link ${index}`;
+}
+
+function getDailyNoteTemplate(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN" ? DAILY_NOTE_TEMPLATE : DAILY_NOTE_TEMPLATE_EN;
+}
+
 function formatDateStr(date) {
   const d = date || new Date();
   const y = d.getFullYear();
@@ -34,11 +72,6 @@ function formatDateStr(date) {
   return `${y}-${m}-${day}`;
 }
 
-/**
- * Format time as HH:mm.
- * @param {Date} [date]
- * @returns {string}
- */
 function formatTimeStr(date) {
   const d = date || new Date();
   const h = String(d.getHours()).padStart(2, "0");
@@ -53,10 +86,10 @@ function normalizeSingleLine(text, fallback = "") {
   return normalized || fallback;
 }
 
-function parseSummaryItemFromMatch(match, linePrefix = "") {
+function parseSummaryItemFromMatch(match, linePrefix = "", locale = "zh-CN") {
   const rawTarget = String(match && match[1] ? match[1] : "").trim();
-  const summary = normalizeSingleLine(match && match[2] ? match[2] : "", "暂无法解析，已保留原始链接");
-  const isPlaceholder = /^原始url$/i.test(rawTarget);
+  const summary = normalizeSingleLine(match && match[2] ? match[2] : "", summaryFallback(locale));
+  const isPlaceholder = /^(原始url|originalurl)$/i.test(rawTarget);
   const directUrl = isPlaceholder ? "" : stripTrailingUrlPunctuation(rawTarget);
   const hints = extractUrlsFromText(String(linePrefix || ""));
   const urlHint = hints.length ? hints[hints.length - 1] : "";
@@ -101,7 +134,7 @@ function extractUrlsFromText(text) {
   return urls;
 }
 
-function parseCaptureTextSections(text) {
+function parseCaptureTextSections(text, locale = "zh-CN") {
   const raw = String(text || "").replace(/\r\n?/g, "\n");
   const lines = raw.split("\n");
   const bodyLines = [];
@@ -110,15 +143,15 @@ function parseCaptureTextSections(text) {
   for (const line of lines) {
     const pureMatch = line.match(URL_SUMMARY_LINE_REGEX);
     if (pureMatch) {
-      summaryItems.push(parseSummaryItemFromMatch(pureMatch, ""));
+      summaryItems.push(parseSummaryItemFromMatch(pureMatch, "", locale));
       continue;
     }
     const inlineMatch = line.match(INLINE_URL_SUMMARY_REGEX);
     if (inlineMatch) {
-      const markerStart = line.search(/>\s*📎\s*(https?:\/\/\S+|原始URL)\s*-\s*/i);
+      const markerStart = line.search(/>\s*📎\s*(https?:\/\/\S+|原始URL|OriginalURL)\s*-\s*/i);
       const prefix = markerStart >= 0 ? line.slice(0, markerStart).trimEnd() : String(line || "").trimEnd();
       if (prefix.trim()) bodyLines.push(prefix);
-      summaryItems.push(parseSummaryItemFromMatch(inlineMatch, prefix));
+      summaryItems.push(parseSummaryItemFromMatch(inlineMatch, prefix, locale));
       continue;
     }
     bodyLines.push(line);
@@ -167,12 +200,13 @@ function parseCaptureTextSections(text) {
   };
 }
 
-function normalizeCaptureParagraph(text) {
+function normalizeCaptureParagraph(text, locale = "zh-CN") {
   let normalized = String(text || "")
     .replace(/\r\n?/g, "\n")
     .trim();
   if (!normalized) return "";
-  normalized = normalized.replace(/^原文[:：]\s*/i, "");
+  const prefix = originalPrefix(locale);
+  normalized = normalized.replace(new RegExp(`^(${prefix}|原文|Original)[:：]\\s*`, "i"), "");
   normalized = normalized
     .split("\n")
     .map((line) => line.trim())
@@ -181,48 +215,38 @@ function normalizeCaptureParagraph(text) {
   return normalized.replace(/\s+/g, " ").trim();
 }
 
-function formatResolverInlineSummary(resolverItems) {
+function formatResolverInlineSummary(resolverItems, locale = "zh-CN") {
   const items = Array.isArray(resolverItems)
     ? resolverItems.filter((item) => item && item.hasSummary)
     : [];
   if (!items.length) return "";
 
   if (items.length === 1) {
-    return `（链接摘要：${normalizeSingleLine(items[0].summary, "暂无法解析，已保留原始链接")}）`;
+    return `(${summaryPrefix(locale)}: ${normalizeSingleLine(items[0].summary, summaryFallback(locale))})`;
   }
 
   const usedLabels = new Map();
   const parts = items.map((item, index) => {
-    const base = inferTitleFromUrl(item.url) || `链接${index + 1}`;
+    const base = inferTitleFromUrl(item.url) || linkLabel(index + 1, locale);
     const count = (usedLabels.get(base) || 0) + 1;
     usedLabels.set(base, count);
     const label = count > 1 ? `${base}#${count}` : base;
-    return `${label}：${normalizeSingleLine(item.summary, "暂无法解析，已保留原始链接")}`;
+    return `${label}: ${normalizeSingleLine(item.summary, summaryFallback(locale))}`;
   });
-  return `（链接摘要：${parts.join("；")}）`;
+  return `(${summaryPrefix(locale)}: ${parts.join("; ")})`;
 }
 
-/**
- * Format a capture entry.
- * @param {string} timeStr
- * @param {string} text
- * @returns {string}
- */
-function formatCaptureEntry(timeStr, text) {
-  const { body, resolverItems } = parseCaptureTextSections(text);
-  const paragraph = normalizeCaptureParagraph(body || text) || "（空）";
-  const inlineSummary = formatResolverInlineSummary(resolverItems);
+function formatCaptureEntry(timeStr, text, options = {}) {
+  const locale = normalizeSupportedLocale(options.locale || "en");
+  const { body, resolverItems } = parseCaptureTextSections(text, locale);
+  const paragraph = normalizeCaptureParagraph(body || text, locale) || emptyValue(locale);
+  const inlineSummary = formatResolverInlineSummary(resolverItems, locale);
   return `- ${timeStr} ${paragraph}${inlineSummary ? ` ${inlineSummary}` : ""}`;
 }
 
-/**
- * Ensure parent folders exist for a given file path.
- * @param {import("obsidian").Vault} vault
- * @param {string} filePath
- */
 async function ensureFolders(vault, filePath) {
   const parts = filePath.split("/");
-  parts.pop(); // remove filename
+  parts.pop();
   let current = "";
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
@@ -232,74 +256,52 @@ async function ensureFolders(vault, filePath) {
       try {
         await vault.createFolder(normalized);
       } catch (_e) {
-        // folder may have been created concurrently — ignore
       }
     }
   }
 }
 
-/**
- * Find or create today's daily note.
- * @param {import("obsidian").Vault} vault
- * @param {string} dailyNotePath - folder path for daily notes
- * @param {string} [dateStr] - override date string (YYYY-MM-DD)
- * @returns {Promise<import("obsidian").TFile>}
- */
-async function findOrCreateDailyNote(vault, dailyNotePath, dateStr) {
+async function findOrCreateDailyNote(vault, dailyNotePath, dateStr, options = {}) {
+  const locale = normalizeSupportedLocale(options.locale || "en");
   const date = dateStr || formatDateStr();
   const filePath = normalizePath(`${dailyNotePath}/${date}.md`);
 
   const existing = vault.getAbstractFileByPath(filePath);
   if (existing) return existing;
 
-  // Ensure folders exist
   await ensureFolders(vault, filePath);
 
-  // Create from template
-  const content = DAILY_NOTE_TEMPLATE.replace(/\{\{date\}\}/g, date);
+  const template = String(options.template || getDailyNoteTemplate(locale));
+  const content = template.replace(/\{\{date\}\}/g, date);
   return await vault.create(filePath, content);
 }
 
-/**
- * Append a capture entry to the idea section of a daily note.
- * @param {import("obsidian").Vault} vault
- * @param {import("obsidian").TFile} file
- * @param {string} entry - formatted entry string (e.g. "- 14:30 some idea")
- * @param {string} sectionHeader - e.g. "### 💡 想法和灵感"
- */
 async function appendToIdeaSection(vault, file, entry, sectionHeader) {
   let content = await vault.read(file);
   const headerIdx = content.indexOf(sectionHeader);
 
   if (headerIdx !== -1) {
-    // Section exists — find the end of it (next heading or end of file)
     const afterHeader = headerIdx + sectionHeader.length;
     const restContent = content.slice(afterHeader);
 
-    // Find next heading (any level) or end of content
     const nextHeadingMatch = restContent.match(/\n(#{1,6} )/);
     let insertPos;
 
     if (nextHeadingMatch) {
-      // Insert before the next heading
       insertPos = afterHeader + nextHeadingMatch.index;
     } else {
-      // No next heading; append at end
       insertPos = content.length;
     }
 
-    // Find the last "- " entry within the section to insert after it
     const sectionContent = content.slice(afterHeader, insertPos);
     const lastDashIdx = sectionContent.lastIndexOf("\n- ");
 
     if (lastDashIdx !== -1) {
-      // Find end of that line
       const lineStart = afterHeader + lastDashIdx + 1;
       const lineEnd = content.indexOf("\n", lineStart + 1);
       const actualEnd = lineEnd === -1 ? content.length : lineEnd;
       content = content.slice(0, actualEnd) + "\n" + entry + content.slice(actualEnd);
     } else {
-      // No existing entries; insert right after the header line
       const headerLineEnd = content.indexOf("\n", headerIdx);
       if (headerLineEnd !== -1) {
         content = content.slice(0, headerLineEnd) + "\n" + entry + content.slice(headerLineEnd);
@@ -308,8 +310,11 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
       }
     }
   } else {
-    // Section doesn't exist — insert after "## 📝 今日记录" line or at end
-    const recordIdx = content.indexOf("## 📝 今日记录");
+    const recordHeadings = ["## 📝 今日记录", "## 📝 Today Notes"];
+    const recordIdx = recordHeadings.reduce((found, heading) => {
+      if (found !== -1) return found;
+      return content.indexOf(heading);
+    }, -1);
     const insertBlock = "\n" + sectionHeader + "\n" + entry + "\n";
 
     if (recordIdx !== -1) {
@@ -320,7 +325,6 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
         content = content + "\n" + insertBlock;
       }
     } else {
-      // Fallback: append at end
       content = content + "\n" + insertBlock;
     }
   }
@@ -330,9 +334,12 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
 
 module.exports = {
   DAILY_NOTE_TEMPLATE,
+  DAILY_NOTE_TEMPLATE_EN,
   formatDateStr,
   formatTimeStr,
   formatCaptureEntry,
   findOrCreateDailyNote,
   appendToIdeaSection,
+  getDailyNoteTemplate,
+  summaryFallback,
 };

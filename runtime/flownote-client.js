@@ -1,7 +1,23 @@
+const { rt } = (() => {
+  try {
+    return require("./runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
+
 class FLOWnoteClient {
   constructor(options) {
     if (!options || typeof options.SdkTransport !== "function" || typeof options.CompatTransport !== "function") {
-      throw new Error("FLOWnoteClient 需要注入 SdkTransport 和 CompatTransport 构造器");
+      throw new Error(rt(
+        "FLOWnoteClient 需要注入 SdkTransport 和 CompatTransport 构造器",
+        "FLOWnoteClient requires injected SdkTransport and CompatTransport constructors",
+      ));
     }
     this.SdkTransport = options.SdkTransport;
     this.CompatTransport = options.CompatTransport;
@@ -62,8 +78,24 @@ class FLOWnoteClient {
         return out;
       } catch (e2) {
         this.lastError = [
-          `[${actionName}] ${primaryMode.toUpperCase()}失败: ${e1 instanceof Error ? e1.message : String(e1)}`,
-          `[${actionName}] ${fallbackMode.toUpperCase()}失败: ${e2 instanceof Error ? e2.message : String(e2)}`,
+          rt(
+            "[{actionName}] {mode}失败: {message}",
+            "[{actionName}] {mode} failed: {message}",
+            {
+              actionName,
+              mode: primaryMode.toUpperCase(),
+              message: e1 instanceof Error ? e1.message : String(e1),
+            },
+          ),
+          rt(
+            "[{actionName}] {mode}失败: {message}",
+            "[{actionName}] {mode} failed: {message}",
+            {
+              actionName,
+              mode: fallbackMode.toUpperCase(),
+              message: e2 instanceof Error ? e2.message : String(e2),
+            },
+          ),
         ].join(" | ");
         throw e2;
       }
@@ -85,7 +117,10 @@ class FLOWnoteClient {
           return [];
         });
       }
-      throw new Error("当前传输层不支持会话消息列表读取。");
+      throw new Error(rt(
+        "当前传输层不支持会话消息列表读取。",
+        "Current transport does not support reading session message list.",
+      ));
     });
   }
   createSession(title) {
@@ -140,25 +175,37 @@ class FLOWnoteClient {
   authorizeProviderOauth(options) {
     return this.withTransport("authorizeProviderOauth", (t) => {
       if (typeof t.authorizeProviderOauth === "function") return t.authorizeProviderOauth(options);
-      throw new Error("当前传输层不支持 Provider OAuth 授权。");
+      throw new Error(rt(
+        "当前传输层不支持 Provider OAuth 授权。",
+        "Current transport does not support Provider OAuth authorization.",
+      ));
     });
   }
   completeProviderOauth(options) {
     return this.withTransport("completeProviderOauth", (t) => {
       if (typeof t.completeProviderOauth === "function") return t.completeProviderOauth(options);
-      throw new Error("当前传输层不支持 Provider OAuth 回调。");
+      throw new Error(rt(
+        "当前传输层不支持 Provider OAuth 回调。",
+        "Current transport does not support Provider OAuth callback.",
+      ));
     });
   }
   setProviderApiKeyAuth(options) {
     return this.withTransport("setProviderApiKeyAuth", (t) => {
       if (typeof t.setProviderApiKeyAuth === "function") return t.setProviderApiKeyAuth(options);
-      throw new Error("当前传输层不支持 Provider API Key 设置。");
+      throw new Error(rt(
+        "当前传输层不支持 Provider API Key 设置。",
+        "Current transport does not support Provider API key setup.",
+      ));
     });
   }
   clearProviderAuth(options) {
     return this.withTransport("clearProviderAuth", (t) => {
       if (typeof t.clearProviderAuth === "function") return t.clearProviderAuth(options);
-      throw new Error("当前传输层不支持 Provider 凭据清除。");
+      throw new Error(rt(
+        "当前传输层不支持 Provider 凭据清除。",
+        "Current transport does not support clearing Provider credentials.",
+      ));
     });
   }
   async stop() {

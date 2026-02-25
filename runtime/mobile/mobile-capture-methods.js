@@ -1,4 +1,5 @@
 const { Notice } = require("obsidian");
+const { tFromContext } = require("../i18n-runtime");
 const { normalizeSettings } = require("../settings-utils");
 const { CaptureModal } = require("./capture-modal");
 const { MobileSettingsTab } = require("./mobile-settings-tab");
@@ -8,18 +9,19 @@ const mobileCaptureMethodsMixin = {
    * Mobile-only onload — called instead of desktop onload on mobile platforms.
    */
   async onloadMobile() {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     try {
       await this.loadMobilePersistedData();
 
       // Ribbon icon
-      this.addRibbonIcon("lightbulb", "快速捕获想法", () => {
+      this.addRibbonIcon("lightbulb", t("commands.mobileQuickCapture", "快速捕获想法"), () => {
         this.openCaptureModal();
       });
 
       // Command
       this.addCommand({
         id: "mobile-quick-capture",
-        name: "快速捕获想法",
+        name: t("commands.mobileQuickCapture", "快速捕获想法"),
         callback: () => {
           this.openCaptureModal();
         },
@@ -30,7 +32,7 @@ const mobileCaptureMethodsMixin = {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[FLOWnote] mobile load failed", e);
-      new Notice(`FLOWnote 移动端加载失败: ${msg}`);
+      new Notice(t("notices.mobileLoadFailed", "FLOWnote 移动端加载失败: {message}", { message: msg }));
     }
   },
 

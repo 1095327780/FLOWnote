@@ -10,6 +10,18 @@ const {
   extractSessionStatusFromEventProperties,
   extractSessionStatusType,
 } = require("./completion-signals");
+const { rt } = (() => {
+  try {
+    return require("../../runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
 
 function normalizeTimestampMs(value) {
   const raw = Number(value || 0);
@@ -177,7 +189,7 @@ function createTransportEventReducer(options) {
     if (err) {
       meta = err;
       if (!text) {
-        text = `模型返回错误：${err}`;
+        text = rt("模型返回错误：{err}", "Model returned an error: {err}", { err });
         call(cfg.onToken, text);
       }
     }
@@ -209,7 +221,7 @@ function createTransportEventReducer(options) {
     if (err) {
       meta = err;
       if (!text) {
-        text = `模型返回错误：${err}`;
+        text = rt("模型返回错误：{err}", "Model returned an error: {err}", { err });
         call(cfg.onToken, text);
       }
     }

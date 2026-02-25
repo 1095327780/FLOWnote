@@ -4,6 +4,8 @@ Language: **English** | [简体中文](README.zh-CN.md)
 
 FLOWnote is an OpenCode-powered plugin for AI-assisted note management.
 
+**OpenCode is required**: install OpenCode on your desktop before using FLOWnote chat, sessions, and skill workflows.
+
 It is designed as an end-to-end workflow for:
 
 - Capture -> Cultivate -> Connect -> Create
@@ -12,15 +14,21 @@ It is designed as an end-to-end workflow for:
 
 ## What Makes FLOWnote Different
 
-FLOWnote is inspired by [Claudian](https://github.com/YishenTu/claudian), which embeds Claude Code into Obsidian.
+FLOWnote is inspired by [Claudian](https://github.com/YishenTu/claudian) and built around the OpenCode runtime + SDK.
 
 FLOWnote takes a different path:
 
-- Integrates **OpenCode** runtime into Obsidian
+- Integrates **OpenCode** runtime and **OpenCode SDK** into Obsidian
 - Ships a **domain-specific skill pack** for knowledge workflows
 - Focuses on **note management loops**, not just agent access
 
 In short: this is not only "OpenCode inside Obsidian", but "OpenCode + a complete note-management skill system".
+
+## Requirements
+
+- OpenCode installed on your desktop (required): [OpenCode](https://opencode.ai) / [GitHub](https://github.com/anomalyco/opencode)
+- Obsidian v1.5.0+
+- For mobile AI cleanup or URL resolving, configure third-party API keys as needed
 
 ## Core Capabilities
 
@@ -29,6 +37,7 @@ In short: this is not only "OpenCode inside Obsidian", but "OpenCode + a complet
 - Session sidebar with persistent history
 - Streaming chat responses and retry/cancel flows
 - Model/provider switching and provider auth handling
+- Powered by OpenCode SDK for session and tool orchestration
 - Connection diagnostics for executable path, runtime mode, and startup failures
 
 ### Built-in skills (bundled and auto-synced)
@@ -82,6 +91,7 @@ FLOWnote currently bundles these skills:
 ### Community plugin directory
 
 After approval, install from Community Plugins by searching `FLOWnote`.
+Before enabling FLOWnote, make sure OpenCode is installed and available on your desktop.
 
 ### Manual installation
 
@@ -99,12 +109,14 @@ Then reload plugins in Obsidian.
 
 ### Desktop setup
 
-1. Install OpenCode locally.
+1. Install OpenCode on your desktop and verify `opencode` is available.
 2. Open FLOWnote settings.
 3. Keep CLI path empty first (auto-detect), or set explicit path if needed.
 4. Choose launch strategy (`auto` / native Windows / WSL) when applicable.
 
 ### Mobile setup
+
+Even when mainly using mobile capture, FLOWnote still requires OpenCode installed on desktop.
 
 1. Configure AI provider (or custom OpenAI-compatible endpoint).
 2. Configure URL resolver provider and key if link parsing is needed.
@@ -161,8 +173,11 @@ Release assets are generated in `release/`:
 - `release/manifest.json`
 - `release/styles.css`
 
-## Acknowledgements
+## Acknowledgments
 
-- FLOWnote is inspired by [Claudian](https://github.com/YishenTu/claudian) by YishenTu.
-- FLOWnote is an independent implementation focused on OpenCode integration and note-management skills.
-- Both Claudian and FLOWnote are distributed under the MIT License.
+- Thanks [OpenCode](https://github.com/anomalyco/opencode) for the runtime and SDK foundation.
+- Thanks [Obsidian](https://obsidian.md) for the plugin API.
+
+## License
+
+FLOWnote is distributed under the MIT License.

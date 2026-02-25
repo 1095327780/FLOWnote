@@ -1,6 +1,18 @@
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { createLinkedAbortController } = require("./http-utils");
+const { rt } = (() => {
+  try {
+    return require("./runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
 const {
   parseModel,
   parseCommandModel,
@@ -68,8 +80,12 @@ class SdkTransport {
     }
 
     if (!mod || typeof mod.createOpencodeClient !== "function") {
-      const details = importErrors.length ? `；${importErrors.join(" | ")}` : "";
-      throw new Error(`FLOWnote SDK(v2) 加载失败：createOpencodeClient 不可用${details}`);
+      const details = importErrors.length ? `; ${importErrors.join(" | ")}` : "";
+      throw new Error(rt(
+        "FLOWnote SDK(v2) 加载失败：createOpencodeClient 不可用{details}",
+        "FLOWnote SDK(v2) load failed: createOpencodeClient is unavailable{details}",
+        { details },
+      ));
     }
 
     this.client = mod.createOpencodeClient({
@@ -146,10 +162,10 @@ class SdkTransport {
 
   async authorizeProviderOauth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const method = Number(options.method);
-    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+    if (!Number.isFinite(method) || method < 0) throw new Error(rt("OAuth method 无效", "Invalid OAuth method"));
 
     const client = await this.ensureClient();
     const res = await client.provider.oauth.authorize({
@@ -162,10 +178,10 @@ class SdkTransport {
 
   async completeProviderOauth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const method = Number(options.method);
-    if (!Number.isFinite(method) || method < 0) throw new Error("OAuth method 无效");
+    if (!Number.isFinite(method) || method < 0) throw new Error(rt("OAuth method 无效", "Invalid OAuth method"));
 
     const code = String(options.code || "").trim();
     const params = {
@@ -183,10 +199,10 @@ class SdkTransport {
 
   async setProviderApiKeyAuth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const key = String(options.key || "").trim();
-    if (!key) throw new Error("API Key 不能为空");
+    if (!key) throw new Error(rt("API Key 不能为空", "API Key is required"));
 
     const client = await this.ensureClient();
     await client.auth.set({
@@ -201,7 +217,7 @@ class SdkTransport {
 
   async clearProviderAuth(options = {}) {
     const providerID = String(options.providerID || "").trim();
-    if (!providerID) throw new Error("providerID 不能为空");
+    if (!providerID) throw new Error(rt("providerID 不能为空", "providerID is required"));
 
     const client = await this.ensureClient();
     await client.auth.remove({ providerID }, { signal: options.signal });
@@ -395,7 +411,7 @@ class SdkTransport {
     );
 
     for await (const raw of eventStream.stream) {
-      if (signal && signal.aborted) throw new Error("用户取消了请求");
+      if (signal && signal.aborted) throw new Error(rt("用户取消了请求", "Request was cancelled by user"));
 
       const root = raw && typeof raw === "object" ? raw : null;
       const event = root && root.payload && typeof root.payload === "object" ? root.payload : root;

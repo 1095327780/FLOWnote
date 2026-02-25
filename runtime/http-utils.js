@@ -1,5 +1,17 @@
 const http = require("http");
 const https = require("https");
+const { rt } = (() => {
+  try {
+    return require("./runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
 
 function nodeHttpRequestJson(url, method, body, timeoutMs, signal, options = {}) {
   const parsed = new URL(url);
@@ -53,13 +65,13 @@ function nodeHttpRequestJson(url, method, body, timeoutMs, signal, options = {})
 
     req.on("error", (err) => finish(reject, err));
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`请求超时 (${timeoutMs}ms)`));
+      req.destroy(new Error(rt("请求超时 ({timeoutMs}ms)", "Request timed out ({timeoutMs}ms)", { timeoutMs })));
     });
 
     if (signal) {
-      onAbort = () => req.destroy(new Error("用户取消了请求"));
+      onAbort = () => req.destroy(new Error(rt("用户取消了请求", "Request was cancelled by user")));
       if (signal.aborted) {
-        req.destroy(new Error("用户取消了请求"));
+        req.destroy(new Error(rt("用户取消了请求", "Request was cancelled by user")));
       } else {
         signal.addEventListener("abort", onAbort, { once: true });
       }
@@ -93,7 +105,11 @@ function nodeHttpRequestSse(url, timeoutMs, signal, handlers, options = {}) {
       if (!textChunk) return;
       buffer += textChunk;
       if (buffer.length > maxBufferChars) {
-        finish(reject, new Error(`SSE 缓冲区超限 (${maxBufferChars})`));
+        finish(reject, new Error(rt(
+          "SSE 缓冲区超限 ({maxBufferChars})",
+          "SSE buffer exceeded limit ({maxBufferChars})",
+          { maxBufferChars },
+        )));
         req.destroy();
         return;
       }
@@ -163,7 +179,11 @@ function nodeHttpRequestSse(url, timeoutMs, signal, handlers, options = {}) {
           res.on("data", (chunk) => chunks.push(chunk));
           res.on("end", () => {
             const body = Buffer.concat(chunks).toString("utf8");
-            finish(reject, new Error(`SSE 请求失败 (${status}): ${body}`));
+            finish(reject, new Error(rt(
+              "SSE 请求失败 ({status}): {body}",
+              "SSE request failed ({status}): {body}",
+              { status, body },
+            )));
           });
           return;
         }
@@ -176,12 +196,16 @@ function nodeHttpRequestSse(url, timeoutMs, signal, handlers, options = {}) {
     );
 
     req.on("error", (err) => finish(reject, err));
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`SSE 超时 (${timeoutMs}ms)`)));
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(rt(
+      "SSE 超时 ({timeoutMs}ms)",
+      "SSE timed out ({timeoutMs}ms)",
+      { timeoutMs },
+    ))));
 
     if (signal) {
-      onAbort = () => req.destroy(new Error("用户取消了请求"));
+      onAbort = () => req.destroy(new Error(rt("用户取消了请求", "Request was cancelled by user")));
       if (signal.aborted) {
-        req.destroy(new Error("用户取消了请求"));
+        req.destroy(new Error(rt("用户取消了请求", "Request was cancelled by user")));
       } else {
         signal.addEventListener("abort", onAbort, { once: true });
       }

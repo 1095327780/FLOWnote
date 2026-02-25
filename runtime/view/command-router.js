@@ -1,11 +1,16 @@
 const { Notice } = require("obsidian");
+const { tFromContext } = require("../i18n-runtime");
+
+function tr(view, key, fallback, params = {}) {
+  return tFromContext(view, key, fallback, params);
+}
 
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
 function getSkillPrimaryDescription(skill) {
-  if (!skill) return "选择技能后会显示主要功能说明。";
+  if (!skill) return tr(this, "view.skill.primaryFallback", "Select a skill to see its primary description.");
 
   const cleanInline = (line) => String(line || "")
     .trim()
@@ -50,14 +55,14 @@ function getSkillPrimaryDescription(skill) {
       !/^[-:| ]+$/.test(line)
     ));
 
-  return lines[0] || "暂无技能说明";
+  return lines[0] || tr(this, "view.skill.noDescription", "No skill description");
 }
 
 function getSkillBriefDescription(skill) {
   const primary = String(this.getSkillPrimaryDescription(skill) || "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!primary || primary === "暂无技能说明") return "";
+  if (!primary || primary === tr(this, "view.skill.noDescription", "No skill description")) return "";
 
   let brief = primary;
   const namePrefix = String(skill && skill.name ? skill.name : "").trim();
@@ -132,19 +137,24 @@ function resolveSkillFromPrompt(userText) {
   if (!skill) return { skill: null, promptText: input };
 
   const rest = (firstSpace >= 0 ? raw.slice(firstSpace + 1) : "").trim();
-  const promptText = rest || `请按技能 ${skill.name || skill.id} 处理当前任务。`;
+  const promptText = rest || tr(
+    this,
+    "view.skill.defaultPrompt",
+    "Please handle this task with skill {name}.",
+    { name: skill.name || skill.id },
+  );
   return { skill, promptText };
 }
 
 function openSkillSelector() {
   const skills = this.plugin.skillService.getSkills();
   if (!skills.length) {
-    new Notice("当前未发现可用技能，请先检查 Skills 目录设置。");
+    new Notice(tr(this, "view.skill.noneFound", "No available skills found. Check Skills directory settings."));
     return;
   }
   const select = this.elements.skillSelect;
   if (!select || select.disabled) {
-    new Notice("技能下拉尚未初始化，请稍后再试。");
+    new Notice(tr(this, "view.skill.notReady", "Skill dropdown is not ready yet. Try again shortly."));
     return;
   }
   select.focus();
@@ -155,7 +165,7 @@ function openSkillSelector() {
     } catch {
     }
   }
-  this.setRuntimeStatus("请从技能下拉列表中选择技能。", "info");
+  this.setRuntimeStatus(tr(this, "view.skill.selectHint", "Please choose a skill from the dropdown."), "info");
 }
 
 async function refreshModelList() {
@@ -191,7 +201,7 @@ async function applyModelSelection(modelID, options = {}) {
   const availableModels = Array.isArray(this.plugin.cachedModels) ? this.plugin.cachedModels : [];
 
   if (normalized && availableModels.length && !availableModels.includes(normalized)) {
-    throw new Error(`模型不可用或当前账号未授权：${normalized}`);
+    throw new Error(tr(this, "view.model.unavailable", "Model unavailable or not authorized: {model}", { model: normalized }));
   }
 
   this.selectedModel = normalized;
@@ -205,12 +215,12 @@ async function applyModelSelection(modelID, options = {}) {
   try {
     if (normalized) {
       await this.plugin.opencodeClient.setDefaultModel({ model: normalized });
-      if (!options.silentNotice) new Notice(`已切换模型：${normalized}`);
-      return `已切换模型：${normalized}`;
+      if (!options.silentNotice) new Notice(tr(this, "view.model.switched", "Switched model: {model}", { model: normalized }));
+      return tr(this, "view.model.switched", "Switched model: {model}", { model: normalized });
     }
 
-    if (!options.silentNotice) new Notice("已恢复默认模型（由 FLOWnote 自动选择）");
-    return "已恢复默认模型（由 FLOWnote 自动选择）";
+    if (!options.silentNotice) new Notice(tr(this, "view.model.resetAuto", "Reset to automatic model selection by FLOWnote."));
+    return tr(this, "view.model.resetAuto", "Reset to automatic model selection by FLOWnote.");
   } catch (e) {
     this.selectedModel = previous;
     this.plugin.settings.defaultModel = previousSetting;
@@ -229,7 +239,7 @@ async function openModelSelector(sessionId) {
   if (typeof this.updateModelSelectOptions === "function") this.updateModelSelectOptions();
 
   if (!select || select.disabled) {
-    new Notice("模型下拉尚未初始化，请稍后再试。");
+    new Notice(tr(this, "view.model.notReady", "Model dropdown is not ready yet. Try again shortly."));
     return;
   }
 
@@ -246,7 +256,7 @@ async function openModelSelector(sessionId) {
     } catch {
     }
   }
-  this.setRuntimeStatus("请从模型下拉列表中选择模型。", "info");
+  this.setRuntimeStatus(tr(this, "view.model.selectHint", "Please choose a model from the dropdown."), "info");
 }
 
 async function handleModelSlashCommand(userText, parsed) {
@@ -259,7 +269,7 @@ async function handleModelSlashCommand(userText, parsed) {
   });
 
   if (!parsed.args) {
-    this.appendAssistantMessage(sessionId, "请从模型下拉列表中选择模型。", "");
+    this.appendAssistantMessage(sessionId, tr(this, "view.model.selectHint", "Please choose a model from the dropdown."), "");
     await this.plugin.persistState();
     this.renderMessages();
     this.renderSidebar(this.root.querySelector(".oc-side"));
@@ -272,8 +282,12 @@ async function handleModelSlashCommand(userText, parsed) {
     this.appendAssistantMessage(sessionId, text, "");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    this.appendAssistantMessage(sessionId, `模型切换失败: ${msg}`, msg);
-    new Notice(`模型切换失败: ${msg}`);
+    this.appendAssistantMessage(
+      sessionId,
+      tr(this, "view.model.switchFailed", "Model switch failed: {message}", { message: msg }),
+      msg,
+    );
+    new Notice(tr(this, "view.model.switchFailed", "Model switch failed: {message}", { message: msg }));
   }
 
   await this.plugin.persistState();

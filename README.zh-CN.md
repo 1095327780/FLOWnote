@@ -4,6 +4,8 @@
 
 FLOWnote 是一个由 OpenCode 驱动的 AI 笔记管理插件。
 
+**必须先安装 OpenCode**：在使用 FLOWnote 的聊天、会话和技能工作流前，请先在电脑安装 OpenCode。
+
 它的目标是提供完整闭环：
 
 - 捕获 -> 培养 -> 连接 -> 创造
@@ -12,15 +14,21 @@ FLOWnote 是一个由 OpenCode 驱动的 AI 笔记管理插件。
 
 ## FLOWnote 的独特点
 
-FLOWnote 参考了 [Claudian](https://github.com/YishenTu/claudian)（将 Claude Code 集成到 Obsidian）。
+FLOWnote 参考了 [Claudian](https://github.com/YishenTu/claudian)，并围绕 OpenCode 运行时与 SDK 构建。
 
 FLOWnote 的路线不同：
 
-- 集成的是 **OpenCode** 运行时
+- 集成的是 **OpenCode** 运行时与 **OpenCode SDK**
 - 内置一套面向知识管理的 **领域技能包**
 - 强调 **笔记管理闭环**，而不是只提供 Agent 入口
 
 一句话：FLOWnote 不只是“把 OpenCode 接进 Obsidian”，而是“OpenCode + 一整套知识管理技能工作流”。
+
+## 使用前提
+
+- 电脑已安装 OpenCode（必需）：[OpenCode 官网](https://opencode.ai) / [GitHub](https://github.com/anomalyco/opencode)
+- Obsidian v1.5.0+
+- 移动端如果需要 AI 清理或链接解析，按需配置第三方 API Key
 
 ## 核心能力
 
@@ -29,6 +37,7 @@ FLOWnote 的路线不同：
 - 会话侧栏与历史持久化
 - 流式回复、重试、取消
 - 模型/Provider 切换与 Provider 鉴权处理
+- 底层由 OpenCode SDK 负责会话与工具编排
 - 连接诊断（可执行文件路径、启动方式、连接失败定位）
 
 ### 内置技能（自动同步）
@@ -80,6 +89,7 @@ FLOWnote 的路线不同：
 ### 社区插件安装
 
 审核通过后，在 Community Plugins 搜索 `FLOWnote` 安装。
+启用 FLOWnote 前，请先确认电脑上的 OpenCode 已安装且可用。
 
 ### 手动安装
 
@@ -97,12 +107,14 @@ FLOWnote 的路线不同：
 
 ### 桌面端
 
-1. 本地安装 OpenCode
+1. 在电脑安装 OpenCode，并确认 `opencode` 命令可用
 2. 打开 FLOWnote 设置
 3. CLI 路径建议先留空自动探测，必要时再填绝对路径
 4. 按环境选择启动方式（`auto` / Windows 本机 / WSL）
 
 ### 移动端
+
+即使主要使用移动端快速捕获，FLOWnote 仍要求桌面端已安装 OpenCode。
 
 1. 配置 AI Provider（或自定义 OpenAI 兼容地址）
 2. 如需链接解析，配置解析服务 Provider 与 Key
@@ -161,6 +173,9 @@ Release 产物位于 `release/`：
 
 ## 致谢
 
-- FLOWnote 受 [Claudian](https://github.com/YishenTu/claudian) 启发
-- FLOWnote 是独立实现，重点在 OpenCode 集成与笔记管理技能闭环
-- Claudian 与 FLOWnote 均采用 MIT 许可证
+- 感谢 [OpenCode](https://github.com/anomalyco/opencode) 提供运行时与 SDK 基础能力
+- 感谢 [Obsidian](https://obsidian.md) 提供插件 API
+
+## 许可证
+
+FLOWnote 采用 MIT 许可证。

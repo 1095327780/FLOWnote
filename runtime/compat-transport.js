@@ -2,6 +2,18 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { spawn, execFileSync } = require("child_process");
+const { rt } = (() => {
+  try {
+    return require("./runtime-locale-state");
+  } catch (_e) {
+    return {
+      rt: (_zh, en, params = {}) => String(en || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => {
+        const value = params[k];
+        return value === undefined || value === null ? "" : String(value);
+      }),
+    };
+  }
+})();
 const {
   ExecutableResolver,
   isNodeScriptPath,
@@ -71,7 +83,7 @@ async function streamPseudo(text, onToken, signal) {
   let current = "";
 
   for (const t of tokens) {
-    if (signal && signal.aborted) throw new Error("用户取消了请求");
+    if (signal && signal.aborted) throw new Error(rt("用户取消了请求", "Request was cancelled by user"));
     current += t;
     onToken(current);
     await sleep(20);
@@ -189,7 +201,7 @@ function collectOutputTail(tail, source, chunk) {
 
 function appendOutputHint(message, tail) {
   if (!Array.isArray(tail) || !tail.length) return message;
-  return `${message}\n最近输出:\n${tail.join("\n")}`;
+  return `${message}\n${rt("最近输出", "Recent output")}:\n${tail.join("\n")}`;
 }
 
 function looksLikeRetryableConnectionError(message) {
@@ -336,6 +348,7 @@ const compatDeps = {
   appendOutputHint,
   looksLikeRetryableConnectionError,
   sessionStatusLooksAuthFailure,
+  rt,
 };
 
 const pathWslMethods = createPathWslMethods(compatDeps);

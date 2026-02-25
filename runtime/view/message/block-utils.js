@@ -1,9 +1,11 @@
+const { tFromContext } = require("../../i18n-runtime");
+
 function ensureReasoningContainer(row, openByDefault) {
   let details = row.querySelector(".oc-message-reasoning");
   if (!details) {
     details = document.createElement("details");
     details.addClass("oc-message-reasoning");
-    details.createEl("summary", { text: "思考过程（可折叠）" });
+    details.createEl("summary", { text: tFromContext(this, "view.block.reasoning", "Reasoning (collapsible)") });
     details.createDiv({ cls: "oc-message-reasoning-body" });
     const body = row.querySelector(".oc-message-content");
     if (body && body.parentElement === row) {
@@ -63,24 +65,24 @@ function resolveDisplayBlockStatus(block, messagePending) {
 function blockTypeLabel(type) {
   const value = String(type || "").trim();
   const map = {
-    tool: "工具调用",
-    subtask: "子任务",
-    agent: "子代理",
-    file: "文件",
-    patch: "文件变更",
-    retry: "重试",
-    compaction: "压缩",
-    snapshot: "快照",
+    tool: tFromContext(this, "view.block.tool", "Tool"),
+    subtask: tFromContext(this, "view.block.subtask", "Subtask"),
+    agent: tFromContext(this, "view.block.agent", "Agent"),
+    file: tFromContext(this, "view.block.file", "File"),
+    patch: tFromContext(this, "view.block.patch", "Patch"),
+    retry: tFromContext(this, "view.block.retry", "Retry"),
+    compaction: tFromContext(this, "view.block.compaction", "Compaction"),
+    snapshot: tFromContext(this, "view.block.snapshot", "Snapshot"),
   };
-  return map[value] || value || "输出";
+  return map[value] || value || tFromContext(this, "view.block.output", "Output");
 }
 
 function blockStatusLabel(status) {
   const value = this.normalizeBlockStatus(status);
-  if (value === "completed") return "已完成";
-  if (value === "running") return "进行中";
-  if (value === "error") return "失败";
-  return "等待中";
+  if (value === "completed") return tFromContext(this, "view.block.status.completed", "Completed");
+  if (value === "running") return tFromContext(this, "view.block.status.running", "Running");
+  if (value === "error") return tFromContext(this, "view.block.status.error", "Failed");
+  return tFromContext(this, "view.block.status.pending", "Pending");
 }
 
 function truncateSummaryText(text, maxLength = 88) {
@@ -104,7 +106,7 @@ function normalizePatchChangeType(value) {
 
 function patchChangeLabel(changeType) {
   void changeType;
-  return "文件变更";
+  return tFromContext(this, "view.block.patchLabel", "File change");
 }
 
 function normalizePatchPath(pathLike) {

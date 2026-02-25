@@ -190,15 +190,31 @@ const sessionBootstrapMethods = {
     });
   },
 
-  async reloadSkills() {
-    if (!this.skillService) return;
+  async reloadSkills(options = {}) {
+    if (!this.skillService) return null;
     const vaultPath = this.getVaultPath();
-    const syncResult = this.syncBundledSkills(vaultPath, { force: true });
+    const locale = String(
+      options && options.locale
+        ? options.locale
+        : (typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en"),
+    ).trim() || "en";
+    const syncResult = await this.syncBundledContent(vaultPath, {
+      force: Object.prototype.hasOwnProperty.call(options, "force") ? Boolean(options.force) : true,
+      syncTemplates: Object.prototype.hasOwnProperty.call(options, "syncTemplates")
+        ? Boolean(options.syncTemplates)
+        : true,
+      locale,
+      resolveConflict: typeof options.resolveConflict === "function" ? options.resolveConflict : null,
+      defaultConflictAction: String(options.defaultConflictAction || "replace"),
+      backupDir: options.backupDir,
+    });
+
     this.log(
-      `bundled skills reload: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
+      `bundled content reload: skills=${syncResult.synced || 0}/${syncResult.total || 0}, ` +
+      `templates=${syncResult.syncedTemplates || 0}/${syncResult.totalTemplates || 0}, ` +
       `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
     );
-    if (syncResult.errors.length) this.log(`bundled skills sync: ${syncResult.errors.join("; ")}`);
+    if (syncResult.errors.length) this.log(`bundled content sync: ${syncResult.errors.join("; ")}`);
     this.skillService.loadSkills();
     if (syncResult.stampUpdated) {
       try {
@@ -210,6 +226,21 @@ const sessionBootstrapMethods = {
     const view = this.getAssistantView();
     if (view) view.render();
     return syncResult;
+  },
+
+  async resetTemplateBaseline(options = {}) {
+    const vaultPath = this.getVaultPath();
+    const locale = String(
+      options && options.locale
+        ? options.locale
+        : (typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en"),
+    ).trim() || "en";
+    return this.resetMetaTemplateBaseline(vaultPath, {
+      locale,
+      resolveConflict: typeof options.resolveConflict === "function" ? options.resolveConflict : null,
+      defaultConflictAction: String(options.defaultConflictAction || "skip"),
+      backupDir: options.backupDir,
+    });
   },
 
   async createSession(title) {
@@ -352,14 +383,25 @@ const sessionBootstrapMethods = {
     }
 
     const vaultPath = this.getVaultPath();
-    const syncResult = this.syncBundledSkills(vaultPath, { force: Boolean(options.force) });
+    const locale = String(
+      options && options.locale
+        ? options.locale
+        : (typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en"),
+    ).trim() || "en";
+    const syncResult = await this.syncBundledContent(vaultPath, {
+      force: Boolean(options.force),
+      syncTemplates: true,
+      locale,
+      defaultConflictAction: "replace",
+    });
     if (!syncResult.errors.length && !syncResult.skipped) {
       this.log(
-        `bundled skills bootstrap: ${syncResult.synced || 0}/${syncResult.total || 0} ` +
+        `bundled content bootstrap: skills=${syncResult.synced || 0}/${syncResult.total || 0}, ` +
+        `templates=${syncResult.syncedTemplates || 0}/${syncResult.totalTemplates || 0}, ` +
         `source=${syncResult.bundledRoot || "unknown"} target=${syncResult.targetRoot || "unknown"}`,
       );
     }
-    if (syncResult.errors.length) this.log(`bundled skills bootstrap sync: ${syncResult.errors.join("; ")}`);
+    if (syncResult.errors.length) this.log(`bundled content bootstrap sync: ${syncResult.errors.join("; ")}`);
     this.skillService.loadSkills();
     this.bootstrapLocalDone = true;
 
