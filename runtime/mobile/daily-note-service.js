@@ -38,30 +38,38 @@ const DAILY_NOTE_TEMPLATE_EN = `# {{date}}
 - Plan for tomorrow:
 `;
 
+function isZh(locale) {
+  return normalizeSupportedLocale(locale) === "zh-CN";
+}
+
 function summaryFallback(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN"
+  return isZh(locale)
     ? "暂无法解析，已保留原始链接"
     : "Unable to resolve, original URL preserved";
 }
 
 function summaryPrefix(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN" ? "链接摘要" : "URL Summary";
+  return isZh(locale) ? "链接摘要" : "URL Summary";
 }
 
 function emptyValue(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN" ? "（空）" : "(Empty)";
+  return isZh(locale) ? "（空）" : "(Empty)";
 }
 
 function originalPrefix(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN" ? "原文" : "Original";
+  return isZh(locale) ? "原文" : "Original";
 }
 
 function linkLabel(index, locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN" ? `链接${index}` : `Link ${index}`;
+  return isZh(locale) ? `链接${index}` : `Link ${index}`;
+}
+
+function recordHeading(locale) {
+  return isZh(locale) ? "## 📝 今日记录" : "## 📝 Today Notes";
 }
 
 function getDailyNoteTemplate(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN" ? DAILY_NOTE_TEMPLATE : DAILY_NOTE_TEMPLATE_EN;
+  return isZh(locale) ? DAILY_NOTE_TEMPLATE : DAILY_NOTE_TEMPLATE_EN;
 }
 
 function formatDateStr(date) {
@@ -86,32 +94,8 @@ function normalizeSingleLine(text, fallback = "") {
   return normalized || fallback;
 }
 
-function parseSummaryItemFromMatch(match, linePrefix = "", locale = "zh-CN") {
-  const rawTarget = String(match && match[1] ? match[1] : "").trim();
-  const summary = normalizeSingleLine(match && match[2] ? match[2] : "", summaryFallback(locale));
-  const isPlaceholder = /^(原始url|originalurl)$/i.test(rawTarget);
-  const directUrl = isPlaceholder ? "" : stripTrailingUrlPunctuation(rawTarget);
-  const hints = extractUrlsFromText(String(linePrefix || ""));
-  const urlHint = hints.length ? hints[hints.length - 1] : "";
-  return {
-    url: directUrl,
-    urlHint,
-    summary,
-    hasSummary: true,
-  };
-}
-
 function stripTrailingUrlPunctuation(rawUrl) {
   return String(rawUrl || "").trim().replace(URL_TRAILING_ASCII_PUNCTUATION_REGEX, "");
-}
-
-function inferTitleFromUrl(url) {
-  try {
-    const parsed = new URL(String(url || ""));
-    return String(parsed.hostname || "").replace(/^www\./i, "").trim();
-  } catch (_e) {
-    return "";
-  }
 }
 
 function extractUrlsFromText(text) {
@@ -132,6 +116,30 @@ function extractUrlsFromText(text) {
     urls.push(cleaned);
   }
   return urls;
+}
+
+function parseSummaryItemFromMatch(match, linePrefix = "", locale = "zh-CN") {
+  const rawTarget = String(match && match[1] ? match[1] : "").trim();
+  const summary = normalizeSingleLine(match && match[2] ? match[2] : "", summaryFallback(locale));
+  const isPlaceholder = /^(原始url|originalurl)$/i.test(rawTarget);
+  const directUrl = isPlaceholder ? "" : stripTrailingUrlPunctuation(rawTarget);
+  const hints = extractUrlsFromText(String(linePrefix || ""));
+  const urlHint = hints.length ? hints[hints.length - 1] : "";
+  return {
+    url: directUrl,
+    urlHint,
+    summary,
+    hasSummary: true,
+  };
+}
+
+function inferTitleFromUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return String(parsed.hostname || "").replace(/^www\./i, "").trim();
+  } catch (_e) {
+    return "";
+  }
 }
 
 function parseCaptureTextSections(text, locale = "zh-CN") {
@@ -283,7 +291,6 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
   if (headerIdx !== -1) {
     const afterHeader = headerIdx + sectionHeader.length;
     const restContent = content.slice(afterHeader);
-
     const nextHeadingMatch = restContent.match(/\n(#{1,6} )/);
     let insertPos;
 
@@ -299,7 +306,16 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
     if (lastDashIdx !== -1) {
       const lineStart = afterHeader + lastDashIdx + 1;
       const lineEnd = content.indexOf("\n", lineStart + 1);
-      const actualEnd = lineEnd === -1 ? content.length : lineEnd;
+      let actualEnd = lineEnd === -1 ? content.length : lineEnd;
+      while (actualEnd < content.length) {
+        const nextLineEnd = content.indexOf("\n", actualEnd + 1);
+        const nextLine = content.slice(actualEnd + 1, nextLineEnd === -1 ? content.length : nextLineEnd);
+        if (nextLine.startsWith("  >") || (nextLine.startsWith("  ") && !nextLine.startsWith("- "))) {
+          actualEnd = nextLineEnd === -1 ? content.length : nextLineEnd;
+        } else {
+          break;
+        }
+      }
       content = content.slice(0, actualEnd) + "\n" + entry + content.slice(actualEnd);
     } else {
       const headerLineEnd = content.indexOf("\n", headerIdx);
@@ -310,10 +326,15 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
       }
     }
   } else {
-    const recordHeadings = ["## 📝 今日记录", "## 📝 Today Notes"];
-    const recordIdx = recordHeadings.reduce((found, heading) => {
-      if (found !== -1) return found;
-      return content.indexOf(heading);
+    const recordAnchors = [
+      "## 📝 今日记录",
+      "## 📝 Today Notes",
+      recordHeading("zh-CN"),
+      recordHeading("en"),
+    ];
+    const recordIdx = recordAnchors.reduce((acc, heading) => {
+      if (acc !== -1) return acc;
+      return content.indexOf(String(heading || ""));
     }, -1);
     const insertBlock = "\n" + sectionHeader + "\n" + entry + "\n";
 
@@ -341,5 +362,7 @@ module.exports = {
   findOrCreateDailyNote,
   appendToIdeaSection,
   getDailyNoteTemplate,
+  parseCaptureTextSections,
+  extractUrlsFromText,
   summaryFallback,
 };

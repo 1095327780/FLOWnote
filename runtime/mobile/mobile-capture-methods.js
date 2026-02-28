@@ -1,6 +1,7 @@
 const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
-const { normalizeSettings } = require("../settings-utils");
+const { setRuntimeLocale } = require("../runtime-locale-state");
+const { normalizeMobileSettings } = require("./mobile-settings-utils");
 const { CaptureModal } = require("./capture-modal");
 const { MobileSettingsTab } = require("./mobile-settings-tab");
 
@@ -49,7 +50,8 @@ const mobileCaptureMethodsMixin = {
   async loadMobilePersistedData() {
     const raw = await this.loadData();
     const data = raw && typeof raw === "object" ? raw : {};
-    this.settings = normalizeSettings(data.settings || {});
+    this.settings = normalizeMobileSettings(data.settings || {});
+    setRuntimeLocale(typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en");
   },
 
   /**
@@ -59,6 +61,7 @@ const mobileCaptureMethodsMixin = {
     const raw = (await this.loadData()) || {};
     raw.settings = this.settings;
     await this.saveData(raw);
+    setRuntimeLocale(typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en");
   },
 
   /**
