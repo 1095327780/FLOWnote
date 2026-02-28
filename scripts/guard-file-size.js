@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = process.cwd();
-const LIMIT = 1200;
+const LIMIT = 1000;
 
 const TARGETS = [
   "main.js",

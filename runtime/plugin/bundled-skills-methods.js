@@ -2,124 +2,26 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
-
-const TEMPLATE_MAP_FILE = "template-map.json";
-const DEFAULT_META_TEMPLATES_DIR = path.join("Meta", "模板");
-const DEFAULT_BACKUP_ROOT = path.join(".opencode", "backups", "bundled-content");
-const CANCELLED_ERROR_CODE = "BUNDLED_CONTENT_SYNC_CANCELLED";
-
-function walkFilesRecursive(rootDir, currentDir = rootDir, output = []) {
-  if (!rootDir || !currentDir || !fs.existsSync(currentDir)) return output;
-  const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry || String(entry.name || "").startsWith(".")) continue;
-    const absPath = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) {
-      walkFilesRecursive(rootDir, absPath, output);
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    output.push(path.relative(rootDir, absPath));
-  }
-  return output;
-}
-
-function normalizeSafeRelativePath(value) {
-  const normalized = String(value || "")
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "")
-    .trim();
-  if (!normalized) return "";
-  if (path.isAbsolute(normalized)) return "";
-  if (normalized.split("/").some((segment) => segment === ".." || segment === "")) return "";
-  return normalized;
-}
-
-function dedupeNormalizedPaths(paths = []) {
-  const seen = new Set();
-  const output = [];
-  for (const value of paths) {
-    const normalized = normalizeSafeRelativePath(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    output.push(normalized);
-  }
-  return output;
-}
-
-function normalizeTemplateLocaleKey(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const lowered = raw.toLowerCase();
-  if (lowered === "zh-cn" || lowered.startsWith("zh")) return "zh-CN";
-  if (lowered === "en" || lowered.startsWith("en")) return "en";
-  return "";
-}
-
-function normalizeTemplateLocaleVariant(variant) {
-  if (!variant || typeof variant !== "object") return null;
-  const metaSource = normalizeSafeRelativePath(variant.metaSource);
-  const fallbackPath = normalizeSafeRelativePath(variant.fallback);
-  const targets = dedupeNormalizedPaths(Array.isArray(variant.targets) ? variant.targets : []);
-  if (!metaSource && !fallbackPath && !targets.length) return null;
-  return {
-    ...(metaSource ? { metaSource } : {}),
-    ...(fallbackPath ? { fallback: fallbackPath } : {}),
-    ...(targets.length ? { targets } : {}),
-  };
-}
-
-function toFileBuffer(value) {
-  try {
-    return fs.readFileSync(value);
-  } catch {
-    return null;
-  }
-}
-
-function filesHaveSameContent(fileA, fileB) {
-  const bufA = toFileBuffer(fileA);
-  const bufB = toFileBuffer(fileB);
-  if (!bufA || !bufB) return false;
-  return Buffer.compare(bufA, bufB) === 0;
-}
-
-function isTemplateContentValid(filePath) {
-  try {
-    const text = fs.readFileSync(filePath, "utf8");
-    return String(text || "").trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
-function createCancelledError(stage = "unknown") {
-  const err = new Error("bundled content sync cancelled");
-  err.code = CANCELLED_ERROR_CODE;
-  err.stage = stage;
-  return err;
-}
-
-function isCancelledError(err) {
-  return Boolean(err && typeof err === "object" && err.code === CANCELLED_ERROR_CODE);
-}
-
-function copyFileWithParent(srcFile, destFile) {
-  fs.mkdirSync(path.dirname(destFile), { recursive: true });
-  fs.copyFileSync(srcFile, destFile);
-}
-
-function cloneExistingPath(srcPath, backupPath) {
-  if (!fs.existsSync(srcPath)) return false;
-  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-  const stat = fs.statSync(srcPath);
-  if (stat.isDirectory()) {
-    fs.cpSync(srcPath, backupPath, { recursive: true });
-  } else {
-    fs.copyFileSync(srcPath, backupPath);
-  }
-  return true;
-}
+const {
+  TEMPLATE_MAP_FILE,
+  DEFAULT_META_TEMPLATES_DIR,
+  DEFAULT_BACKUP_ROOT,
+  walkFilesRecursive,
+  normalizeSafeRelativePath,
+  dedupeNormalizedPaths,
+  normalizeTemplateLocaleKey,
+  normalizeTemplateLocaleVariant,
+  filesHaveSameContent,
+  isTemplateContentValid,
+  isCancelledError,
+  copyFileWithParent,
+  cloneExistingPath,
+} = require("./bundled-skills-utils");
+const {
+  resolveBundledSyncAction: resolveBundledSyncActionImpl,
+  syncBundledSkills: syncBundledSkillsImpl,
+  syncBundledContent: syncBundledContentImpl,
+} = require("./bundled-skills-flow-methods");
 
 function createBundledSkillsMethods(options = {}) {
   const pluginDirname = String(options.pluginDirname || "");
@@ -556,193 +458,11 @@ function createBundledSkillsMethods(options = {}) {
     },
 
     async resolveBundledSyncAction(conflict, options = {}, state = {}) {
-      if (state.globalAction === "replace") return "replace";
-      if (state.globalAction === "skip") return "skip";
-
-      const defaultAction = ["replace", "skip"].includes(String(options.defaultConflictAction || ""))
-        ? String(options.defaultConflictAction)
-        : "skip";
-      const resolver = options && typeof options.resolveConflict === "function"
-        ? options.resolveConflict
-        : null;
-      if (!resolver) return defaultAction;
-
-      let choice = null;
-      try {
-        choice = await resolver(conflict);
-      } catch {
-        choice = null;
-      }
-
-      const normalized = String(choice || "").trim().toLowerCase();
-      if (normalized === "replace_all") {
-        state.globalAction = "replace";
-        return "replace";
-      }
-      if (normalized === "skip_all") {
-        state.globalAction = "skip";
-        return "skip";
-      }
-      if (normalized === "replace") return "replace";
-      if (normalized === "skip") return "skip";
-      if (normalized === "cancel") throw createCancelledError(conflict && conflict.kind ? conflict.kind : "unknown");
-      return defaultAction;
+      return resolveBundledSyncActionImpl.call(this, conflict, options, state);
     },
 
     async syncBundledSkills(vaultPath, options = {}) {
-      const runtime = this.ensureRuntimeModules();
-      const force = Boolean(options && options.force);
-      const skillLocale = this.resolveBundledSkillLocale(options.locale);
-      const bundledRoot = this.getBundledSkillsRoot();
-      const bundledIds = this.listBundledSkillIds(bundledRoot);
-      const signature = this.getBundledSkillsContentSignature(bundledRoot, bundledIds);
-      const stamp = `${this.getBundledSkillsStamp(bundledIds, signature)}:locale=${skillLocale}`;
-
-      if (this.skillService) this.skillService.setAllowedSkillIds(bundledIds);
-      if (!bundledIds.length) {
-        return {
-          synced: 0,
-          total: 0,
-          skippedCount: 0,
-          replacedCount: 0,
-          conflictCount: 0,
-          backupCount: 0,
-          targetRoot: path.join(vaultPath, this.settings.skillsDir),
-          bundledRoot,
-          locale: skillLocale,
-          stamp,
-          skipped: false,
-          stampUpdated: false,
-          cancelled: false,
-          backupRoot: "",
-          errors: [`未找到内置 skills 源目录或目录为空：${bundledRoot}`],
-        };
-      }
-
-      const targetRoot = path.join(vaultPath, this.settings.skillsDir);
-      fs.mkdirSync(targetRoot, { recursive: true });
-      const shouldSync = this.shouldSyncBundledSkills(targetRoot, bundledIds, stamp, force);
-      if (!shouldSync) {
-        return {
-          synced: 0,
-          total: bundledIds.length,
-          skippedCount: 0,
-          replacedCount: 0,
-          conflictCount: 0,
-          backupCount: 0,
-          targetRoot,
-          bundledRoot,
-          locale: skillLocale,
-          stamp,
-          skipped: true,
-          stampUpdated: false,
-          cancelled: false,
-          backupRoot: "",
-          errors: [],
-        };
-      }
-
-      const errors = [];
-      const conflicts = [];
-      const conflictState = {};
-      let synced = 0;
-      let replacedCount = 0;
-      let skippedCount = 0;
-      let backupCount = 0;
-      let backupRoot = "";
-
-      try {
-        for (const skillId of bundledIds) {
-          const srcDir = path.join(bundledRoot, skillId);
-          const destDir = path.join(targetRoot, skillId);
-
-          let action = "replace";
-          if (fs.existsSync(destDir)) {
-            action = await this.resolveBundledSyncAction({
-              kind: "skill",
-              id: skillId,
-              sourcePath: srcDir,
-              targetPath: destDir,
-            }, options, conflictState);
-            conflicts.push({ kind: "skill", id: skillId, action, targetPath: destDir });
-          }
-
-          if (action === "skip") {
-            skippedCount += 1;
-            continue;
-          }
-
-          try {
-            if (fs.existsSync(destDir)) {
-              if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
-              const backed = this.backupPathIfNeeded(destDir, backupRoot, path.join("skills", skillId));
-              if (backed) backupCount += 1;
-              fs.rmSync(destDir, { recursive: true, force: true });
-              replacedCount += 1;
-            }
-            runtime.copyDirectoryRecursive(srcDir, destDir);
-            const localizedDoc = this.applyBundledSkillLocaleDoc(srcDir, destDir, skillLocale);
-            if (!localizedDoc.ok) {
-              errors.push(`${skillId}: ${localizedDoc.error}`);
-              continue;
-            }
-            this.applyBundledSkillLocaleResources(srcDir, destDir, skillLocale);
-            this.removeLocalizedMarkdownVariants(destDir);
-            synced += 1;
-          } catch (e) {
-            errors.push(`${skillId}: ${e instanceof Error ? e.message : String(e)}`);
-          }
-        }
-      } catch (e) {
-        if (isCancelledError(e)) {
-          return {
-            synced,
-            total: bundledIds.length,
-            skippedCount,
-            replacedCount,
-            conflictCount: conflicts.length,
-            backupCount,
-            targetRoot,
-            bundledRoot,
-            locale: skillLocale,
-            stamp,
-            skipped: false,
-            stampUpdated: false,
-            cancelled: true,
-            cancelledStage: e.stage,
-            backupRoot,
-            conflicts,
-            errors,
-          };
-        }
-        errors.push(e instanceof Error ? e.message : String(e));
-      }
-
-      const hasRuntimeState = this.runtimeState && typeof this.runtimeState === "object";
-      let stampUpdated = false;
-      if (!errors.length && hasRuntimeState) {
-        this.runtimeState.bundledSkillsStamp = stamp;
-        stampUpdated = true;
-      }
-
-      return {
-        synced,
-        total: bundledIds.length,
-        skippedCount,
-        replacedCount,
-        conflictCount: conflicts.length,
-        backupCount,
-        targetRoot,
-        bundledRoot,
-        locale: skillLocale,
-        stamp,
-        skipped: false,
-        stampUpdated,
-        cancelled: false,
-        backupRoot,
-        conflicts,
-        errors,
-      };
+      return syncBundledSkillsImpl.call(this, vaultPath, options);
     },
 
     async syncBundledTemplates(vaultPath, options = {}) {
@@ -1064,82 +784,7 @@ function createBundledSkillsMethods(options = {}) {
     },
 
     async syncBundledContent(vaultPath, options = {}) {
-      const force = Boolean(options && options.force);
-      const syncTemplates = options && Object.prototype.hasOwnProperty.call(options, "syncTemplates")
-        ? Boolean(options.syncTemplates)
-        : true;
-
-      const skillResult = await this.syncBundledSkills(vaultPath, options);
-      if (skillResult.cancelled) {
-        return {
-          synced: Number(skillResult.synced || 0),
-          total: Number(skillResult.total || 0),
-          targetRoot: skillResult.targetRoot,
-          bundledRoot: skillResult.bundledRoot,
-          locale: skillResult.locale,
-          stamp: skillResult.stamp,
-          stampUpdated: false,
-          skipped: false,
-          cancelled: true,
-          cancelledStage: skillResult.cancelledStage || "skill",
-          backupRoot: skillResult.backupRoot || "",
-          skills: skillResult,
-          templates: null,
-          errors: Array.isArray(skillResult.errors) ? skillResult.errors : [],
-        };
-      }
-
-      const templateOptions = {
-        ...options,
-        force,
-        targetRoot: skillResult.targetRoot || path.join(vaultPath, this.settings.skillsDir),
-      };
-      const templateResult = syncTemplates
-        ? await this.syncBundledTemplates(vaultPath, templateOptions)
-        : {
-          synced: 0,
-          total: 0,
-          skippedCount: 0,
-          replacedCount: 0,
-          conflictCount: 0,
-          backupCount: 0,
-          fallbackUsed: [],
-          missingMeta: [],
-          skipped: true,
-          cancelled: false,
-          targetRoot: templateOptions.targetRoot,
-          bundledRoot: this.getBundledSkillsRoot(),
-          mapPath: this.getBundledTemplateMapPath(),
-          metaRoot: path.join(vaultPath, DEFAULT_META_TEMPLATES_DIR),
-          backupRoot: "",
-          errors: [],
-        };
-
-      const cancelled = Boolean(templateResult && templateResult.cancelled);
-      const errors = [
-        ...(Array.isArray(skillResult.errors) ? skillResult.errors : []),
-        ...(Array.isArray(templateResult.errors) ? templateResult.errors : []),
-      ];
-
-      return {
-        synced: Number(skillResult.synced || 0),
-        total: Number(skillResult.total || 0),
-        syncedTemplates: Number(templateResult.synced || 0),
-        totalTemplates: Number(templateResult.total || 0),
-        targetRoot: skillResult.targetRoot,
-        bundledRoot: skillResult.bundledRoot,
-        locale: skillResult.locale,
-        templateMapPath: templateResult.mapPath,
-        stamp: skillResult.stamp,
-        stampUpdated: Boolean(skillResult.stampUpdated),
-        skipped: Boolean(skillResult.skipped) && Boolean(templateResult.skipped),
-        cancelled,
-        cancelledStage: cancelled ? (templateResult.cancelledStage || "template") : "",
-        backupRoot: skillResult.backupRoot || templateResult.backupRoot || "",
-        skills: skillResult,
-        templates: templateResult,
-        errors,
-      };
+      return syncBundledContentImpl.call(this, vaultPath, options);
     },
   };
 }
