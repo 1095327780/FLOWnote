@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Week"
+  short_description: "周复盘、清理残留并规划下周"
+  default_prompt: "Use $ah-week to run my weekly review and produce next-week priorities."

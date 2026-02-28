@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Review"
+  short_description: "每日复盘并分流到项目笔记或卡片"
+  default_prompt: "Use $ah-review to run my daily reflection and route ideas into project notes or card candidates."

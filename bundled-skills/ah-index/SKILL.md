@@ -1,31 +1,108 @@
 ---
 name: ah-index
-description: 知识库索引维护技能。用于初始化或刷新库结构清单、统计信息和关键入口。
+description: |
+  索引维护技能：巡检知识库连接质量，发现孤立笔记、主题/领域页缺口和链接断层，并输出可执行索引更新建议。用于每周或每月连接层维护场景。
 ---
 
-# ah-index
+# AH Index
 
-维护知识库索引文件，帮助 AI 快速理解当前库状态。
+`ah-index` 在 FLOW 中承担 **O 阶段连接维护器**：提升知识连接密度，让知识可被调用。
 
-## 必须遵守
+## FLOW Position
 
-- 扫描范围遵守 Flow 四层目录约定。
-- 输出索引位置：`Meta/索引/kb-manifest.md`。
-- 统计口径稳定，避免每次字段漂移。
+- 输入：知识库结构、永久笔记、主题页、领域页、项目链接。
+- 输出：索引巡检结果、归属建议、连接修复建议。
 
-## 流程
+## Reusable Resources
 
-1. 检查索引是否存在（初始化/更新模式）。
-2. 扫描目录并统计：capture/cultivate/connect/create 四层。
-3. 汇总活跃项目、归档项目、主题/领域数量。
-4. 写回 `kb-manifest.md`。
-5. 更新 `STATUS.md` 中索引更新时间。
+- 维护原则：`references/index-principles.md`
+- 路径约定：`references/path-conventions.md`
+- 扫描规则：`references/index-scan-rules.md`
+- 连接密度巡检：`references/connection-audit.md`
+- 主题/领域页建议：`references/page-creation-rules.md`
+- 卡片同步执行：`references/card-sync-apply.md`
+- 项目同步执行：`references/project-sync-apply.md`
+- 安全写入协议：`references/safe-sync-write-protocol.md`
+- 状态回写：`references/status-reporting.md`
+- 质量检查：`references/quality-checklist.md`
+- 报告模板：`assets/索引巡检报告模板.md`
 
-## 按需读取 References
+## Skill Contract
 
-- 索引字段、区块稳定性、增量比较：`references/index-schema.md`
+### Inputs
 
-## 输出
+- 运行模式：`初始化` / `更新` / `巡检` / `sync-card` / `sync-project`。
+- 同步模式：`sync_mode=strict`（默认且必选）。
+- 扫描范围：全库或增量路径。
+- 可选：优先关注层（主题页/领域页/项目链接）。
+- `sync-card` 模式下：新卡路径、标题、标签、来源上下文。
+- `sync-project` 模式下：项目路径、项目标题、项目编号、领域信息。
 
-- 本次统计摘要。
-- 与上次相比的变化（新增/减少）。
+### Reads
+
+- 知识库目录与关键页面（主题页、领域页、永久笔记、项目总览）。
+- `Meta/.ai-memory/STATUS.md`
+- `references/index-principles.md`
+- `references/path-conventions.md`
+- `references/index-scan-rules.md`
+- `references/connection-audit.md`
+- `references/page-creation-rules.md`
+- `references/card-sync-apply.md`
+- `references/project-sync-apply.md`
+- `references/safe-sync-write-protocol.md`
+- `references/status-reporting.md`
+- `references/quality-checklist.md`
+- `assets/索引巡检报告模板.md`
+
+### Writes
+
+- 索引巡检报告（例如 `Meta/索引/索引巡检-{{日期}}.md`）。
+- 可选：`Meta/索引/kb-manifest.md` 更新。
+- `sync-card` 模式下直接更新目标主题页（📍）与领域页（🌱）链接。
+- `sync-project` 模式下直接更新目标领域页（🌱）的项目入口链接。
+- `STATUS.md` 的“回顾”分区（记录本次维护状态）。
+
+### Calls
+
+- 协议入口：`Read ../ah-memory/SKILL.md`
+- 若发现大量待转化洞见：建议 `Read ../ah-card/SKILL.md`
+- 若发现项目沉淀断链：建议 `Read ../ah-project/SKILL.md` 或 `Read ../ah-archive/SKILL.md`
+
+### Return
+
+- 巡检或同步结果摘要（孤立笔记/缺失链接/同步命中页）。
+- 优先级建议（先修什么、后修什么）。
+- 下一步入口（最多 3 条）。
+
+### Failure Handling
+
+- 首次运行无索引：自动走初始化并生成基础报告。
+- 扫描中断：输出已完成范围并写 `进行中(N/M)`。
+- 路径不可读：写 `阻塞:<原因>` 并给最小补齐动作。
+- 结果过多：按优先级分批输出，避免一次性淹没。
+- `sync-card` 未命中页面：写待同步清单并返回新建页建议。
+- `sync-project` 未命中领域页：写待同步清单并返回领域页补建建议。
+
+## Workflow
+
+1. **Scope**：确定模式与扫描范围。
+2. **Branch**：
+   - `sync-card`：按 `card-sync-apply.md` + `safe-sync-write-protocol.md` 更新主题页/领域页。
+   - `sync-project`：按 `project-sync-apply.md` + `safe-sync-write-protocol.md` 更新领域页项目入口。
+   - 其他模式：按 `index-scan-rules.md` 抽取页面与链接关系。
+3. **Audit/Suggest**：
+   - `sync-card/sync-project`：返回命中/未命中与待同步建议。
+   - 其他模式：按 `connection-audit.md` + `page-creation-rules.md` 识别缺口并给建议。
+4. **Report**：按模板写巡检或同步结果。
+5. **State Update**：按 `status-reporting.md` 回写状态。
+6. **Return**：返回摘要与下一步入口。
+
+## Quality Bar
+
+- 巡检必须区分“主题页问题”和“领域页问题”。
+- 建议必须可执行（包含目标页面与建议动作）。
+- 不追求一次性全修，优先修高影响断链。
+- 每次输出都要给出下一轮维护触发条件。
+- `sync-card/sync-project` 必须具备幂等性（重复执行不重复插入同一链接）。
+- `sync-card/sync-project` 必须使用分节锚点写入，不得重复创建同名标题。
+- 同一输入二次执行时应无文件变更（仅返回 `skip` 结果）。

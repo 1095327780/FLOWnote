@@ -40,6 +40,19 @@ class SessionStore {
     return Math.floor(raw);
   }
 
+  static normalizeLinkedContextFiles(value) {
+    const list = Array.isArray(value) ? value : [];
+    const seen = new Set();
+    const normalized = [];
+    list.forEach((rawPath) => {
+      const next = String(rawPath || "").trim().replace(/^\/+/, "");
+      if (!next || seen.has(next)) return;
+      seen.add(next);
+      normalized.push(next);
+    });
+    return normalized;
+  }
+
   upsertSession(session) {
     const st = this.state();
     const i = st.sessions.findIndex((s) => s.id === session.id);
@@ -99,10 +112,14 @@ class SessionStore {
         const role = roleRaw === "assistant" ? "assistant" : roleRaw === "user" ? "user" : "";
         if (!role) return null;
         const createdAt = SessionStore.normalizeTimestampMs(row.createdAt || row.updatedAt || row.timestamp || 0);
+        const linkedContextFiles = role === "user"
+          ? SessionStore.normalizeLinkedContextFiles(row.linkedContextFiles)
+          : [];
         return {
           id: String(row.id || `${role}-${Date.now()}-${index}`),
           role,
           text: String(row.text || ""),
+          linkedContextFiles,
           reasoning: role === "assistant" ? String(row.reasoning || "") : "",
           meta: role === "assistant" ? String(row.meta || "") : "",
           blocks: role === "assistant" && Array.isArray(row.blocks) ? row.blocks : [],
@@ -140,7 +157,13 @@ class SessionStore {
   appendMessage(sessionId, message) {
     const st = this.state();
     const list = st.messagesBySession[sessionId] || [];
-    list.push(message);
+    const nextMessage = message && typeof message === "object"
+      ? Object.assign({}, message)
+      : message;
+    if (nextMessage && typeof nextMessage === "object" && nextMessage.role === "user") {
+      nextMessage.linkedContextFiles = SessionStore.normalizeLinkedContextFiles(nextMessage.linkedContextFiles);
+    }
+    list.push(nextMessage);
     st.messagesBySession[sessionId] = list.slice(-200);
 
     const session = st.sessions.find((s) => s.id === sessionId);

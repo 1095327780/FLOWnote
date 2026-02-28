@@ -84,3 +84,18 @@ test("setSessionMessages should derive session title from latest user message wh
   assert.equal(plugin.runtimeState.sessions[0].lastUserPrompt, "请帮我整理今天的会议纪要并提炼三条行动项");
   assert.equal(plugin.runtimeState.sessions[0].title, "请帮我整理今天的会议纪要并提炼三条行动项");
 });
+
+test("appendMessage should normalize linkedContextFiles for user message", () => {
+  const { store, plugin } = createStoreFixture();
+  store.appendMessage("s1", {
+    id: "u2",
+    role: "user",
+    text: "hello",
+    linkedContextFiles: [" /Project/alpha.md ", "Project/alpha.md", "Work/todo.md", ""],
+    createdAt: 1740000000000,
+  });
+
+  const latest = plugin.runtimeState.messagesBySession.s1[plugin.runtimeState.messagesBySession.s1.length - 1];
+  assert.ok(latest);
+  assert.deepEqual(latest.linkedContextFiles, ["Project/alpha.md", "Work/todo.md"]);
+});

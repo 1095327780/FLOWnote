@@ -934,6 +934,77 @@ body.theme-dark .oc-surface {
   padding: 0 6px;
 }
 
+.oc-message-context-files {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--oc-border) 58%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.oc-message-user .oc-message-context-files {
+  border-top-color: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 32%, transparent);
+}
+
+.oc-message-context-label {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--text-muted) 78%, rgb(var(--oc-brand-rgb)) 22%);
+  line-height: 1.2;
+}
+
+.oc-message-context-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.oc-message-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: min(320px, 68vw);
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--oc-border) 80%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 84%, rgb(var(--oc-brand-rgb)) 16%);
+  color: var(--text-normal);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.oc-message-context-chip:hover {
+  border-color: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 54%, var(--oc-border-hover));
+  background: color-mix(in srgb, var(--background-primary) 75%, rgb(var(--oc-brand-rgb)) 25%);
+  transform: translateY(-1px);
+}
+
+.oc-message-context-chip:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.oc-message-context-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  color: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 68%, var(--text-muted));
+  flex-shrink: 0;
+}
+
+.oc-message-context-chip-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.oc-message-context-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .oc-user-msg-actions {
   position: absolute;
   bottom: -20px;
@@ -1631,6 +1702,7 @@ body.theme-dark .oc-surface {
 }
 
 .oc-input-wrapper {
+  position: relative;
   border: 1px solid var(--oc-border);
   border-radius: 8px;
   background: var(--background-primary);
@@ -1660,8 +1732,100 @@ body.theme-dark .oc-surface {
 
 .oc-file-indicator {
   display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.oc-context-file-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  max-width: min(360px, 60vw);
+  padding: 4px 8px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, rgb(var(--oc-brand-rgb)) 42%, var(--oc-border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--background-primary) 88%, rgb(var(--oc-brand-rgb)) 12%) 0%,
+    color-mix(in srgb, var(--background-primary) 95%, transparent) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 18%, transparent),
+    0 1px 8px color-mix(in srgb, black 14%, transparent);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.oc-context-file-chip:hover {
+  border-color: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 58%, var(--oc-border-hover));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--background-primary) 82%, rgb(var(--oc-brand-rgb)) 18%) 0%,
+    color-mix(in srgb, var(--background-primary) 92%, rgb(var(--oc-brand-rgb)) 8%) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 20%, transparent),
+    0 2px 10px color-mix(in srgb, black 16%, transparent);
+  transform: translateY(-1px);
+}
+
+.oc-context-file-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  color: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 62%, var(--text-muted));
+  flex-shrink: 0;
+}
+
+.oc-context-file-chip-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.oc-context-file-chip-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-normal);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.oc-context-file-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--oc-border) 74%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 88%, black 12%);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.oc-context-file-chip-remove:hover {
+  border-color: var(--oc-border-hover);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.oc-context-file-chip-remove:active {
+  transform: scale(0.95);
+}
+
+.oc-context-file-chip-remove:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
 }
 
 .oc-selection-indicator {
@@ -1720,6 +1884,91 @@ body.theme-dark .oc-surface {
 .oc-actions {
   display: flex;
   gap: 8px;
+}
+
+.oc-context-link-btn {
+  min-width: 36px;
+  padding-inline: 10px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.oc-context-file-picker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--oc-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 94%, rgb(var(--oc-brand-rgb)) 6%);
+  box-shadow: var(--oc-shadow-soft);
+  z-index: 120;
+  overflow: hidden;
+}
+
+.oc-context-file-picker-search {
+  width: calc(100% - 16px);
+  margin: 8px;
+}
+
+.oc-context-file-picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+
+.oc-context-file-picker-empty {
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.oc-context-file-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.oc-context-file-picker-item:hover,
+.oc-context-file-picker-item.is-selected {
+  background: color-mix(in srgb, var(--oc-brand-faint) 72%, transparent);
+}
+
+.oc-context-file-picker-item-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.oc-context-file-picker-item-name {
+  font-size: 13px;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-context-file-picker-item.is-linked .oc-context-file-picker-item-name {
+  color: var(--oc-brand-strong);
+}
+
+.oc-context-file-picker-item-path {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-context-file-picker-item-meta {
+  font-size: 11px;
+  color: var(--oc-brand-strong);
+  flex-shrink: 0;
 }
 
 .oc-send-btn,

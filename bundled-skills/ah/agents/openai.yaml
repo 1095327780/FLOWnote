@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Gateway"
+  short_description: "FLOW统一入口与子技能路由"
+  default_prompt: "Use $ah to route my request to the correct FLOW skill."

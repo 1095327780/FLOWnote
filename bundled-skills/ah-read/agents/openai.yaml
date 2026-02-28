@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Read"
+  short_description: "阅读整理并联动思考提炼与制卡"
+  default_prompt: "Use $ah-read to organize highlights and invoke $ah-think(mode=read) before handing candidates to $ah-card."

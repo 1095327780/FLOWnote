@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Month"
+  short_description: "月度战略复盘与下月计划"
+  default_prompt: "Use $ah-month to run my monthly review and set next-month priorities."

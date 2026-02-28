@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Archive"
+  short_description: "项目归档、复盘沉淀与经验交接"
+  default_prompt: "Use $ah-archive to close this project with gate checks, retrospective extraction, and ah-card handoff candidates."

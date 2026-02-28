@@ -48,6 +48,7 @@ class FLOWnoteAssistantView extends ItemView {
     this.ignoreMessageScrollEventsUntil = 0;
     this.forceBottomUntil = 0;
     this.lastManualScrollIntentAt = 0;
+    this.linkedContextFiles = [];
   }
 
   getViewType() {
@@ -89,6 +90,9 @@ class FLOWnoteAssistantView extends ItemView {
 
   onClose() {
     this.clearInlineQuestionWidget(true);
+    if (typeof this.closeLinkedContextFilePicker === "function") {
+      this.closeLinkedContextFilePicker();
+    }
     this.unbindMessagesScrollTracking();
     this.forceBottomUntil = 0;
     this.lastManualScrollIntentAt = 0;
@@ -168,7 +172,11 @@ class FLOWnoteAssistantView extends ItemView {
   setBusy(isBusy) {
     if (this.elements.sendBtn) this.elements.sendBtn.disabled = isBusy;
     if (this.elements.cancelBtn) this.elements.cancelBtn.disabled = !isBusy;
+    if (this.elements.attachFileBtn) this.elements.attachFileBtn.disabled = isBusy;
     if (this.elements.input) this.elements.input.disabled = isBusy;
+    if (isBusy && typeof this.closeLinkedContextFilePicker === "function") {
+      this.closeLinkedContextFilePicker();
+    }
     if (this.root) {
       this.root.toggleClass("is-busy", isBusy);
     }

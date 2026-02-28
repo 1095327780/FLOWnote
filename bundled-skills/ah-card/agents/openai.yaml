@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Card"
+  short_description: "多来源洞见制卡与来源回写闭环"
+  default_prompt: "Use $ah-card to convert these insights into permanent notes with source trace, project-candidate backfill, and link connections."

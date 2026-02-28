@@ -1,82 +1,40 @@
-# ah-memory 接口规范（Flow v2）
+# Skill Interface Spec (v2)
 
-> 本文件定义所有 skills 调用记忆系统的统一接口与最小行为。
+本文件定义所有 `ah-*` 技能必须实现的跨会话接口。
 
-## 1. 必备文件
+## 1. 启动阶段（Start）
 
-- `Meta/.ai-memory/STATUS.md`
-- `Meta/.ai-memory/index.json`
-- `Meta/.ai-memory/domains/{domain-slug}.md`
-- `Meta/.ai-memory/projects/{project-slug}.md`
-- `Meta/.ai-memory/daily/{YYYY-MM-DD}.md`
+必做：
 
-若不存在，先创建再写入。
+1. 读取 `Meta/.ai-memory/STATUS.md`。
+2. 定位本技能相关分区条目。
+3. 如果存在 `进行中(...)` 或 `待交接:<当前技能>`，先询问“继续/新建”。
 
-## 2. 读取接口
+## 2. 执行阶段（Progress）
 
-读取请求参数：
+必做：
 
-```json
-{
-  "scope": "global | domain | project | daily | mixed",
-  "context_refs": {
-    "domain": "string|null",
-    "project": "string|null",
-    "date": "YYYY-MM-DD|null"
-  },
-  "budget": "minimal | normal | deep",
-  "mode": "summary_only | with_details"
-}
-```
+1. 在关键节点写任务专属进度文件。
+2. 使用可验证的状态值（见 `status-schema.md`）。
+3. 避免只更新局部文件而不更新全局状态。
 
-默认：
-- `budget = minimal`
-- `mode = summary_only`
+## 3. 结束阶段（Checkpoint）
 
-### 推荐读层
+必做：
 
-- `global` -> `STATUS.md`
-- `domain` -> `domains/{domain}.md`
-- `project` -> `projects/{project}.md`
-- `daily` -> `daily/{date}.md`
-- `mixed` -> 全局 + 目标层摘要
+1. 回写任务专属进度文件最终状态。
+2. 回写 `STATUS.md`。
+3. 若需跨技能衔接，设置 `待交接:<skill>`。
 
-## 3. 写入接口
+## 4. Handoff Contract
 
-每次技能结束至少做三件事：
+当技能 A 移交给技能 B：
 
-1. 写回目标层文件（domain/project/daily）
-2. 更新 `STATUS.md` 的待处理摘要
-3. 更新 `index.json` 的来源映射与时间戳
+- A 在 `STATUS.md` 中写入：`待交接:ah-b`
+- A 返回给用户：建议调用 `/ah-b`
+- B 启动时识别 `待交接:ah-b` 并给出“继续/新建”选择
 
-## 4. index.json 建议结构
+## 5. Path Contract
 
-```json
-{
-  "updated_at": "2026-02-23T10:00:00.000Z",
-  "records": [
-    {
-      "id": "card-2026-02-23-001",
-      "type": "card",
-      "sources": ["daily:2026-02-23", "project:flownote-v2"],
-      "updated_at": "2026-02-23T10:00:00.000Z",
-      "tags": ["flow/card"]
-    }
-  ]
-}
-```
-
-## 5. 失败与降级
-
-- 目标层文件缺失：创建空模板后继续
-- 上下文标识不明确：仅读取 `STATUS.md`，并在必要时询问用户选择
-- 解析异常：回退到文本读取，不阻断主流程
-
-## 6. 问题提问策略
-
-仅在关键冲突发问：
-- 同时命中多个项目
-- 同时命中多个领域
-- 写回目标层不唯一
-
-其余场景默认最小读取并继续。
+- 仅允许 `Read ../<skill-name>/SKILL.md`
+- 禁止 `skills/ah-...` 和其他环境特定路径

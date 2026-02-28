@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Note"
+  short_description: "早间启动、创建今日日记与聚焦"
+  default_prompt: "Use $ah-note to start today with a focused daily note."

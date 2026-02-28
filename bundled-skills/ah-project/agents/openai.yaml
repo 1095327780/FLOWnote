@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Project"
+  short_description: "知识沉淀导向的项目目录初始化"
+  default_prompt: "Use $ah-project to initialize a knowledge-first project folder with execution logs, artifact space, and card candidates."

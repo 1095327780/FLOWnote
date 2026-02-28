@@ -95,6 +95,57 @@ function addTextCopyButton(textBlock, sourceText) {
   });
 }
 
+function normalizeMessageLinkedContextFiles(message) {
+  const rawPaths = Array.isArray(message && message.linkedContextFiles) ? message.linkedContextFiles : [];
+  const seen = new Set();
+  const normalized = [];
+  rawPaths.forEach((rawPath) => {
+    const next = String(rawPath || "").trim().replace(/^\/+/, "");
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    normalized.push(next);
+  });
+  return normalized;
+}
+
+function linkedContextDisplayName(pathValue) {
+  const parts = String(pathValue || "").split("/");
+  return parts.length ? parts[parts.length - 1] || String(pathValue || "") : String(pathValue || "");
+}
+
+function renderUserLinkedContextFiles(row, message) {
+  const linkedFiles = normalizeMessageLinkedContextFiles(message);
+  if (!linkedFiles.length) return;
+
+  const panel = row.createDiv({ cls: "oc-message-context-files" });
+  panel.createDiv({
+    cls: "oc-message-context-label",
+    text: tFromContext(this, "view.message.linkedFiles", "Linked files"),
+  });
+  const chips = panel.createDiv({ cls: "oc-message-context-list" });
+
+  linkedFiles.forEach((pathValue) => {
+    const chip = chips.createEl("a", {
+      cls: "oc-message-context-chip internal-link",
+      attr: {
+        href: pathValue,
+        "data-href": pathValue,
+        title: pathValue,
+      },
+    });
+    const iconEl = chip.createSpan({ cls: "oc-message-context-chip-icon" });
+    safeSetIcon(iconEl, "file-text");
+    chip.createSpan({
+      cls: "oc-message-context-chip-name",
+      text: linkedContextDisplayName(pathValue),
+    });
+  });
+
+  if (typeof this.attachInternalLinkHandlers === "function") {
+    this.attachInternalLinkHandlers(panel);
+  }
+}
+
 
 function renderMessageItem(parent, message) {
   const row = parent.createDiv({ cls: ["oc-message", `oc-message-${message.role}`] });
@@ -178,6 +229,7 @@ function renderMessageItem(parent, message) {
   }
 
   if (message.role === "user") {
+    this.renderUserLinkedContextFiles(row, message);
     this.renderUserActions(row, message);
   }
 }
@@ -187,6 +239,7 @@ const messageListMethods = {
   renderMessages,
   renderUserActions,
   addTextCopyButton,
+  renderUserLinkedContextFiles,
   renderMessageItem,
 };
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Think"
+  short_description: "自适应思考引擎与学习模型扩展库"
+  default_prompt: "Use $ah-think to adaptively orchestrate a model pack (including learning-theory models) and return an actionable reasoning packet with confidence."

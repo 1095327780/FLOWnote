@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Inbox"
+  short_description: "批量想法清理与项目/卡片分流"
+  default_prompt: "Use $ah-inbox to process my backlog and route each idea to project notes, card candidates, or tasks."

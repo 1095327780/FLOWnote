@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Capture"
+  short_description: "快速捕获想法并写入今日日记"
+  default_prompt: "Use $ah-capture to quickly capture this idea without over-formatting it."

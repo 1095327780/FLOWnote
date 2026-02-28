@@ -77,6 +77,9 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
 
   const sessionStore = createSessionStore(runtimeState);
   let persisted = 0;
+  let sentPrompt = "";
+  let composeLinkedPaths = [];
+  let clearLinkedContextCalled = 0;
 
   const view = {
     plugin: {
@@ -89,6 +92,7 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
       },
       opencodeClient: {
         async sendMessage(options) {
+          sentPrompt = String(options && options.prompt ? options.prompt : "");
           if (typeof options.onToken === "function") options.onToken("partial");
           return { text: "final", reasoning: "", meta: "", blocks: [] };
         },
@@ -110,10 +114,20 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
     autoScrollEnabled: true,
     silentAbortBudget: 0,
     currentAbort: null,
+    linkedContextFiles: ["Project/alpha.md", "Work/todo.md"],
 
     parseModelSlashCommand() { return null; },
     parseSkillSelectorSlashCommand() { return null; },
     resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return this.linkedContextFiles.slice(); },
+    clearLinkedContextFiles() {
+      clearLinkedContextCalled += 1;
+      this.linkedContextFiles = [];
+    },
+    composePromptWithLinkedFiles(prompt, options = {}) {
+      composeLinkedPaths = Array.isArray(options.linkedPaths) ? options.linkedPaths.slice() : [];
+      return `${prompt}\n\n[linked=${composeLinkedPaths.join(",")}]`;
+    },
 
     render() {},
     renderMessages() {},
@@ -144,9 +158,14 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
     const messages = runtimeState.messagesBySession.s1;
     assert.equal(messages.length, 2);
     assert.equal(messages[0].role, "user");
+    assert.deepEqual(messages[0].linkedContextFiles, ["Project/alpha.md", "Work/todo.md"]);
     assert.equal(messages[1].role, "assistant");
     assert.equal(messages[1].text, "final");
     assert.equal(messages[1].pending, false);
+    assert.deepEqual(composeLinkedPaths, ["Project/alpha.md", "Work/todo.md"]);
+    assert.match(sentPrompt, /\[linked=Project\/alpha\.md,Work\/todo\.md\]/);
+    assert.equal(clearLinkedContextCalled, 1);
+    assert.deepEqual(view.linkedContextFiles, []);
     assert.equal(persisted, 1);
   } finally {
     fixture.restore();

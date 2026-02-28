@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Memory"
+  short_description: "FLOW跨技能状态与交接协议中枢"
+  default_prompt: "Use $ah-memory to standardize status read/write and handoff rules across FLOW skills."

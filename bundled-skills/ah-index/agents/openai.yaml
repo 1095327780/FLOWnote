@@ -1,0 +1,4 @@
+interface:
+  display_name: "AH Index"
+  short_description: "扫描并更新知识库结构索引"
+  default_prompt: "Use $ah-index to refresh my knowledge-base manifest and highlight maintenance actions."

@@ -9,8 +9,26 @@ function createMessageId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function mountPendingDraft(view, sessionId, userText, hideUserMessage) {
+function collectUserLinkedContextFiles(view, hideUserMessage) {
+  if (hideUserMessage || !view || typeof view.getLinkedContextFilePaths !== "function") return [];
+  const rawPaths = view.getLinkedContextFilePaths();
+  if (!Array.isArray(rawPaths) || !rawPaths.length) return [];
+  const seen = new Set();
+  const normalized = [];
+  rawPaths.forEach((rawPath) => {
+    const next = String(rawPath || "").trim().replace(/^\/+/, "");
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    normalized.push(next);
+  });
+  return normalized;
+}
+
+function mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedContextFiles = []) {
   const userMessage = { id: createMessageId("msg"), role: "user", text: userText, createdAt: Date.now() };
+  if (Array.isArray(linkedContextFiles) && linkedContextFiles.length) {
+    userMessage.linkedContextFiles = linkedContextFiles.slice();
+  }
   const draftId = createMessageId("msg");
   const draft = {
     id: draftId,
@@ -33,9 +51,15 @@ function mountPendingDraft(view, sessionId, userText, hideUserMessage) {
     view.setForceBottomWindow(12000);
   }
   view.autoScrollEnabled = true;
-  view.renderMessages({ forceBottom: true });
-  view.refreshHistoryMenu();
-  view.scheduleScrollMessagesToBottom(true);
+  if (typeof view.renderMessages === "function") {
+    view.renderMessages({ forceBottom: true });
+  }
+  if (typeof view.refreshHistoryMenu === "function") {
+    view.refreshHistoryMenu();
+  }
+  if (typeof view.scheduleScrollMessagesToBottom === "function") {
+    view.scheduleScrollMessagesToBottom(true);
+  }
 
   return { draftId };
 }
@@ -241,9 +265,15 @@ async function finalizePromptCycle(view, shouldRerenderModelPicker) {
     return;
   }
 
-  view.renderMessages({ forceBottom: true });
-  view.refreshHistoryMenu();
-  view.scheduleScrollMessagesToBottom(true);
+  if (typeof view.renderMessages === "function") {
+    view.renderMessages({ forceBottom: true });
+  }
+  if (typeof view.refreshHistoryMenu === "function") {
+    view.refreshHistoryMenu();
+  }
+  if (typeof view.scheduleScrollMessagesToBottom === "function") {
+    view.scheduleScrollMessagesToBottom(true);
+  }
 }
 
 async function runSendPrompt(view, userText, options = {}) {
@@ -279,7 +309,18 @@ async function runSendPrompt(view, userText, options = {}) {
     view.render();
   }
 
-  const { draftId } = mountPendingDraft(view, sessionId, userText, hideUserMessage);
+  const linkedContextFiles = collectUserLinkedContextFiles(view, hideUserMessage);
+  const { draftId } = mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedContextFiles);
+  if (!hideUserMessage) {
+    if (typeof view.clearLinkedContextFiles === "function") {
+      view.clearLinkedContextFiles({ closePicker: true });
+    } else if (Array.isArray(view.linkedContextFiles)) {
+      view.linkedContextFiles = [];
+      if (typeof view.refreshLinkedContextIndicators === "function") {
+        view.refreshLinkedContextIndicators();
+      }
+    }
+  }
 
   view.currentAbort = new AbortController();
   view.setBusy(true);
@@ -287,11 +328,14 @@ async function runSendPrompt(view, userText, options = {}) {
   let shouldRerenderModelPicker = false;
 
   try {
-    const prompt = view.plugin.skillService.buildInjectedPrompt(
+    let prompt = view.plugin.skillService.buildInjectedPrompt(
       skillMatch.skill,
       view.plugin.settings.skillInjectMode,
       skillMatch.promptText || userText,
     );
+    if (typeof view.composePromptWithLinkedFiles === "function") {
+      prompt = await view.composePromptWithLinkedFiles(prompt, { linkedPaths: linkedContextFiles });
+    }
 
     const response = await view.plugin.opencodeClient.sendMessage({
       sessionId,
