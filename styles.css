@@ -45,7 +45,7 @@ body.theme-dark .oc-surface {
   background: linear-gradient(180deg, color-mix(in srgb, var(--background-primary) 94%, rgb(var(--oc-brand-rgb)) 6%) 0%, var(--background-primary) 100%);
 }
 
-.oc-session-list::-webkit-scrollbar,
+.oc-history-list::-webkit-scrollbar,
 .oc-messages::-webkit-scrollbar,
 .oc-model-list::-webkit-scrollbar,
 .oc-skill-list::-webkit-scrollbar,
@@ -53,7 +53,7 @@ body.theme-dark .oc-surface {
   width: 6px;
 }
 
-.oc-session-list::-webkit-scrollbar-track,
+.oc-history-list::-webkit-scrollbar-track,
 .oc-messages::-webkit-scrollbar-track,
 .oc-model-list::-webkit-scrollbar-track,
 .oc-skill-list::-webkit-scrollbar-track,
@@ -61,7 +61,7 @@ body.theme-dark .oc-surface {
   background: transparent;
 }
 
-.oc-session-list::-webkit-scrollbar-thumb,
+.oc-history-list::-webkit-scrollbar-thumb,
 .oc-messages::-webkit-scrollbar-thumb,
 .oc-model-list::-webkit-scrollbar-thumb,
 .oc-skill-list::-webkit-scrollbar-thumb,
@@ -70,7 +70,7 @@ body.theme-dark .oc-surface {
   border-radius: 999px;
 }
 
-.oc-session-list::-webkit-scrollbar-thumb:hover,
+.oc-history-list::-webkit-scrollbar-thumb:hover,
 .oc-messages::-webkit-scrollbar-thumb:hover,
 .oc-model-list::-webkit-scrollbar-thumb:hover,
 .oc-skill-list::-webkit-scrollbar-thumb:hover,
@@ -169,18 +169,89 @@ body.theme-dark .oc-surface {
   height: 16px;
 }
 
-/* Body / Side -------------------------------------------------- */
-.oc-body {
-  display: grid;
-  grid-template-columns: 292px 1fr;
-  gap: 10px;
-  min-height: 0;
-  height: 100%;
+.oc-header-btn {
+  border: 1px solid var(--oc-border);
+  background: color-mix(in srgb, var(--background-primary) 92%, rgb(var(--oc-brand-rgb)) 8%);
+  box-shadow: var(--oc-shadow-faint);
 }
 
-.oc-body.is-side-collapsed {
-  grid-template-columns: 38px 1fr;
+.oc-header-btn.oc-icon-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  color: var(--text-normal);
+}
+
+.oc-header-btn.oc-icon-btn svg,
+.oc-header-btn.oc-icon-btn .svg-icon {
+  width: 18px !important;
+  height: 18px !important;
+  stroke-width: 2.2;
+}
+
+.oc-header-btn:hover {
+  border-color: var(--oc-border-hover);
+  background: var(--oc-brand-faint);
+  color: var(--oc-brand-strong);
+}
+
+.oc-history-container {
+  position: relative;
+}
+
+.oc-history-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  width: min(330px, calc(100vw - 28px));
+  max-height: min(440px, 65vh);
+  overflow: hidden;
+  border: 1px solid var(--oc-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 94%, rgb(var(--oc-brand-rgb)) 6%);
+  box-shadow: var(--oc-shadow-soft);
+  z-index: 60;
+}
+
+.oc-history-menu.visible {
+  display: block;
+}
+
+.oc-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--oc-border);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.oc-history-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.oc-history-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Body / Side -------------------------------------------------- */
+.oc-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
 .oc-side {
@@ -305,26 +376,32 @@ body.theme-dark .oc-surface {
   margin-bottom: 10px;
 }
 
-.oc-session-list {
+.oc-history-list {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   min-height: 0;
+  max-height: min(360px, 54vh);
   padding-inline-end: 2px;
 }
 
 .oc-session-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   position: relative;
-  border: 1px solid var(--oc-border);
-  border-radius: 8px;
-  padding: 8px 8px 8px 10px;
+  border-bottom: 1px solid var(--oc-border);
+  padding: 9px 10px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.oc-session-item:last-child {
+  border-bottom: none;
 }
 
 .oc-session-item:hover {
-  border-color: var(--oc-border-hover);
   background: var(--oc-surface-muted);
 }
 
@@ -334,24 +411,47 @@ body.theme-dark .oc-surface {
 }
 
 .oc-session-item.is-active {
-  border-color: color-mix(in srgb, var(--oc-brand) 58%, var(--oc-border));
-  background: color-mix(in srgb, var(--oc-brand-faint) 78%, transparent);
+  background: color-mix(in srgb, var(--oc-brand-faint) 72%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--oc-brand) 66%, transparent);
+}
+
+.oc-session-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.oc-session-item-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.oc-session-item.is-active .oc-session-item-icon {
+  color: var(--oc-brand-strong);
+}
+
+.oc-session-item-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .oc-session-item-actions {
-  position: absolute;
-  top: 6px;
-  inset-inline-end: 6px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
+  margin-inline-start: auto;
+  align-self: center;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
 }
 
 .oc-session-item:hover .oc-session-item-actions,
-.oc-session-item.is-active .oc-session-item-actions {
+.oc-session-item.is-active .oc-session-item-actions,
+.oc-session-item.is-renaming .oc-session-item-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -359,16 +459,16 @@ body.theme-dark .oc-surface {
 .oc-session-item-action {
   all: unset;
   box-sizing: border-box;
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
   border: 1px solid transparent;
   color: var(--text-faint);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 96%, transparent);
 }
 
 .oc-session-item-action svg {
@@ -389,8 +489,7 @@ body.theme-dark .oc-surface {
 
 .oc-session-title {
   font-size: 13px;
-  margin-bottom: 4px;
-  padding-inline-end: 48px;
+  margin-bottom: 3px;
   font-weight: 500;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -398,18 +497,38 @@ body.theme-dark .oc-surface {
 }
 
 .oc-session-preview {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: 6px;
+  margin-bottom: 3px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 .oc-session-meta {
   font-size: 11px;
-  opacity: 0.85;
+  color: var(--text-faint);
+  opacity: 0.92;
+}
+
+.oc-session-rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--oc-border-focus);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  padding: 2px 6px;
+  margin-bottom: 3px;
+}
+
+.oc-session-rename-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--oc-brand-strong) 62%, var(--oc-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--oc-brand-faint) 60%, transparent);
 }
 
 .oc-side-footer {
@@ -426,6 +545,7 @@ body.theme-dark .oc-surface {
   padding: 10px;
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   gap: 10px;

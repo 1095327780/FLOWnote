@@ -160,6 +160,17 @@ function activeSessionLabel() {
   return this.sessionDisplayTitle(session);
 }
 
+function formatSessionMetaTime(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function render() {
   this.clearInlineQuestionWidget(true);
   const container = this.contentEl || this.containerEl.children[1] || this.containerEl;
@@ -172,15 +183,11 @@ function render() {
   this.renderHeader(header);
 
   const body = shell.createDiv({ cls: "oc-body" });
-  body.toggleClass("is-side-collapsed", this.isSidebarCollapsed);
-  const side = body.createDiv({ cls: "oc-side" });
   const main = body.createDiv({ cls: "oc-main" });
 
   this.elements.body = body;
-  this.elements.side = side;
   this.elements.main = main;
 
-  this.renderSidebar(side);
   this.renderMain(main);
 }
 
@@ -194,61 +201,70 @@ function renderHeader(header) {
 
   const actions = header.createDiv({ cls: "oc-header-actions" });
   actions.createDiv({ cls: "oc-header-meta", text: tr(this, "view.header.runtime", "Chat Runtime") });
+
+  const newBtn = this.buildIconButton(
+    actions,
+    "plus",
+    tr(this, "view.session.new", "New session"),
+    async () => {
+      try {
+        const session = await this.plugin.createSession("");
+        this.plugin.sessionStore.setActiveSession(session.id);
+        await this.plugin.persistState();
+        this.closeHistoryMenu();
+        this.render();
+      } catch (e) {
+        new Notice(e instanceof Error ? e.message : String(e));
+      }
+    },
+    "oc-header-btn",
+  );
+  newBtn.setAttr("type", "button");
+
+  const historyContainer = actions.createDiv({ cls: "oc-history-container" });
+  const historyBtn = historyContainer.createEl("button", {
+    cls: "oc-icon-btn oc-header-btn oc-history-toggle",
+  });
+  setIcon(historyBtn, "history");
+  historyBtn.setAttr("type", "button");
+  historyBtn.setAttr("aria-label", tr(this, "view.session.history", "Session history"));
+  historyBtn.setAttr("title", tr(this, "view.session.history", "Session history"));
+
+  const historyMenu = historyContainer.createDiv({ cls: "oc-history-menu" });
+  historyMenu.addEventListener("click", (event) => event.stopPropagation());
+  this.elements.historyMenu = historyMenu;
+
+  historyBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    this.toggleHistoryMenu();
+  });
+
+  if (!this.historyMenuDocumentBound) {
+    this.historyMenuDocumentBound = true;
+    this.registerDomEvent(document, "click", () => this.closeHistoryMenu());
+  }
+
+  this.refreshHistoryMenu();
 }
 
 function renderSidebar(side) {
+  if (!side) return;
   side.empty();
-  side.toggleClass("is-collapsed", this.isSidebarCollapsed);
-
-  const header = side.createDiv({ cls: "oc-side-header" });
-  header.createEl("h3", { text: tr(this, "view.session.heading", "Sessions") });
-
-  const sideActions = header.createDiv({ cls: "oc-side-actions" });
-  const toggleBtn = sideActions.createEl("button", { cls: "oc-side-toggle" });
-  toggleBtn.setAttr("type", "button");
-  toggleBtn.setAttr("aria-label", this.isSidebarCollapsed
-    ? tr(this, "view.session.expandList", "Expand session list")
-    : tr(this, "view.session.collapseList", "Collapse session list"));
-  toggleBtn.setAttr("title", this.isSidebarCollapsed
-    ? tr(this, "view.session.expandList", "Expand session list")
-    : tr(this, "view.session.collapseList", "Collapse session list"));
-  this.renderSidebarToggleIcon(toggleBtn);
-  toggleBtn.addEventListener("click", () => this.toggleSidebarCollapsed());
-
-  if (this.isSidebarCollapsed) {
-    return;
-  }
-
-  const addBtn = sideActions.createEl("button", { cls: "oc-side-add" });
-  addBtn.setAttr("type", "button");
-  addBtn.setAttr("aria-label", tr(this, "view.session.new", "New session"));
-  addBtn.setAttr("title", tr(this, "view.session.new", "New session"));
-  try {
-    setIcon(addBtn, "plus");
-  } catch {
-    addBtn.setText("+");
-  }
-  addBtn.addEventListener("click", async () => {
-    try {
-      const session = await this.plugin.createSession("");
-      this.plugin.sessionStore.setActiveSession(session.id);
-      await this.plugin.persistState();
-      this.render();
-    } catch (e) {
-      new Notice(e instanceof Error ? e.message : String(e));
-    }
-  });
-
   const sessions = this.plugin.sessionStore.state().sessions;
   const active = this.plugin.sessionStore.state().activeSessionId;
-  side.createDiv({
-    cls: "oc-side-count",
+
+  const header = side.createDiv({ cls: "oc-history-header" });
+  header.createSpan({ text: tr(this, "view.session.heading", "Sessions") });
+  header.createSpan({
+    cls: "oc-history-count",
     text: tr(this, "view.session.count", "{count} sessions", { count: sessions.length }),
   });
-  const list = side.createDiv({ cls: "oc-session-list" });
+
+  const list = side.createDiv({ cls: "oc-history-list" });
 
   if (!sessions.length) {
-    list.createDiv({ cls: "oc-empty", text: tr(this, "view.session.empty", "No sessions yet. Click \"+\" to start.") });
+    list.createDiv({ cls: "oc-history-empty", text: tr(this, "view.session.empty", "No sessions yet. Click \"+\" to start.") });
     return;
   }
 
@@ -257,6 +273,8 @@ function renderSidebar(side) {
     const item = list.createDiv({ cls: "oc-session-item", attr: { title: displayTitle } });
     if (s.id === active) item.addClass("is-active");
     item.addEventListener("click", async () => {
+      if (item.hasClass("is-renaming")) return;
+      this.closeHistoryMenu();
       this.plugin.sessionStore.setActiveSession(s.id);
       this.render();
       try {
@@ -272,6 +290,24 @@ function renderSidebar(side) {
       this.render();
     });
 
+    const iconEl = item.createDiv({ cls: "oc-session-item-icon" });
+    setIcon(iconEl, s.id === active ? "message-square-dot" : "message-square");
+
+    const content = item.createDiv({ cls: "oc-session-item-content" });
+    const titleEl = content.createDiv({ cls: "oc-session-title", text: displayTitle });
+    titleEl.setAttr("title", displayTitle);
+
+    if (s.lastUserPrompt) {
+      content.createDiv({ cls: "oc-session-preview", text: s.lastUserPrompt, attr: { title: s.lastUserPrompt } });
+    }
+
+    content.createDiv({
+      cls: "oc-session-meta",
+      text: s.id === active
+        ? tr(this, "view.session.currentShort", "Current session")
+        : this.formatSessionMetaTime(s.updatedAt),
+    });
+
     const actions = item.createDiv({ cls: "oc-session-item-actions" });
 
     const renameBtn = actions.createEl("button", { cls: "oc-session-item-action" });
@@ -279,23 +315,68 @@ function renderSidebar(side) {
     renameBtn.setAttr("aria-label", tr(this, "view.session.rename", "Rename session"));
     renameBtn.setAttr("title", tr(this, "view.session.rename", "Rename session"));
     setIcon(renameBtn, "pencil");
-    renameBtn.addEventListener("click", async (event) => {
+    renameBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const next = window.prompt(tr(this, "view.session.renamePrompt", "Rename session"), displayTitle);
-      if (next === null) return;
-      const normalized = normalizeSessionTitle(next);
-      if (!normalized) {
-        new Notice(tr(this, "view.session.renameEmpty", "Session name cannot be empty"));
-        return;
-      }
-      const renamed = this.plugin.sessionStore.renameSession(s.id, normalized);
-      if (!renamed) {
-        new Notice(tr(this, "view.session.renameMissing", "Session to rename was not found"));
-        return;
-      }
-      await this.plugin.persistState();
-      this.render();
+      if (item.hasClass("is-renaming")) return;
+
+      item.addClass("is-renaming");
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "oc-session-rename-input";
+      input.value = displayTitle;
+      titleEl.replaceWith(input);
+      input.focus();
+      input.select();
+      const stop = (ev) => ev.stopPropagation();
+      input.addEventListener("click", stop);
+      input.addEventListener("mousedown", stop);
+
+      let finished = false;
+      const finishRename = async (commit) => {
+        if (finished) return;
+        finished = true;
+        item.removeClass("is-renaming");
+
+        if (!commit) {
+          this.render();
+          return;
+        }
+
+        const normalized = normalizeSessionTitle(input.value || "");
+        if (!normalized) {
+          new Notice(tr(this, "view.session.renameEmpty", "Session name cannot be empty"));
+          this.render();
+          return;
+        }
+
+        const renamed = this.plugin.sessionStore.renameSession(s.id, normalized);
+        if (!renamed) {
+          new Notice(tr(this, "view.session.renameMissing", "Session to rename was not found"));
+          this.render();
+          return;
+        }
+
+        await this.plugin.persistState();
+        this.refreshHistoryMenu();
+        this.refreshCurrentSessionContext();
+      };
+
+      input.addEventListener("blur", () => {
+        void finishRename(true);
+      }, { once: true });
+
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" && !ev.isComposing) {
+          ev.preventDefault();
+          input.blur();
+          return;
+        }
+        if (ev.key === "Escape" && !ev.isComposing) {
+          ev.preventDefault();
+          void finishRename(false);
+        }
+      });
     });
 
     const deleteBtn = actions.createEl("button", { cls: "oc-session-item-action is-danger" });
@@ -318,21 +399,40 @@ function renderSidebar(side) {
       if (typeof this.plugin.deleteSession !== "function") {
         await this.plugin.persistState();
       }
+      this.closeHistoryMenu();
       this.render();
     });
-
-    item.createDiv({ cls: "oc-session-title", text: displayTitle });
-    if (s.lastUserPrompt) {
-      item.createDiv({ cls: "oc-session-preview", text: s.lastUserPrompt, attr: { title: s.lastUserPrompt } });
-    }
-
-    item.createDiv({ cls: "oc-session-meta", text: s.updatedAt ? new Date(s.updatedAt).toLocaleString() : "" });
   });
+}
 
-  side.createDiv({
-    cls: "oc-side-footer",
-    text: tr(this, "view.session.footer", "FLOWnote sessions, skills, model switch, and diagnostics."),
-  });
+function closeHistoryMenu() {
+  const menu = this.elements && this.elements.historyMenu;
+  if (!menu) return;
+  menu.removeClass("visible");
+}
+
+function toggleHistoryMenu() {
+  const menu = this.elements && this.elements.historyMenu;
+  if (!menu) return;
+  const isVisible = menu.hasClass("visible");
+  if (isVisible) {
+    menu.removeClass("visible");
+    return;
+  }
+  this.refreshHistoryMenu();
+  menu.addClass("visible");
+}
+
+function refreshHistoryMenu() {
+  const menu = this.elements && this.elements.historyMenu;
+  if (!menu) return;
+  this.renderSidebar(menu);
+}
+
+function refreshCurrentSessionContext() {
+  const labelEl = this.elements && this.elements.currentSessionLabel;
+  if (!labelEl) return;
+  labelEl.textContent = tr(this, "view.session.current", "Current session: {title}", { title: this.activeSessionLabel() });
 }
 
 function renderMain(main) {
@@ -380,7 +480,7 @@ function renderMain(main) {
   bottomBtn.addEventListener("click", () => this.scrollMessagesTo("bottom"));
 
   const contextFooter = main.createDiv({ cls: "oc-context-footer" });
-  contextFooter.createDiv({
+  this.elements.currentSessionLabel = contextFooter.createDiv({
     cls: "oc-context-session",
     text: tr(this, "view.session.current", "Current session: {title}", { title: this.activeSessionLabel() }),
   });
@@ -554,6 +654,11 @@ module.exports = { layoutRendererMethods: {
   deriveSessionTitleFromPrompt,
   sessionDisplayTitle,
   activeSessionLabel,
+  formatSessionMetaTime,
+  closeHistoryMenu,
+  toggleHistoryMenu,
+  refreshHistoryMenu,
+  refreshCurrentSessionContext,
   updateModelSelectOptions,
   render,
   renderHeader,

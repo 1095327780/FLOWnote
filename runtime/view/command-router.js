@@ -272,7 +272,7 @@ async function handleModelSlashCommand(userText, parsed) {
     this.appendAssistantMessage(sessionId, tr(this, "view.model.selectHint", "Please choose a model from the dropdown."), "");
     await this.plugin.persistState();
     this.renderMessages();
-    this.renderSidebar(this.root.querySelector(".oc-side"));
+    this.refreshHistoryMenu();
     await this.openModelSelector(sessionId);
     return;
   }
@@ -292,7 +292,7 @@ async function handleModelSlashCommand(userText, parsed) {
 
   await this.plugin.persistState();
   this.renderMessages();
-  this.renderSidebar(this.root.querySelector(".oc-side"));
+  this.refreshHistoryMenu();
 }
 
 module.exports = { commandRouterMethods: {

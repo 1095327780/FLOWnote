@@ -34,7 +34,7 @@ function mountPendingDraft(view, sessionId, userText, hideUserMessage) {
   }
   view.autoScrollEnabled = true;
   view.renderMessages({ forceBottom: true });
-  view.renderSidebar(view.root.querySelector(".oc-side"));
+  view.refreshHistoryMenu();
   view.scheduleScrollMessagesToBottom(true);
 
   return { draftId };
@@ -242,7 +242,7 @@ async function finalizePromptCycle(view, shouldRerenderModelPicker) {
   }
 
   view.renderMessages({ forceBottom: true });
-  view.renderSidebar(view.root.querySelector(".oc-side"));
+  view.refreshHistoryMenu();
   view.scheduleScrollMessagesToBottom(true);
 }
 
