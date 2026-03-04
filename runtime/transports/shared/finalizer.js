@@ -80,6 +80,7 @@ async function pollAssistantPayload(options) {
   const quietTimeoutMs = Math.max(10000, Number(cfg.quietTimeoutMs || 120000));
   const maxTotalMs = Math.max(quietTimeoutMs * 3, Number(cfg.maxTotalMs || 10 * 60 * 1000));
   const latestIntervalMs = Math.max(220, Number(cfg.latestIntervalMs || 1100));
+  const requireTerminalStatusOnCompletion = Boolean(cfg.requireTerminalStatusOnCompletion);
   const defaultNoMessageTimeoutMs = Math.max(
     12000,
     Math.min(45000, Math.floor(quietTimeoutMs * 0.5)),
@@ -124,7 +125,14 @@ async function pollAssistantPayload(options) {
   const isComplete = () => {
     if (!hasRenderablePayload(payload)) return false;
     if (payloadLooksInProgress(payload)) return false;
-    return completionSeen;
+    if (!completionSeen) return false;
+    if (!requireTerminalStatusOnCompletion) return true;
+    if (statusIndicatesTerminalNoWork(lastStatus)) return true;
+    if (typeof cfg.getSessionStatus !== "function") return true;
+    const elapsedMs = Date.now() - startedAt;
+    const statusGraceMs = Math.max(2500, Math.min(12000, Math.floor(quietTimeoutMs * 0.15)));
+    if (!lastStatus && pollCount >= 4 && elapsedMs >= statusGraceMs) return true;
+    return false;
   };
 
   const checkQuestionPending = async (force = false) => {

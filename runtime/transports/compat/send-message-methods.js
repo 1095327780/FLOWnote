@@ -155,6 +155,9 @@ function createSendMessageMethods(deps = {}) {
     })}`);
     const deliveredQuestionIds = new Set();
     let waitingForQuestion = false;
+    let pendingQuestionSyncAt = 0;
+    let pendingQuestionSyncResult = false;
+    let pendingQuestionSyncPromise = null;
     let isCommandRequest = false;
     const handleQuestionRequest = (request) => {
       const requestId = String(
@@ -175,18 +178,73 @@ function createSendMessageMethods(deps = {}) {
         options.onQuestionResolved(info);
       }
     };
-    const checkWaitingForQuestion = async () => {
-      if (deliveredQuestionIds.size > 0) {
-        waitingForQuestion = true;
-        return true;
+    const syncPendingQuestionsForSession = async (force = false) => {
+      if (isCommandRequest) {
+        waitingForQuestion = false;
+        return false;
       }
-      if (isCommandRequest) return false;
-      if (waitingForQuestion) {
-        waitingForQuestion = await this.hasPendingQuestionsForSession(sessionId, options.signal);
+      if (!force) {
+        if (pendingQuestionSyncPromise) return pendingQuestionSyncPromise;
+        if (Date.now() - pendingQuestionSyncAt < 450) return pendingQuestionSyncResult;
+      }
+      const run = (async () => {
+        const listed = await this.listQuestions({
+          sessionId,
+          signal: options.signal,
+        });
+        const activeRequestIds = new Set();
+        if (Array.isArray(listed)) {
+          for (const request of listed) {
+            if (!request || typeof request !== "object") continue;
+            const reqSession = String((request.sessionID || request.sessionId || "")).trim();
+            if (reqSession && reqSession !== sessionId) continue;
+            const requestId = String((request.id || request.requestID || request.requestId || "")).trim();
+            if (!requestId) continue;
+            activeRequestIds.add(requestId);
+            handleQuestionRequest(request);
+          }
+        }
+
+        if (deliveredQuestionIds.size) {
+          for (const requestId of Array.from(deliveredQuestionIds)) {
+            if (!activeRequestIds.has(requestId)) {
+              handleQuestionResolved({ requestId, sessionId });
+            }
+          }
+        }
+
+        waitingForQuestion = activeRequestIds.size > 0;
+        pendingQuestionSyncResult = waitingForQuestion;
+        pendingQuestionSyncAt = Date.now();
         return waitingForQuestion;
+      })();
+      pendingQuestionSyncPromise = run;
+      try {
+        return await run;
+      } catch (error) {
+        if (deliveredQuestionIds.size > 0 || waitingForQuestion) {
+          waitingForQuestion = true;
+          pendingQuestionSyncResult = true;
+          pendingQuestionSyncAt = Date.now();
+          return true;
+        }
+        this.log(`sync pending questions failed: ${error instanceof Error ? error.message : String(error)}`);
+        pendingQuestionSyncResult = false;
+        pendingQuestionSyncAt = Date.now();
+        return false;
+      } finally {
+        if (pendingQuestionSyncPromise === run) pendingQuestionSyncPromise = null;
       }
-      waitingForQuestion = await this.hasPendingQuestionsForSession(sessionId, options.signal);
-      return waitingForQuestion;
+    };
+    const checkWaitingForQuestion = async () => {
+      if (isCommandRequest) return false;
+      if (deliveredQuestionIds.size > 0) {
+        return syncPendingQuestionsForSession(true);
+      }
+      if (waitingForQuestion) {
+        return syncPendingQuestionsForSession(false);
+      }
+      return syncPendingQuestionsForSession(false);
     };
 
     const questionWatch = this.createQuestionWatch(sessionId, options.signal, {
@@ -215,6 +273,7 @@ function createSendMessageMethods(deps = {}) {
 
     let res = null;
     let streamed = null;
+    let recoveredAfterRequestFailure = false;
     const commandBody = isCommandRequest
       ? {
         command: resolvedCommand.command,
@@ -229,6 +288,46 @@ function createSendMessageMethods(deps = {}) {
       parts: [{ type: "text", text: effectivePrompt || options.prompt }],
     };
     if (model) messageBody.model = model;
+
+    const canRecoverFromRequestFailurePayload = async (candidate) => {
+      if (!candidate || !hasRenderablePayload(candidate)) return false;
+      if (payloadLooksInProgress(candidate)) return Boolean(await checkWaitingForQuestion());
+      if (Boolean(candidate.completed)) return true;
+      return Boolean(await checkWaitingForQuestion());
+    };
+
+    const recoverFromRequestFailure = async (requestError, handlers = null, recoveryOptions = null) => {
+      if (!isRecoverableRequestError(requestError)) return null;
+      if (options.signal && options.signal.aborted) return null;
+      this.log(
+        `request failed and fallback to polling final response: ${
+          requestError instanceof Error ? requestError.message : String(requestError)
+        }`,
+      );
+      const pollRecoveryOptions = recoveryOptions && typeof recoveryOptions === "object"
+        ? recoveryOptions
+        : {};
+      try {
+        const recovered = await this.streamAssistantFromPolling(
+          sessionId,
+          startedAt,
+          options.signal,
+          handlers,
+          {
+            allowQuestionPending: true,
+            ...pollRecoveryOptions,
+          },
+        );
+        if (await canRecoverFromRequestFailurePayload(recovered)) return recovered;
+      } catch (pollError) {
+        this.log(
+          `request failure polling recovery failed: ${
+            pollError instanceof Error ? pollError.message : String(pollError)
+          }`,
+        );
+      }
+      return null;
+    };
 
     if (this.settings.enableStreaming) {
       const linked = createLinkedAbortController(options.signal);
@@ -310,33 +409,68 @@ function createSendMessageMethods(deps = {}) {
       streamed = await eventStreamPromise;
 
       if (requestError) {
-        const canRecoverFromStream = Boolean(
-          streamed
-          && hasRenderablePayload(streamed)
-          && !payloadLooksInProgress(streamed)
-          && Boolean(streamed.completed),
+        const forcePollingRecovery = Boolean(
+          isCommandRequest
+          && isRecoverableRequestError(requestError)
+          && !(options.signal && options.signal.aborted),
         );
-        if (!(isRecoverableRequestError(requestError) && canRecoverFromStream)) {
-          throw requestError;
+        let canRecoverFromStream = false;
+        if (!forcePollingRecovery) {
+          canRecoverFromStream = await canRecoverFromRequestFailurePayload(streamed);
+        } else {
+          this.log("command request timed out; require polling terminal recovery before completing");
         }
-        this.log(`request failed but recovered from stream payload: ${requestError instanceof Error ? requestError.message : String(requestError)}`);
+        if (!canRecoverFromStream || forcePollingRecovery) {
+          const recovered = await recoverFromRequestFailure(
+            requestError,
+            streamHandlers,
+            forcePollingRecovery
+              ? { requireTerminalStatusOnCompletion: true }
+              : null,
+          );
+          if (recovered) {
+            streamed = recovered;
+            canRecoverFromStream = true;
+          }
+        }
+        if (!canRecoverFromStream) throw requestError;
+        recoveredAfterRequestFailure = true;
+        this.log(
+          `request failed but recovered from stream/polling payload: ${
+            requestError instanceof Error ? requestError.message : String(requestError)
+          }`,
+        );
       }
     } else if (isCommandRequest) {
-      res = await this.request(
-        "POST",
-        `/session/${encodeURIComponent(sessionId)}/command`,
-        commandBody,
-        sessionQuery,
-        options.signal,
-      );
+      try {
+        res = await this.request(
+          "POST",
+          `/session/${encodeURIComponent(sessionId)}/command`,
+          commandBody,
+          sessionQuery,
+          options.signal,
+        );
+      } catch (requestError) {
+        const recovered = await recoverFromRequestFailure(requestError);
+        if (!recovered) throw requestError;
+        streamed = recovered;
+        recoveredAfterRequestFailure = true;
+      }
     } else {
-      res = await this.request(
-        "POST",
-        `/session/${encodeURIComponent(sessionId)}/message`,
-        messageBody,
-        sessionQuery,
-        options.signal,
-      );
+      try {
+        res = await this.request(
+          "POST",
+          `/session/${encodeURIComponent(sessionId)}/message`,
+          messageBody,
+          sessionQuery,
+          options.signal,
+        );
+      } catch (requestError) {
+        const recovered = await recoverFromRequestFailure(requestError);
+        if (!recovered) throw requestError;
+        streamed = recovered;
+        recoveredAfterRequestFailure = true;
+      }
     }
 
     const data = res && res.data ? res.data : res;
@@ -364,6 +498,22 @@ function createSendMessageMethods(deps = {}) {
         meta: String(payload && payload.meta ? payload.meta : ""),
         blocks: payload && Array.isArray(payload.blocks) ? payload.blocks : [],
         completed: this.isMessageEnvelopeCompleted(envelope),
+      };
+    }
+
+    if (
+      recoveredAfterRequestFailure
+      && !hasRenderablePayload(finalized)
+      && streamed
+      && hasRenderablePayload(streamed)
+    ) {
+      finalized = {
+        messageId: String(streamed.messageId || finalized.messageId || ""),
+        text: String(streamed.text || ""),
+        reasoning: String(streamed.reasoning || ""),
+        meta: String(streamed.meta || ""),
+        blocks: Array.isArray(streamed.blocks) ? streamed.blocks : [],
+        completed: Boolean(streamed.completed),
       };
     }
 

@@ -234,3 +234,35 @@ test("pollAssistantPayload should wait for explicit completion signal when sessi
   assert.equal(result.timedOut, true);
   assert.equal(result.completed, false);
 });
+
+test("pollAssistantPayload should wait for terminal session status when completion gating is enabled", async () => {
+  let statusCalls = 0;
+  const result = await pollAssistantPayload({
+    quietTimeoutMs: 15000,
+    maxTotalMs: 60000,
+    noMessageTimeoutMs: 12000,
+    requireTerminalStatusOnCompletion: true,
+    sleep: async () => {},
+    getLatest: async () => ({
+      messageId: "msg_a1",
+      createdAt: Date.now(),
+      payload: {
+        text: "partial-terminal-looking",
+        reasoning: "",
+        meta: "",
+        blocks: [],
+      },
+      completed: true,
+    }),
+    getSessionStatus: async () => {
+      statusCalls += 1;
+      return statusCalls >= 3 ? { type: "idle" } : { type: "busy" };
+    },
+  });
+
+  assert.ok(statusCalls >= 3);
+  assert.equal(result.messageId, "msg_a1");
+  assert.equal(String(result.payload && result.payload.text || ""), "partial-terminal-looking");
+  assert.equal(result.completed, true);
+  assert.equal(result.timedOut, false);
+});

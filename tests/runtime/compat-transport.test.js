@@ -995,6 +995,110 @@ test("sendMessage should recover from request timeout when streaming payload is 
   assert.equal(result.messageId, "msg_stream_ok");
 });
 
+test("sendMessage should recover from request timeout via polling fallback", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+  let pollingCalls = 0;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      throw new Error("FLOWnote 连接失败: 请求超时 (120000ms)");
+    }
+    if (method === "GET" && endpoint === "/question") return [];
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => ({
+    messageId: "msg_stream_partial",
+    text: "partial",
+    reasoning: "",
+    meta: "",
+    blocks: [{ id: "tool_1", type: "tool", status: "running" }],
+    completed: false,
+  });
+  transport.streamAssistantFromPolling = async () => {
+    pollingCalls += 1;
+    return {
+      messageId: "msg_poll_done",
+      text: "polling-complete",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: true,
+    };
+  };
+  transport.trySyncMessageRecovery = async () => {
+    throw new Error("trySyncMessageRecovery should not run after timeout recovery");
+  };
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+  });
+
+  assert.equal(pollingCalls, 1);
+  assert.equal(result.text, "polling-complete");
+  assert.equal(result.messageId, "msg_poll_done");
+});
+
+test("sendMessage should require polling terminal recovery for timed-out command requests", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+  let pollingCalls = 0;
+  let pollingRequireTerminalStatus = false;
+
+  transport.resolveCommandForEndpoint = async () => ({ use: true, command: "ah-month" });
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/command") {
+      throw new Error("FLOWnote connection failed: Request timed out (120000ms)");
+    }
+    if (method === "GET" && endpoint === "/question") return [];
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => ({
+    messageId: "msg_stream_partial",
+    text: "now let me check...",
+    reasoning: "",
+    meta: "",
+    blocks: [],
+    completed: true,
+  });
+  transport.streamAssistantFromPolling = async (_sessionId, _startedAt, _signal, _handlers, options) => {
+    pollingCalls += 1;
+    pollingRequireTerminalStatus = Boolean(
+      options && options.requireTerminalStatusOnCompletion,
+    );
+    return {
+      messageId: "msg_poll_done",
+      text: "polling-command-complete",
+      reasoning: "",
+      meta: "",
+      blocks: [],
+      completed: true,
+    };
+  };
+  transport.trySyncMessageRecovery = async () => null;
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "/ah-month",
+  });
+
+  assert.equal(pollingCalls, 1);
+  assert.equal(pollingRequireTerminalStatus, true);
+  assert.equal(result.text, "polling-command-complete");
+  assert.equal(result.messageId, "msg_poll_done");
+});
+
+test("getFinalizeTimeoutConfig should follow configured timeout", () => {
+  const transport = createTransport();
+  transport.settings.requestTimeoutMs = 240000;
+
+  const cfg = transport.getFinalizeTimeoutConfig();
+
+  assert.equal(cfg.quietTimeoutMs, 240000);
+  assert.equal(cfg.maxTotalMs, 720000);
+});
+
 test("sendMessage should reject response without completion signal", async () => {
   const transport = createTransport();
   transport.settings.enableStreaming = true;
@@ -1064,6 +1168,49 @@ test("sendMessage should not fail with idle empty payload when question request 
     prompt: "hello",
   });
 
+  assert.match(String(result.text || ""), /等待问题回答后继续生成|Waiting for question response/i);
+});
+
+test("sendMessage should emit onQuestionRequest when pending question is discovered by list fallback", async () => {
+  const transport = createTransport();
+  transport.settings.enableStreaming = true;
+
+  transport.request = async (method, endpoint) => {
+    if (method === "POST" && endpoint === "/session/ses_1/message") {
+      return {
+        info: {
+          id: "msg_q_wait_emit",
+          role: "assistant",
+          sessionID: "ses_1",
+          time: { created: 100 },
+        },
+        parts: [],
+      };
+    }
+    if (method === "GET" && endpoint === "/question") {
+      return [
+        {
+          id: "que_emit_1",
+          sessionID: "ses_1",
+          questions: [{ question: "继续前请确认目标？", options: ["确认"] }],
+        },
+      ];
+    }
+    throw new Error(`unexpected request: ${method} ${endpoint}`);
+  };
+  transport.streamAssistantFromEvents = async () => null;
+  transport.trySyncMessageRecovery = async () => null;
+  transport.reconcileAssistantResponseQuick = async () => null;
+
+  const requested = [];
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+    onQuestionRequest: (req) => requested.push(req),
+  });
+
+  assert.equal(requested.length, 1);
+  assert.equal(requested[0].id, "que_emit_1");
   assert.match(String(result.text || ""), /等待问题回答后继续生成|Waiting for question response/i);
 });
 

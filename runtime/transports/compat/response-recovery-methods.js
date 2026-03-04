@@ -25,6 +25,8 @@ function createResponseRecoveryMethods(deps = {}) {
       return v === undefined || v === null ? "" : String(v);
     }),
   } = deps;
+  const QUESTION_WATCH_POLL_INTERVAL_MS = 5000;
+  const QUESTION_WATCH_ERROR_RETRY_MS = 3000;
 
   function normalizeTimestampMs(value) {
     const raw = Number(value || 0);
@@ -93,6 +95,32 @@ function createResponseRecoveryMethods(deps = {}) {
       const created = envelopeCreatedAtMs(item);
       return Boolean(created && created >= anchorCreated);
     }) || null;
+  }
+
+  function waitWithAbort(ms, signal) {
+    const waitMs = Math.max(0, Number(ms) || 0);
+    if (!signal || typeof signal.addEventListener !== "function") {
+      return sleep(waitMs);
+    }
+    if (signal.aborted) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      const onAbort = () => cleanup();
+      signal.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(cleanup, waitMs);
+    });
   }
 
   class ResponseRecoveryMethods {
@@ -219,6 +247,7 @@ function createResponseRecoveryMethods(deps = {}) {
     const timeoutCfg = this.getFinalizeTimeoutConfig();
     const pollOptions = options && typeof options === "object" ? options : {};
     const quickFallback = Boolean(pollOptions.quickFallback);
+    const requireTerminalStatusOnCompletion = Boolean(pollOptions.requireTerminalStatusOnCompletion);
     const quietTimeoutMs = Number.isFinite(Number(pollOptions.quietTimeoutMs)) && Number(pollOptions.quietTimeoutMs) > 0
       ? Number(pollOptions.quietTimeoutMs)
       : quickFallback
@@ -248,6 +277,7 @@ function createResponseRecoveryMethods(deps = {}) {
       noMessageTimeoutMs,
       sleep,
       requireTerminal: false,
+      requireTerminalStatusOnCompletion,
       onToken: handlers && handlers.onToken,
       onReasoning: handlers && handlers.onReasoning,
       onBlocks: handlers && handlers.onBlocks,
@@ -455,7 +485,7 @@ function createResponseRecoveryMethods(deps = {}) {
           break;
         }
         this.log(`question watcher poll failed: ${message}`);
-        await sleep(1000);
+        await waitWithAbort(QUESTION_WATCH_ERROR_RETRY_MS, signal);
         continue;
       }
 
@@ -492,7 +522,7 @@ function createResponseRecoveryMethods(deps = {}) {
         seenByRequestId.set(requestId, request);
       }
 
-      await sleep(1600);
+      await waitWithAbort(QUESTION_WATCH_POLL_INTERVAL_MS, signal);
     }
   }
 
