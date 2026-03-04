@@ -57,8 +57,8 @@ test("daily note template should switch by locale", () => {
   try {
     const zhTpl = fixture.getDailyNoteTemplate("zh-CN");
     const enTpl = fixture.getDailyNoteTemplate("en-US");
-    assert.match(zhTpl, /今日计划/);
-    assert.match(enTpl, /Today Plan/);
+    assert.match(zhTpl, /## 记录/);
+    assert.match(enTpl, /## Records/);
   } finally {
     fixture.restore();
   }

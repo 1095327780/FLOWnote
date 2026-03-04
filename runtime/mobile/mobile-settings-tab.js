@@ -242,8 +242,8 @@ class MobileSettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName(t("mobile.settings.headerName", "Idea section header"))
-      .setDesc(t("mobile.settings.headerDesc", "Heading used to store captured ideas."))
+      .setName(t("mobile.settings.headerName", "Record section header"))
+      .setDesc(t("mobile.settings.headerDesc", "Heading used to store captured content."))
       .addText((text) => {
         text.setPlaceholder(defaultIdeaSectionHeaderByLocale(locale)).setValue(mc.ideaSectionHeader).onChange(async (v) => {
           mc.ideaSectionHeader = v.trim() || defaultIdeaSectionHeaderByLocale(locale);

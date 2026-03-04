@@ -32,6 +32,22 @@ function normalizeTimestampMs(value) {
   return Math.floor(raw);
 }
 
+function parseSkillInfoFromInstructionText(text) {
+  const raw = String(text || "");
+  if (!raw.includes("<skill-instruction>")) return null;
+
+  const baseDirMatch = raw.match(/Base directory for this skill:\s*([^\n\r]+)/i);
+  const baseDirectory = baseDirMatch && baseDirMatch[1] ? String(baseDirMatch[1]).trim() : "";
+  if (!baseDirectory) return null;
+
+  const normalizedPath = baseDirectory.replace(/\\/g, "/");
+  const skillMatch = normalizedPath.match(/\/skills\/([^/]+)\/?/i);
+  const skillId = skillMatch && skillMatch[1] ? String(skillMatch[1]).trim() : "";
+  if (!skillId) return null;
+
+  return { skillId, baseDirectory };
+}
+
 function createTransportEventReducer(options) {
   const cfg = options && typeof options === "object" ? options : {};
   const sessionId = String(cfg.sessionId || "").trim();
@@ -49,9 +65,12 @@ function createTransportEventReducer(options) {
   const promptedPermissionIds = new Set();
   const promptedQuestionIds = new Set();
   const activeQuestionIds = new Set();
+  const userTextByPart = new Map();
+  const stickyBlockIds = new Set();
 
   let messageId = "";
   let activeMessageCreatedAt = 0;
+  let latestUserMessageId = "";
   let text = "";
   let reasoning = "";
   let meta = "";
@@ -88,6 +107,15 @@ function createTransportEventReducer(options) {
     }
   };
 
+  const retainStickyBlocks = () => {
+    const retained = [];
+    for (const [id, part] of blockPartById.entries()) {
+      if (!stickyBlockIds.has(id)) continue;
+      retained.push([id, part]);
+    }
+    return retained;
+  };
+
   const updateBlocks = () => {
     const nextBlocks = Array.from(blockPartById.values())
       .map((part, idx) => toPartBlock(part, idx))
@@ -101,19 +129,26 @@ function createTransportEventReducer(options) {
   };
 
   const resetActiveMessageContent = () => {
+    const stickyBlocks = retainStickyBlocks();
     textByPart.clear();
     reasoningByPart.clear();
     blockPartById.clear();
     partKindById.clear();
+    for (const [id, part] of stickyBlocks) {
+      blockPartById.set(id, part);
+      partKindById.set(id, String(part && part.type ? part.type : ""));
+    }
     completionSeen = false;
     idleSeen = false;
     text = "";
     reasoning = "";
-    blocks = [];
-    blocksKey = blocksFingerprint([]);
+    blocks = stickyBlocks
+      .map((entry, idx) => toPartBlock(entry[1], idx))
+      .filter(Boolean);
+    blocksKey = blocksFingerprint(blocks);
     call(cfg.onToken, "");
     call(cfg.onReasoning, "");
-    call(cfg.onBlocks, []);
+    call(cfg.onBlocks, blocks);
   };
 
   const consumePermissionEvent = (event) => {
@@ -202,6 +237,13 @@ function createTransportEventReducer(options) {
       ? event.properties.info
       : null;
     if (!info || info.sessionID !== sessionId) return;
+    if (info.role === "user") {
+      if (typeof info.id !== "string" || !info.id) return;
+      const created = info.time ? normalizeTimestampMs(info.time.created || 0) : 0;
+      if (created > 0 && created < startedAt - 1000) return;
+      latestUserMessageId = info.id;
+      return;
+    }
     if (info.role !== "assistant") return;
     if (typeof info.id !== "string" || !info.id) return;
 
@@ -232,19 +274,71 @@ function createTransportEventReducer(options) {
     }
   };
 
+  const tryCaptureSkillInstruction = (part, delta = "") => {
+    if (!part || part.type !== "text") return;
+    if (typeof part.messageID !== "string" || !part.messageID) return;
+    if (latestUserMessageId && part.messageID !== latestUserMessageId) return;
+
+    const partId = typeof part.id === "string" && part.id ? part.id : `user:${part.messageID}`;
+    const current = userTextByPart.get(partId) || "";
+    let next = current;
+    if (delta) next = mergeSnapshotText(next, delta);
+    if (typeof part.text === "string") next = mergeSnapshotText(next, part.text);
+    if (next !== current) userTextByPart.set(partId, next);
+
+    const skillInfo = parseSkillInfoFromInstructionText(next);
+    if (!skillInfo) return;
+
+    const toolPartId = `skill-instruction:${part.messageID}`;
+    if (blockPartById.has(toolPartId)) return;
+
+    const now = Date.now();
+    const skillPart = {
+      id: toolPartId,
+      sessionID: sessionId,
+      messageID: part.messageID,
+      type: "tool",
+      callID: toolPartId,
+      tool: "skill",
+      state: {
+        status: "completed",
+        title: `Skill: ${skillInfo.skillId}`,
+        input: {
+          skill: skillInfo.skillId,
+          source: "skill-instruction",
+          baseDirectory: skillInfo.baseDirectory,
+        },
+        output: `Official skill context injected: ${skillInfo.skillId}`,
+        metadata: {
+          source: "skill-instruction",
+        },
+        time: {
+          start: now,
+          end: now,
+        },
+      },
+    };
+
+    stickyBlockIds.add(toolPartId);
+    partKindById.set(toolPartId, "tool");
+    blockPartById.set(toolPartId, skillPart);
+    updateBlocks();
+  };
+
   const consumeMessagePartUpdated = (event) => {
     const props = event.properties && typeof event.properties === "object" ? event.properties : {};
     const part = props.part && typeof props.part === "object" ? props.part : null;
     if (!part || typeof part.sessionID !== "string" || part.sessionID !== sessionId) return;
+    const delta = typeof props.delta === "string" ? props.delta : "";
     if (part.time) {
       const partStart = normalizeTimestampMs(part.time.start || 0);
       if (partStart > 0 && partStart < startedAt - 1000) return;
     }
+    tryCaptureSkillInstruction(part, delta);
     if (!messageId) return;
     if (typeof part.messageID !== "string" || part.messageID !== messageId) return;
 
     const partId = typeof part.id === "string" && part.id ? part.id : `${part.type || "part"}:${part.messageID || "unknown"}`;
-    const delta = typeof props.delta === "string" ? props.delta : "";
     partKindById.set(partId, String(part.type || ""));
 
     if (part.type === "text") {

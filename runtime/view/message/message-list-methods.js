@@ -31,7 +31,7 @@ function renderMessages(options = {}) {
     });
     welcome.createDiv({
       cls: "oc-empty",
-      text: tFromContext(this, "view.welcome.empty", "Send a message, or pick a skill from the dropdown first."),
+      text: tFromContext(this, "view.welcome.empty", "Send a message, or type / to pick a skill command."),
     });
     this.renderInlineQuestionPanel(messages);
     if (shouldStickToBottom) {
@@ -113,6 +113,15 @@ function linkedContextDisplayName(pathValue) {
   return parts.length ? parts[parts.length - 1] || String(pathValue || "") : String(pathValue || "");
 }
 
+function isLinkedContextFolderPath(view, pathValue) {
+  const normalized = String(pathValue || "").trim().replace(/^\/+/, "");
+  if (!normalized) return false;
+  const vault = view && view.app && view.app.vault;
+  if (!vault || typeof vault.getAbstractFileByPath !== "function") return false;
+  const target = vault.getAbstractFileByPath(normalized);
+  return Boolean(target && Array.isArray(target.children));
+}
+
 function renderUserLinkedContextFiles(row, message) {
   const linkedFiles = normalizeMessageLinkedContextFiles(message);
   if (!linkedFiles.length) return;
@@ -120,21 +129,27 @@ function renderUserLinkedContextFiles(row, message) {
   const panel = row.createDiv({ cls: "oc-message-context-files" });
   panel.createDiv({
     cls: "oc-message-context-label",
-    text: tFromContext(this, "view.message.linkedFiles", "Linked files"),
+    text: tFromContext(this, "view.message.linkedFiles", "Linked context"),
   });
   const chips = panel.createDiv({ cls: "oc-message-context-list" });
 
   linkedFiles.forEach((pathValue) => {
-    const chip = chips.createEl("a", {
-      cls: "oc-message-context-chip internal-link",
-      attr: {
-        href: pathValue,
-        "data-href": pathValue,
-        title: pathValue,
-      },
-    });
+    const isFolder = isLinkedContextFolderPath(this, pathValue);
+    const chip = isFolder
+      ? chips.createDiv({
+        cls: "oc-message-context-chip is-folder",
+        attr: { title: pathValue },
+      })
+      : chips.createEl("a", {
+        cls: "oc-message-context-chip internal-link",
+        attr: {
+          href: pathValue,
+          "data-href": pathValue,
+          title: pathValue,
+        },
+      });
     const iconEl = chip.createSpan({ cls: "oc-message-context-chip-icon" });
-    safeSetIcon(iconEl, "file-text");
+    safeSetIcon(iconEl, isFolder ? "folder" : "file-text");
     chip.createSpan({
       cls: "oc-message-context-chip-name",
       text: linkedContextDisplayName(pathValue),

@@ -740,13 +740,13 @@ class BasicSettingsSectionMethods {
       });
 
     new Setting(containerEl)
-      .setName(t("mobile.settings.headerName", "想法区域标题"))
+      .setName(t("mobile.settings.headerName", "记录区标题"))
       .addText((text) => {
         text
-          .setPlaceholder(locale === "zh-CN" ? "### 💡 想法和灵感" : "### 💡 Ideas")
+          .setPlaceholder(locale === "zh-CN" ? "## 记录" : "## Records")
           .setValue(mc.ideaSectionHeader)
           .onChange(async (v) => {
-            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "### 💡 想法和灵感" : "### 💡 Ideas");
+            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "## 记录" : "## Records");
             await this.plugin.saveSettings();
           });
       });

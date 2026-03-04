@@ -1,83 +1,216 @@
 ---
 name: ah
-description: |
-  FLOW 统一入口技能：基于用户意图与全局状态进行路由决策，返回最合适的 ah 子技能或执行顺序。用于用户不确定该调用哪个技能、或希望从一个入口协调多步骤任务的场景。
+description: 阿浩知识库统一入口与技能路由中枢。用于用户不确定该用哪个技能、想查看功能菜单、或希望根据意图自动分发到对应技能时。
 ---
 
-# AH Gateway
+# 📚 阿浩知识库助手
 
-`/ah` 只做路由编排，不在网关内展开业务执行。
+> **统一入口** — 只需 `/ah`，AI 帮你完成所有操作
 
-## FLOW Position
+---
 
-- 输入：用户请求 + 全局状态。
-- 输出：单技能路由或多技能有序链路。
+## 🎯 技能定位
 
-## Reusable Resources
+知识库的**智能总调度中心**。无需记住其他命令，只需描述想做什么，或选择数字。
 
-- 网关原则：`references/gateway-principles.md`
-- 意图映射：`references/routing-matrix.md`
-- 优先级仲裁：`references/priority-resolution.md`
-- 多意图编排：`references/multi-intent-playbook.md`
-- 质量检查：`references/quality-checklist.md`
-- 输出模板：`assets/路由结果模板.md`
+---
 
-## Skill Contract
+## ⚠️ 启动时必做：读取全局状态
 
-### Inputs
+> **每次启动时，必须先读取 AI 记忆系统的全局状态！**
 
-- 用户原始表达。
-- 可选：显式命令（如 `/ah-read`）。
-- 可选：用户给出的执行顺序偏好。
+```
+[AI 内部执行]
+1. 读取 Meta/.ai-memory/STATUS.md
+2. 检查是否有待处理的任务
+3. 如果有，在欢迎消息中显示
+```
 
-### Reads
+---
 
-- `Meta/.ai-memory/STATUS.md`
-- `references/gateway-principles.md`
-- `references/routing-matrix.md`
-- `references/priority-resolution.md`
-- `references/multi-intent-playbook.md`
-- `references/quality-checklist.md`
-- `assets/路由结果模板.md`
+## 🚀 启动交互
 
-### Writes
+### 情况 A：有待处理任务时
 
-- 默认不写业务文件。
-- 可选：在 `STATUS.md` 的“回顾”分区记录一次网关路由标记。
+```
+👋 你好！我是阿浩知识库助手。
 
-### Calls
+📋 **待处理事项**：
+{{根据全局状态生成的待处理事项列表}}
 
-- 协议入口：`Read ../ah-memory/SKILL.md`
-- 路由目标：`Read ../<target-skill>/SKILL.md`
-  - `ah-note/ah-capture/ah-read/ah-card/ah-think/ah-index/ah-project/ah-archive/ah-review/ah-week/ah-month/ah-inbox`
+---
 
-### Return
+今天想做什么？
 
-- 单一路由：目标技能 + 路由理由 + 预期输出。
-- 多意图路由：顺序链路 + 当前应先执行的第一个技能。
-- 若意图不清或仅输入“请用 ah 处理”：返回“状态感知摘要 + 功能列表（编号）+ 输入数字选择指引”。
-- 若用户仅输入数字：按上一轮功能列表编号直达对应技能。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-### Failure Handling
+☀️ **开启新的一天**
+   1. 创建今日日记
 
-- 状态冲突：按 `priority-resolution.md` 输出优先顺序。
-- 意图模糊：按 `routing-matrix.md` 给最小澄清问题。
-- 目标不可用：给次优技能并说明替代理由。
+📥 **捕获与整理**
+   2. 快速记录想法
+3. 整理残留记录
 
-## Workflow
+📝 **笔记创作**
+   4. 写永久笔记
+   5. 阅读引导
+   6. 深度思考（思维模型）
 
-1. **Parse**：识别显式命令、核心意图、是否为“数字选择输入”。
-2. **State Check**：读取 `STATUS.md`，识别 `阻塞/待交接/进行中`。
-3. **Route**：按 `routing-matrix.md` 匹配目标技能。
-4. **Resolve**：按 `priority-resolution.md` 处理冲突与优先级。
-5. **Orchestrate**：多意图时按 `multi-intent-playbook.md` 给顺序链。
-6. **Menu Fallback**：若意图不清，输出 4-6 个编号功能项（含首选项），并提示“输入数字继续”。
-7. **Return**：按模板返回可执行下一步，不展开业务流程。
+📁 **项目管理**
+   7. 创建新项目
+   8. 归档项目
 
-## Quality Bar
+🔄 **定期回顾**
+   9. 每日回顾
+   10. 每周回顾
+   11. 每月复盘
+   12. 年度回顾
 
-- 路由必须“状态感知 + 意图感知”，不能只靠关键词。
-- 多意图必须给顺序，不把用户留在选择负担里。
-- 输出以“下一步可执行”为中心，避免泛泛解释。
-- 建议技能不超过 3 个，默认给出 1 个首选。
-- 模糊意图时必须提供编号功能列表，允许用户直接输入数字（如 `1`）选择。
+🔧 **系统维护**
+   13. 初始化/更新索引
+   14. 初始化知识库
+   15. 处理旧笔记
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+输入数字或直接说你想做什么 💬
+```
+
+### 待处理事项的生成规则
+
+根据全局状态文件，生成待处理事项：
+
+```
+📋 **待处理事项**：
+
+1. 📖 《社会心理学》有 4 个洞见等待转化为卡片笔记
+   → 输入 "4" 或 "整理卡片笔记" 继续
+
+2. 📖 《效率脑科学》阅读整理进行到 25%（3/12批次）
+   → 输入 "5" 或 "继续阅读整理" 继续
+
+3. 🔄 本周还没有进行周回顾
+   → 输入 "10" 开始周回顾
+```
+
+### 情况 B：没有待处理任务时
+
+展示标准功能菜单（不显示待处理事项区域）：
+
+```
+👋 你好！我是阿浩知识库助手。
+
+今天想做什么？
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+...
+```
+
+### 情况 C：用户已说明需求
+
+直接识别意图，确认后执行。
+
+---
+
+## 🧠 意图识别
+
+> ⚠️ **重要：意图识别只在「菜单选择阶段」起作用！**
+>
+> 一旦进入某个子技能（如 ah-note、ah-review），就**不再做意图识别**。
+> 用户在子技能流程中的回答是**数据输入**，不是**命令触发**。
+>
+> **错误示例**：
+> - AI 问：「今天最重要的一件事是什么？」
+> - 用户答：「阅读《存在与时间》第三章」
+> - ❌ 错误：识别到「阅读」，跳转到 ah-read
+> - ✅ 正确：把「阅读《存在与时间》第三章」作为今日聚焦填入日记
+
+| 用户表达 | 匹配技能 | 路径 |
+|---------|---------|------|
+| 早上好、今天计划、创建日记 | **ah-note** | `ah-note/SKILL.md` |
+| 记录、想法、灵感、记一下 | **ah-capture** | `ah-capture/SKILL.md` |
+| 整理、残留记录、inbox | **ah-inbox** | `ah-inbox/SKILL.md` |
+| 永久笔记、卡片、制卡 | **ah-card** | `ah-card/SKILL.md` |
+| 读书、阅读、书籍 | **ah-read** | `ah-read/SKILL.md` |
+| 深度思考、分析、费曼、苏格拉底 | **ah-think** | `ah-think/SKILL.md` |
+| 新项目、创建项目、立项 | **ah-project** | `ah-project/SKILL.md` |
+| 归档、完成项目、结束项目 | **ah-archive** | `ah-archive/SKILL.md` |
+| 日回顾、晚上反思 | **ah-review** | `ah-review/SKILL.md` |
+| 周回顾、本周 | **ah-week** | `ah-week/SKILL.md` |
+| 月回顾、月度、复盘 | **ah-month** | `ah-month/SKILL.md` |
+| 年回顾、年度总结、年终复盘 | **ah-year** | `ah-year/SKILL.md` |
+| 索引、统计、维护 | **ah-init** | `ah-init/SKILL.md` |
+| 初始化、搭建知识库、从零开始 | **ah-init** | `ah-init/SKILL.md` |
+| 旧笔记、迁移、处理旧内容 | **ah-legacy** | `ah-legacy/SKILL.md` |
+
+---
+
+## 🎯 技能速查
+
+| # | 命令 | 功能 |
+|---|------|------|
+| 1 | `/ah-note` | 创建今日日记 |
+| 2 | `/ah-capture` | 快速记录 |
+| 3 | `/ah-inbox` | 整理残留记录 |
+| 4 | `/ah-card` | 写永久笔记 |
+| 5 | `/ah-read` | 阅读引导 |
+| 6 | `/ah-think` | 思维模型工具箱 |
+| 7 | `/ah-project` | 新建项目 |
+| 8 | `/ah-archive` | 归档项目 |
+| 9 | `/ah-review` | 每日回顾 |
+| 10 | `/ah-week` | 每周回顾 |
+| 11 | `/ah-month` | 每月复盘 |
+| 12 | `/ah-year` | 年度回顾 |
+| 13 | `/ah-init` | 初始化/更新索引 |
+| 14 | `/ah-init` | 初始化知识库 |
+| 15 | `/ah-legacy` | 处理旧笔记 |
+
+---
+
+## 💡 智能推荐
+
+```
+早上 (6:00-10:00) → ah-note
+傍晚 (17:00-20:00) → ah-review
+周日 → ah-week
+月底 → ah-month
+年底 → ah-year
+```
+
+---
+
+## 📋 执行步骤
+
+1. **读取全局状态** — `Read Meta/.ai-memory/STATUS.md`
+2. **生成待处理提示** — 根据全局状态生成待处理事项
+3. **识别意图** — 匹配对应技能
+4. **加载技能** — `Read skills/ah-xxx/SKILL.md`
+5. **执行任务** — 按技能指引操作
+6. **完成后** — 询问是否继续
+
+---
+
+## 🏷️ 元信息
+
+```yaml
+name: ah
+version: 6.0.0
+description: 阿浩知识库统一入口（含记忆系统）
+author: 阿浩learn
+dependencies:
+  - ah-memory    # 记忆系统（核心）
+  - ah-note      # 创建日记
+  - ah-capture   # 快速记录
+- ah-inbox     # 整理残留记录
+  - ah-card      # 永久笔记
+  - ah-read      # 阅读引导
+  - ah-think     # 思维模型工具箱
+  - ah-project   # 新建项目
+  - ah-archive   # 归档项目
+  - ah-review    # 每日回顾
+  - ah-week      # 每周回顾
+  - ah-month     # 每月复盘
+  - ah-year      # 年度回顾
+  - ah-init      # 知识库初始化
+  - ah-legacy    # 旧笔记处理
+```

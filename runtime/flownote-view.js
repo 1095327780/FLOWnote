@@ -173,6 +173,7 @@ class FLOWnoteAssistantView extends ItemView {
     if (this.elements.sendBtn) this.elements.sendBtn.disabled = isBusy;
     if (this.elements.cancelBtn) this.elements.cancelBtn.disabled = !isBusy;
     if (this.elements.attachFileBtn) this.elements.attachFileBtn.disabled = isBusy;
+    if (this.elements.modelSelect) this.elements.modelSelect.disabled = isBusy;
     if (this.elements.input) this.elements.input.disabled = isBusy;
     if (isBusy && typeof this.closeLinkedContextFilePicker === "function") {
       this.closeLinkedContextFilePicker();

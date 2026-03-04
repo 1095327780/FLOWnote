@@ -8,8 +8,10 @@ const {
   normalizeLinkedContextPath,
   displayNameFromPath,
   isLinkableContextFile,
+  isLinkableContextFolder,
   createLinkableContextEntry,
 } = require("./shared-utils");
+const { linkedContextDropMethods } = require("./linked-context-drop-methods");
 
 function getLinkedContextFilePaths() {
   if (!Array.isArray(this.linkedContextFiles)) this.linkedContextFiles = [];
@@ -24,7 +26,6 @@ function getLinkedContextFilePaths() {
   this.linkedContextFiles = normalized;
   return normalized;
 }
-
 function listLinkableVaultFiles() {
   const vault = this.app && this.app.vault;
   if (!vault || typeof vault.getFiles !== "function") return [];
@@ -36,16 +37,21 @@ function listLinkableVaultFiles() {
   entries.sort((a, b) => String(a.path || "").localeCompare(String(b.path || ""), undefined, { sensitivity: "base" }));
   return entries;
 }
-
+function isLinkedContextFolderPath(pathValue) {
+  const normalizedPath = normalizeLinkedContextPath(pathValue);
+  if (!normalizedPath) return false;
+  const vault = this.app && this.app.vault;
+  if (!vault || typeof vault.getAbstractFileByPath !== "function") return false;
+  const target = vault.getAbstractFileByPath(normalizedPath);
+  return isLinkableContextFolder(target);
+}
 function refreshLinkedContextIndicators() {
   const contextRow = this.elements && this.elements.contextRow;
   const fileIndicator = this.elements && this.elements.fileIndicator;
   const selectionIndicator = this.elements && this.elements.selectionIndicator;
   if (!contextRow || !fileIndicator || !selectionIndicator) return;
-
   const linkedPaths = this.getLinkedContextFilePaths();
   fileIndicator.empty();
-
   if (!linkedPaths.length) {
     contextRow.toggleClass("has-content", false);
     fileIndicator.style.display = "none";
@@ -53,14 +59,15 @@ function refreshLinkedContextIndicators() {
     selectionIndicator.setAttr("title", "");
     return;
   }
-
   linkedPaths.forEach((pathValue) => {
+    const isFolder = isLinkedContextFolderPath.call(this, pathValue);
     const chip = fileIndicator.createDiv({
       cls: "oc-context-file-chip",
       attr: { title: pathValue },
     });
+    if (isFolder) chip.addClass("is-folder");
     const iconEl = chip.createSpan({ cls: "oc-context-file-chip-icon" });
-    setIcon(iconEl, "file-text");
+    setIcon(iconEl, isFolder ? "folder" : "file-text");
     chip.createSpan({
       cls: "oc-context-file-chip-name",
       text: displayNameFromPath(pathValue),
@@ -70,22 +77,20 @@ function refreshLinkedContextIndicators() {
       text: "×",
     });
     removeBtn.setAttr("type", "button");
-    removeBtn.setAttr("aria-label", tr(this, "view.context.removeFile", "Remove linked file"));
-    removeBtn.setAttr("title", tr(this, "view.context.removeFile", "Remove linked file"));
+    removeBtn.setAttr("aria-label", tr(this, "view.context.removeFile", "Remove linked context"));
+    removeBtn.setAttr("title", tr(this, "view.context.removeFile", "Remove linked context"));
     removeBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.removeLinkedContextFile(pathValue);
     });
   });
-
   contextRow.toggleClass("has-content", true);
   fileIndicator.style.display = "flex";
-  const counterText = tr(this, "view.context.fileCount", "{count} linked file(s)", { count: linkedPaths.length });
+  const counterText = tr(this, "view.context.fileCount", "{count} linked context item(s)", { count: linkedPaths.length });
   selectionIndicator.textContent = counterText;
   selectionIndicator.setAttr("title", counterText);
 }
-
 function toggleLinkedContextFile(pathOrFile) {
   const normalizedPath = normalizeLinkedContextPath(pathOrFile && pathOrFile.path ? pathOrFile.path : pathOrFile);
   if (!normalizedPath) return;
@@ -98,7 +103,7 @@ function toggleLinkedContextFile(pathOrFile) {
     return;
   }
   if (linkedPaths.length >= LINKED_CONTEXT_MAX_FILES) {
-    new Notice(tr(this, "view.context.maxFiles", "You can link up to {count} files at once.", {
+    new Notice(tr(this, "view.context.maxFiles", "You can link up to {count} context items at once.", {
       count: LINKED_CONTEXT_MAX_FILES,
     }));
     return;
@@ -107,7 +112,6 @@ function toggleLinkedContextFile(pathOrFile) {
   this.linkedContextFiles = linkedPaths;
   this.refreshLinkedContextIndicators();
 }
-
 function removeLinkedContextFile(pathValue) {
   const normalizedPath = normalizeLinkedContextPath(pathValue);
   if (!normalizedPath) return;
@@ -115,7 +119,6 @@ function removeLinkedContextFile(pathValue) {
   this.linkedContextFiles = linkedPaths;
   this.refreshLinkedContextIndicators();
 }
-
 function clearLinkedContextFiles(options = {}) {
   const linkedPaths = this.getLinkedContextFilePaths();
   if (!linkedPaths.length) {
@@ -130,7 +133,6 @@ function clearLinkedContextFiles(options = {}) {
     this.closeLinkedContextFilePicker();
   }
 }
-
 function ensureLinkedContextPickerState() {
   if (!this.linkedContextFilePicker || typeof this.linkedContextFilePicker !== "object") {
     this.linkedContextFilePicker = {
@@ -150,22 +152,356 @@ function ensureLinkedContextPickerState() {
   }
   return this.linkedContextFilePicker;
 }
-
+function ensureSlashCommandPickerState() {
+  if (!this.slashCommandPicker || typeof this.slashCommandPicker !== "object") {
+    this.slashCommandPicker = {
+      visible: false,
+      mode: "mention",
+      mentionStart: -1,
+      query: "",
+      selectedIndex: 0,
+      entries: [],
+      filtered: [],
+      lastLoadAt: 0,
+      rootEl: null,
+      listEl: null,
+    };
+  }
+  return this.slashCommandPicker;
+}
+function listSlashCommandEntries() {
+  const entries = [];
+  const seen = new Set();
+  const pushEntry = (raw) => {
+    if (!raw || typeof raw !== "object") return;
+    const command = String(raw.command || "").trim();
+    if (!command || !command.startsWith("/")) return;
+    const normalized = command.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    const name = String(raw.name || "").trim();
+    const description = String(raw.description || "").trim();
+    const insert = String(raw.insert || `${command} `);
+    entries.push({
+      type: String(raw.type || "command"),
+      command,
+      name,
+      description,
+      insert,
+      order: Number(raw.order || 0),
+      search: `${command.slice(1)} ${name} ${description}`.toLowerCase(),
+    });
+  };
+  pushEntry({
+    type: "builtin",
+    command: "/models",
+    name: tr(this, "view.model.commandName", "Model"),
+    description: tr(this, "view.model.commandDescription", "Open model picker or switch model with /models <id>."),
+    insert: "/models ",
+    order: 0,
+  });
+  const skillService = this.plugin && this.plugin.skillService;
+  const skills = skillService && typeof skillService.getSkills === "function"
+    ? skillService.getSkills()
+    : [];
+  skills
+    .slice()
+    .sort((a, b) => String(a && a.id ? a.id : "").localeCompare(String(b && b.id ? b.id : "")))
+    .forEach((skill) => {
+      const id = String(skill && skill.id ? skill.id : "").trim();
+      if (!id) return;
+      const command = `/${id}`;
+      const name = String(skill && skill.name ? skill.name : id).trim() || id;
+      const description = typeof this.getSkillPrimaryDescription === "function"
+        ? String(this.getSkillPrimaryDescription(skill) || "")
+        : "";
+      pushEntry({
+        type: "skill",
+        command,
+        name,
+        description,
+        insert: `${command} `,
+        order: 10,
+      });
+    });
+  return entries;
+}
+function detectSlashCommandQuery() {
+  const inputEl = this.elements && this.elements.input;
+  if (!inputEl) return null;
+  const text = String(inputEl.value || "");
+  const cursor = Number(inputEl.selectionStart || 0);
+  const beforeCursor = text.slice(0, cursor);
+  const match = beforeCursor.match(/^\s*\/([^\s]*)$/);
+  if (!match) return null;
+  const slashIndex = beforeCursor.lastIndexOf("/");
+  if (slashIndex < 0) return null;
+  return {
+    start: slashIndex,
+    cursor,
+    query: String(match[1] || ""),
+  };
+}
+function closeSlashCommandPicker(options = {}) {
+  const picker = ensureSlashCommandPickerState.call(this);
+  picker.visible = false;
+  picker.mode = "mention";
+  picker.mentionStart = -1;
+  picker.query = "";
+  picker.selectedIndex = 0;
+  picker.filtered = [];
+  if (picker.rootEl && picker.rootEl.isConnected) {
+    picker.rootEl.remove();
+  }
+  picker.rootEl = null;
+  picker.listEl = null;
+  if (options && options.focusInput && this.elements && this.elements.input) {
+    this.elements.input.focus();
+  }
+}
+function filterSlashCommandPickerEntries(picker) {
+  const query = String(picker.query || "").trim().toLowerCase();
+  const base = Array.isArray(picker.entries) ? picker.entries.slice() : [];
+  const matchEntry = (entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    if (!query) return true;
+    return String(entry.search || "").includes(query);
+  };
+  const scoreEntry = (entry) => {
+    const commandText = String(entry.command || "").replace(/^\//, "").toLowerCase();
+    const nameText = String(entry.name || "").toLowerCase();
+    const startsCommand = query ? commandText.startsWith(query) : false;
+    const startsName = query ? nameText.startsWith(query) : false;
+    return {
+      startsCommand,
+      startsName,
+      order: Number(entry.order || 0),
+      command: commandText,
+      name: nameText,
+    };
+  };
+  const filtered = base
+    .filter((entry) => matchEntry(entry))
+    .sort((a, b) => {
+      const aScore = scoreEntry(a);
+      const bScore = scoreEntry(b);
+      if (aScore.startsCommand !== bScore.startsCommand) return aScore.startsCommand ? -1 : 1;
+      if (aScore.startsName !== bScore.startsName) return aScore.startsName ? -1 : 1;
+      if (aScore.order !== bScore.order) return aScore.order - bScore.order;
+      if (aScore.command !== bScore.command) return aScore.command.localeCompare(bScore.command);
+      return aScore.name.localeCompare(bScore.name);
+    })
+    .slice(0, LINKED_CONTEXT_PICKER_MAX_ITEMS);
+  picker.filtered = filtered;
+  if (!filtered.length) {
+    picker.selectedIndex = 0;
+    return;
+  }
+  const maxIndex = filtered.length - 1;
+  picker.selectedIndex = Math.max(0, Math.min(maxIndex, Number(picker.selectedIndex || 0)));
+}
+function moveSlashCommandPickerSelection(delta) {
+  const picker = ensureSlashCommandPickerState.call(this);
+  if (!picker.visible || !Array.isArray(picker.filtered) || !picker.filtered.length) return;
+  const maxIndex = picker.filtered.length - 1;
+  picker.selectedIndex = Math.max(0, Math.min(maxIndex, Number(picker.selectedIndex || 0) + Number(delta || 0)));
+  renderSlashCommandPickerList.call(this);
+}
+function selectSlashCommandPickerEntry(index, options = {}) {
+  const picker = ensureSlashCommandPickerState.call(this);
+  const item = Array.isArray(picker.filtered) ? picker.filtered[index] : null;
+  if (!item || !item.command) return;
+  const fromMention = options && Object.prototype.hasOwnProperty.call(options, "fromMention")
+    ? Boolean(options.fromMention)
+    : true;
+  if (fromMention && this.elements && this.elements.input) {
+    const inputEl = this.elements.input;
+    const text = String(inputEl.value || "");
+    let start = Number(picker.mentionStart || -1);
+    let end = Number(inputEl.selectionStart || 0);
+    if (start < 0 || end < start || text.charAt(start) !== "/") {
+      const mention = detectSlashCommandQuery.call(this);
+      if (mention) {
+        start = mention.start;
+        end = mention.cursor;
+      }
+    }
+    if (start >= 0 && end >= start) {
+      const before = text.slice(0, start);
+      const after = text.slice(end).replace(/^\s+/, "");
+      const insertText = String(item.insert || `${item.command} `);
+      inputEl.value = `${before}${insertText}${after}`;
+      const nextCursor = before.length + insertText.length;
+      inputEl.selectionStart = inputEl.selectionEnd = nextCursor;
+    }
+  }
+  const closeAfterSelect = options && Object.prototype.hasOwnProperty.call(options, "close")
+    ? Boolean(options.close)
+    : true;
+  if (closeAfterSelect) {
+    closeSlashCommandPicker.call(this, { focusInput: true });
+  } else {
+    renderSlashCommandPickerList.call(this);
+  }
+}
+function renderSlashCommandPickerList() {
+  const picker = ensureSlashCommandPickerState.call(this);
+  if (!picker.visible || !picker.listEl || !picker.rootEl) return;
+  filterSlashCommandPickerEntries.call(this, picker);
+  picker.listEl.empty();
+  if (!picker.filtered.length) {
+    picker.listEl.createDiv({
+      cls: "oc-context-file-picker-empty",
+      text: tr(this, "view.command.picker.empty", "No matching commands."),
+    });
+    return;
+  }
+  picker.filtered.forEach((entry, index) => {
+    const item = picker.listEl.createDiv({
+      cls: "oc-context-file-picker-item oc-slash-command-item",
+      attr: { title: [entry.command, entry.name, entry.description].filter(Boolean).join(" - ") },
+    });
+    if (index === picker.selectedIndex) item.addClass("is-selected");
+    const textWrap = item.createDiv({ cls: "oc-context-file-picker-item-text" });
+    textWrap.createDiv({ cls: "oc-slash-command-item-command", text: entry.command });
+    const meta = textWrap.createDiv({ cls: "oc-slash-command-item-meta" });
+    if (entry.name) {
+      meta.createSpan({ cls: "oc-slash-command-item-name", text: entry.name });
+    }
+    if (entry.description) {
+      meta.createSpan({ cls: "oc-slash-command-item-desc", text: entry.description });
+    }
+    item.addEventListener("mouseenter", () => {
+      if (picker.selectedIndex === index) return;
+      picker.selectedIndex = index;
+      const previousSelected = picker.listEl ? picker.listEl.querySelector(".oc-slash-command-item.is-selected") : null;
+      if (previousSelected && previousSelected !== item) {
+        previousSelected.classList.remove("is-selected");
+      }
+      item.classList.add("is-selected");
+    });
+    item.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectSlashCommandPickerEntry.call(this, index, { close: true, fromMention: true });
+    });
+  });
+}
+function renderSlashCommandPicker() {
+  const picker = ensureSlashCommandPickerState.call(this);
+  if (!picker.visible) {
+    closeSlashCommandPicker.call(this);
+    return;
+  }
+  const inputWrapper = this.elements && this.elements.inputWrapper;
+  if (!inputWrapper) return;
+  if (!picker.rootEl || !picker.rootEl.isConnected) {
+    picker.rootEl = inputWrapper.createDiv({ cls: "oc-context-file-picker oc-slash-command-picker is-mention-mode" });
+    picker.rootEl.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+    });
+    picker.rootEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    picker.listEl = picker.rootEl.createDiv({ cls: "oc-context-file-picker-list" });
+  }
+  renderSlashCommandPickerList.call(this);
+}
+function syncSlashCommandPickerFromInputMention() {
+  const picker = ensureSlashCommandPickerState.call(this);
+  const mention = detectSlashCommandQuery.call(this);
+  if (!mention) {
+    if (picker.visible && picker.mode === "mention") {
+      closeSlashCommandPicker.call(this);
+    }
+    return;
+  }
+  const linkedPicker = this.ensureLinkedContextPickerState();
+  if (linkedPicker.visible && linkedPicker.mode === "mention") {
+    this.closeLinkedContextFilePicker({ preserveSlash: true });
+  }
+  const now = Date.now();
+  const shouldReloadEntries = !Array.isArray(picker.entries)
+    || !picker.entries.length
+    || !picker.visible
+    || picker.mode !== "mention"
+    || (now - Number(picker.lastLoadAt || 0)) > 5000;
+  if (shouldReloadEntries) {
+    picker.entries = listSlashCommandEntries.call(this);
+    picker.lastLoadAt = now;
+  }
+  if (!picker.entries.length) {
+    if (picker.visible) {
+      closeSlashCommandPicker.call(this);
+    }
+    return;
+  }
+  const isDifferentQuery = picker.query !== mention.query;
+  picker.mode = "mention";
+  picker.mentionStart = mention.start;
+  picker.query = mention.query;
+  picker.visible = true;
+  if (isDifferentQuery || !picker.filtered.length) {
+    picker.selectedIndex = 0;
+  }
+  this.ensureLinkedContextPickerDocumentBinding();
+  renderSlashCommandPicker.call(this);
+}
+function handleSlashCommandInputKeydown(event) {
+  const picker = ensureSlashCommandPickerState.call(this);
+  if (!picker.visible || picker.mode !== "mention") return false;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveSlashCommandPickerSelection.call(this, 1);
+    return true;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveSlashCommandPickerSelection.call(this, -1);
+    return true;
+  }
+  if ((event.key === "Enter" || event.key === "Tab") && !event.isComposing) {
+    event.preventDefault();
+    if (Array.isArray(picker.filtered) && picker.filtered.length) {
+      selectSlashCommandPickerEntry.call(this, picker.selectedIndex, { close: true, fromMention: true });
+      return true;
+    }
+    closeSlashCommandPicker.call(this, { focusInput: true });
+    return true;
+  }
+  if (event.key === "Escape" && !event.isComposing) {
+    event.preventDefault();
+    closeSlashCommandPicker.call(this, { focusInput: true });
+    return true;
+  }
+  return false;
+}
 function ensureLinkedContextPickerDocumentBinding() {
   if (this.linkedContextFilePickerDocumentBound) return;
   this.linkedContextFilePickerDocumentBound = true;
-
   this.registerDomEvent(document, "click", (event) => {
-    const picker = this.ensureLinkedContextPickerState();
-    if (!picker.visible) return;
     const target = event && event.target ? event.target : null;
-    if (!(target instanceof Node)) return;
-    if (picker.rootEl && picker.rootEl.contains(target)) return;
-    if (this.elements && this.elements.attachFileBtn && this.elements.attachFileBtn.contains(target)) return;
-    this.closeLinkedContextFilePicker();
+    if (typeof Node !== "undefined" && !(target instanceof Node)) return;
+    const picker = this.ensureLinkedContextPickerState();
+    if (picker.visible) {
+      if (!(picker.rootEl && picker.rootEl.contains(target))
+        && !(this.elements && this.elements.attachFileBtn && this.elements.attachFileBtn.contains(target))) {
+        this.closeLinkedContextFilePicker({ preserveSlash: true });
+      }
+    }
+    const slashPicker = ensureSlashCommandPickerState.call(this);
+    if (slashPicker.visible) {
+      const inputEl = this.elements && this.elements.input;
+      const insideSlash = Boolean(slashPicker.rootEl && slashPicker.rootEl.contains(target))
+        || Boolean(inputEl && target === inputEl);
+      if (!insideSlash) {
+        closeSlashCommandPicker.call(this);
+      }
+    }
   });
 }
-
 function closeLinkedContextFilePicker(options = {}) {
   const picker = this.ensureLinkedContextPickerState();
   picker.visible = false;
@@ -181,36 +517,33 @@ function closeLinkedContextFilePicker(options = {}) {
   picker.searchEl = null;
   picker.listEl = null;
   picker.emptyEl = null;
-
+  if (!(options && options.preserveSlash)) {
+    closeSlashCommandPicker.call(this);
+  }
   if (options && options.focusInput && this.elements && this.elements.input) {
     this.elements.input.focus();
   }
 }
-
 function detectLinkedContextMentionQuery() {
   const inputEl = this.elements && this.elements.input;
   if (!inputEl) return null;
-
   const text = String(inputEl.value || "");
   const cursor = Number(inputEl.selectionStart || 0);
   const beforeCursor = text.slice(0, cursor);
   const atIndex = beforeCursor.lastIndexOf("@");
   if (atIndex < 0) return null;
-
   const charBefore = atIndex > 0 ? beforeCursor.charAt(atIndex - 1) : " ";
   if (atIndex > 0 && !/\s/.test(charBefore)) return null;
-
   const token = beforeCursor.slice(atIndex + 1);
   if (/\s/.test(token)) return null;
-
   return {
     start: atIndex,
     cursor,
     query: token,
   };
 }
-
 function syncLinkedContextPickerFromInputMention() {
+  syncSlashCommandPickerFromInputMention.call(this);
   const picker = this.ensureLinkedContextPickerState();
   const mention = this.detectLinkedContextMentionQuery();
   if (!mention) {
@@ -219,14 +552,12 @@ function syncLinkedContextPickerFromInputMention() {
     }
     return;
   }
-
   const now = Date.now();
   const shouldReloadEntries = !Array.isArray(picker.entries)
     || !picker.entries.length
     || !picker.visible
     || picker.mode !== "mention"
     || (now - Number(picker.lastLoadAt || 0)) > 5000;
-
   if (shouldReloadEntries) {
     picker.entries = this.listLinkableVaultFiles();
     picker.lastLoadAt = now;
@@ -237,7 +568,7 @@ function syncLinkedContextPickerFromInputMention() {
     }
     return;
   }
-
+  closeSlashCommandPicker.call(this);
   const isDifferentQuery = picker.query !== mention.query;
   picker.mode = "mention";
   picker.mentionStart = mention.start;
@@ -246,15 +577,13 @@ function syncLinkedContextPickerFromInputMention() {
   if (isDifferentQuery || !picker.filtered.length) {
     picker.selectedIndex = 0;
   }
-
   this.ensureLinkedContextPickerDocumentBinding();
   this.renderLinkedContextFilePicker();
 }
-
 function handleLinkedContextInputKeydown(event) {
+  if (handleSlashCommandInputKeydown.call(this, event)) return true;
   const picker = this.ensureLinkedContextPickerState();
   if (!picker.visible || picker.mode !== "mention") return false;
-
   if (event.key === "ArrowDown") {
     event.preventDefault();
     this.moveLinkedContextPickerSelection(1);
@@ -281,12 +610,10 @@ function handleLinkedContextInputKeydown(event) {
   }
   return false;
 }
-
 function filterLinkedContextPickerEntries(picker) {
   const query = String(picker.query || "").trim().toLowerCase();
   const linkedSet = new Set(this.getLinkedContextFilePaths());
   const base = Array.isArray(picker.entries) ? picker.entries.slice() : [];
-
   const filtered = base
     .filter((entry) => {
       if (!entry || typeof entry !== "object") return false;
@@ -300,19 +627,16 @@ function filterLinkedContextPickerEntries(picker) {
       const bStarts = query ? bName.startsWith(query) : false;
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
-
       const aLinked = linkedSet.has(a.path);
       const bLinked = linkedSet.has(b.path);
       if (aLinked && !bLinked) return -1;
       if (!aLinked && bLinked) return 1;
-
       const aMtime = Number(a.mtime || 0);
       const bMtime = Number(b.mtime || 0);
       if (aMtime !== bMtime) return bMtime - aMtime;
       return String(a.path || "").localeCompare(String(b.path || ""), undefined, { sensitivity: "base" });
     })
     .slice(0, LINKED_CONTEXT_PICKER_MAX_ITEMS);
-
   picker.filtered = filtered;
   if (!filtered.length) {
     picker.selectedIndex = 0;
@@ -321,7 +645,6 @@ function filterLinkedContextPickerEntries(picker) {
   const maxIndex = filtered.length - 1;
   picker.selectedIndex = Math.max(0, Math.min(maxIndex, Number(picker.selectedIndex || 0)));
 }
-
 function moveLinkedContextPickerSelection(delta) {
   const picker = this.ensureLinkedContextPickerState();
   if (!picker.visible || !Array.isArray(picker.filtered) || !picker.filtered.length) return;
@@ -329,19 +652,16 @@ function moveLinkedContextPickerSelection(delta) {
   picker.selectedIndex = Math.max(0, Math.min(maxIndex, Number(picker.selectedIndex || 0) + Number(delta || 0)));
   this.renderLinkedContextFilePickerList();
 }
-
 function selectLinkedContextPickerEntry(index, options = {}) {
   const picker = this.ensureLinkedContextPickerState();
   const item = Array.isArray(picker.filtered) ? picker.filtered[index] : null;
   if (!item || !item.path) return;
-
   const fromMention = Boolean(options && options.fromMention);
   if (fromMention && this.elements && this.elements.input) {
     const inputEl = this.elements.input;
     const text = String(inputEl.value || "");
     let start = Number(picker.mentionStart || -1);
     let end = Number(inputEl.selectionStart || 0);
-
     if (start < 0 || end < start || text.charAt(start) !== "@") {
       const mention = this.detectLinkedContextMentionQuery();
       if (mention) {
@@ -349,7 +669,6 @@ function selectLinkedContextPickerEntry(index, options = {}) {
         end = mention.cursor;
       }
     }
-
     if (start >= 0 && end >= start) {
       const before = text.slice(0, start);
       const after = text.slice(end).replace(/^\s+/, "");
@@ -360,7 +679,6 @@ function selectLinkedContextPickerEntry(index, options = {}) {
       inputEl.selectionStart = inputEl.selectionEnd = nextCursor;
     }
   }
-
   this.toggleLinkedContextFile(item.path);
   const closeAfterSelect = options && Object.prototype.hasOwnProperty.call(options, "close")
     ? Boolean(options.close)
@@ -371,14 +689,11 @@ function selectLinkedContextPickerEntry(index, options = {}) {
     this.renderLinkedContextFilePickerList();
   }
 }
-
 function renderLinkedContextFilePickerList() {
   const picker = this.ensureLinkedContextPickerState();
   if (!picker.visible || !picker.listEl || !picker.rootEl) return;
-
   this.filterLinkedContextPickerEntries(picker);
   picker.listEl.empty();
-
   if (!picker.filtered.length) {
     picker.listEl.createDiv({
       cls: "oc-context-file-picker-empty",
@@ -386,7 +701,6 @@ function renderLinkedContextFilePickerList() {
     });
     return;
   }
-
   const linkedSet = new Set(this.getLinkedContextFilePaths());
   picker.filtered.forEach((entry, index) => {
     const item = picker.listEl.createDiv({
@@ -395,15 +709,12 @@ function renderLinkedContextFilePickerList() {
     });
     if (index === picker.selectedIndex) item.addClass("is-selected");
     if (linkedSet.has(entry.path)) item.addClass("is-linked");
-
     const textWrap = item.createDiv({ cls: "oc-context-file-picker-item-text" });
     textWrap.createDiv({ cls: "oc-context-file-picker-item-name", text: entry.name || displayNameFromPath(entry.path) || entry.path });
     textWrap.createDiv({ cls: "oc-context-file-picker-item-path", text: entry.path });
-
     if (linkedSet.has(entry.path)) {
       item.createDiv({ cls: "oc-context-file-picker-item-meta", text: tr(this, "view.context.picker.linked", "Linked") });
     }
-
     item.addEventListener("mouseenter", () => {
       if (picker.selectedIndex === index) return;
       picker.selectedIndex = index;
@@ -422,17 +733,14 @@ function renderLinkedContextFilePickerList() {
     });
   });
 }
-
 function renderLinkedContextFilePicker() {
   const picker = this.ensureLinkedContextPickerState();
   if (!picker.visible) {
     this.closeLinkedContextFilePicker();
     return;
   }
-
   const inputWrapper = this.elements && this.elements.inputWrapper;
   if (!inputWrapper) return;
-
   if (!picker.rootEl || !picker.rootEl.isConnected) {
     picker.rootEl = inputWrapper.createDiv({ cls: "oc-context-file-picker" });
     picker.rootEl.addEventListener("mousedown", (event) => {
@@ -441,7 +749,6 @@ function renderLinkedContextFilePicker() {
     picker.rootEl.addEventListener("click", (event) => {
       event.stopPropagation();
     });
-
     picker.searchEl = picker.rootEl.createEl("input", {
       cls: "oc-context-file-picker-search",
       attr: {
@@ -449,13 +756,11 @@ function renderLinkedContextFilePicker() {
         placeholder: tr(this, "view.context.picker.search", "Search Obsidian files..."),
       },
     });
-
     picker.searchEl.addEventListener("input", () => {
       picker.query = String(picker.searchEl.value || "");
       picker.selectedIndex = 0;
       this.renderLinkedContextFilePickerList();
     });
-
     picker.searchEl.addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -477,23 +782,20 @@ function renderLinkedContextFilePicker() {
         this.closeLinkedContextFilePicker({ focusInput: true });
       }
     });
-
     picker.listEl = picker.rootEl.createDiv({ cls: "oc-context-file-picker-list" });
   }
-
   const mentionMode = picker.mode === "mention";
   if (picker.rootEl) {
     picker.rootEl.toggleClass("is-mention-mode", mentionMode);
   }
-
   if (picker.searchEl) {
     picker.searchEl.value = String(picker.query || "");
     picker.searchEl.style.display = mentionMode ? "none" : "";
   }
   this.renderLinkedContextFilePickerList();
 }
-
 function openLinkedContextFilePicker() {
+  closeSlashCommandPicker.call(this);
   const picker = this.ensureLinkedContextPickerState();
   if (picker.visible) {
     if (picker.mode === "mention") {
@@ -511,13 +813,11 @@ function openLinkedContextFilePicker() {
     this.closeLinkedContextFilePicker({ focusInput: true });
     return;
   }
-
   const entries = this.listLinkableVaultFiles();
   if (!entries.length) {
     new Notice(tr(this, "view.context.noFiles", "No linkable vault files found."));
     return;
   }
-
   picker.entries = entries;
   picker.lastLoadAt = Date.now();
   picker.mode = "button";
@@ -529,32 +829,40 @@ function openLinkedContextFilePicker() {
   this.renderLinkedContextFilePicker();
   if (picker.searchEl) picker.searchEl.focus();
 }
-
 async function buildLinkedContextPromptBlock(options = {}) {
   const candidatePaths = options && Array.isArray(options.linkedPaths) ? options.linkedPaths : this.getLinkedContextFilePaths();
   const linkedPaths = candidatePaths
     .map((pathValue) => normalizeLinkedContextPath(pathValue))
     .filter(Boolean);
   if (!linkedPaths.length) return "";
-
   const vault = this.app && this.app.vault;
   if (!vault || typeof vault.getAbstractFileByPath !== "function") return "";
-
   const sections = [
-    "Additional context from user-linked Obsidian files (@):",
-    "Use these files as reference context when answering the request.",
+    "Additional context from user-linked Obsidian targets (@):",
+    "Use these files/folders as reference context when answering the request.",
   ];
   let totalChars = 0;
-  let included = 0;
+  let includedFiles = 0;
+  let includedFolders = 0;
   let skipped = 0;
-
   for (const pathValue of linkedPaths) {
     const target = vault.getAbstractFileByPath(pathValue);
     if (!target || typeof target.path !== "string") {
       skipped += 1;
       continue;
     }
-
+    if (isLinkableContextFolder(target)) {
+      includedFolders += 1;
+      sections.push("");
+      sections.push(`<<<FLOWNOTE_FOLDER path="${target.path}">>>`);
+      sections.push("[Folder path only; file contents are not attached.]");
+      sections.push("<<<END_FLOWNOTE_FOLDER>>>");
+      continue;
+    }
+    if (!isLinkableContextFile(target)) {
+      skipped += 1;
+      continue;
+    }
     let rawText = "";
     try {
       rawText = typeof vault.cachedRead === "function"
@@ -564,20 +872,17 @@ async function buildLinkedContextPromptBlock(options = {}) {
       skipped += 1;
       continue;
     }
-
     const content = String(rawText || "");
     const remain = LINKED_CONTEXT_MAX_TOTAL_CHARS - totalChars;
     if (remain <= 0) {
       skipped += 1;
       continue;
     }
-
     const allowed = Math.min(remain, LINKED_CONTEXT_MAX_CHARS_PER_FILE);
     const snippet = content.slice(0, allowed);
     const truncated = content.length > snippet.length;
     totalChars += snippet.length;
-    included += 1;
-
+    includedFiles += 1;
     sections.push(``);
     sections.push(`<<<FLOWNOTE_FILE path="${target.path}">>>`);
     sections.push(snippet);
@@ -586,16 +891,13 @@ async function buildLinkedContextPromptBlock(options = {}) {
     }
     sections.push("<<<END_FLOWNOTE_FILE>>>");
   }
-
-  if (!included) return "";
+  if (!includedFiles && !includedFolders) return "";
   if (skipped > 0) {
     sections.push(``);
-    sections.push(`[Note] ${skipped} linked file(s) were skipped due to read errors or size limits.`);
+    sections.push(`[Note] ${skipped} linked target(s) were skipped due to read errors or size limits.`);
   }
-
   return sections.join("\n");
 }
-
 async function composePromptWithLinkedFiles(basePrompt, options = {}) {
   const prompt = String(basePrompt || "");
   if (!prompt) return prompt;
@@ -604,7 +906,6 @@ async function composePromptWithLinkedFiles(basePrompt, options = {}) {
     .map((pathValue) => normalizeLinkedContextPath(pathValue))
     .filter(Boolean);
   if (!linkedPaths.length) return prompt;
-
   try {
     const contextBlock = await this.buildLinkedContextPromptBlock({ linkedPaths });
     if (!contextBlock) return prompt;
@@ -616,7 +917,6 @@ async function composePromptWithLinkedFiles(basePrompt, options = {}) {
     return prompt;
   }
 }
-
 const linkedContextMethods = {
   getLinkedContextFilePaths,
   listLinkableVaultFiles,
@@ -624,6 +924,7 @@ const linkedContextMethods = {
   toggleLinkedContextFile,
   removeLinkedContextFile,
   clearLinkedContextFiles,
+  ...linkedContextDropMethods,
   ensureLinkedContextPickerState,
   ensureLinkedContextPickerDocumentBinding,
   closeLinkedContextFilePicker,
@@ -639,5 +940,4 @@ const linkedContextMethods = {
   buildLinkedContextPromptBlock,
   composePromptWithLinkedFiles,
 };
-
 module.exports = { linkedContextMethods };

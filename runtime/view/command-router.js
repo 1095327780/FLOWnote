@@ -9,6 +9,18 @@ function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
+function syncInlineModelSelectLabelFromSelect(view) {
+  const modelSelect = view && view.elements && view.elements.modelSelect;
+  const modelSelectText = view && view.elements && view.elements.modelSelectText;
+  if (!modelSelect || !modelSelectText) return;
+  const option = modelSelect.options && modelSelect.selectedIndex >= 0
+    ? modelSelect.options[modelSelect.selectedIndex]
+    : null;
+  const displayText = String((option && option.text) || "").trim() || tr(view, "view.model.placeholder", "Model");
+  modelSelectText.textContent = displayText;
+  modelSelectText.setAttribute("title", displayText);
+}
+
 function getSkillPrimaryDescription(skill) {
   if (!skill) return tr(this, "view.skill.primaryFallback", "Select a skill to see its primary description.");
 
@@ -102,13 +114,16 @@ function parseModelSlashCommand(text) {
 function parseSkillSelectorSlashCommand(text) {
   const input = String(text || "").trim();
   if (!input.startsWith("/")) return null;
+  if (input === "/") return { command: "skills" };
 
   const raw = input.slice(1).trim();
   if (!raw) return null;
 
   const firstSpace = raw.indexOf(" ");
   const cmd = (firstSpace >= 0 ? raw.slice(0, firstSpace) : raw).trim().toLowerCase();
+  const args = (firstSpace >= 0 ? raw.slice(firstSpace + 1) : "").trim();
   if (!["skills", "skill"].includes(cmd)) return null;
+  if (args) return null;
   return { command: "skills" };
 }
 
@@ -123,27 +138,54 @@ function resolveSkillFromPrompt(userText) {
   const cmd = (firstSpace >= 0 ? raw.slice(0, firstSpace) : raw).trim();
   const cmdLower = cmd.toLowerCase();
   if (!cmdLower) return { skill: null, promptText: input };
-  if (["models", "model", "modle", "skills", "skill"].includes(cmdLower)) {
+  if (["models", "model", "modle"].includes(cmdLower)) {
     return { skill: null, promptText: input };
   }
 
   const skills = this.plugin.skillService.getSkills();
-  const skill = skills.find((item) => {
+  const findSkillByToken = (token) => skills.find((item) => {
+    const needle = String(token || "").toLowerCase();
+    if (!needle) return false;
     const id = String(item.id || "").toLowerCase();
     const name = String(item.name || "").toLowerCase();
-    return id === cmdLower || name === cmdLower;
+    return id === needle || name === needle;
   });
+  const buildPromptText = (skill, promptTextRaw) => {
+    const promptText = String(promptTextRaw || "").trim();
+    if (promptText) return promptText;
+    return tr(
+      this,
+      "view.skill.defaultPrompt",
+      "Please handle this task with skill {name}.",
+      { name: skill.name || skill.id },
+    );
+  };
+
+  if (["skills", "skill"].includes(cmdLower)) {
+    const nestedRaw = (firstSpace >= 0 ? raw.slice(firstSpace + 1) : "").trim();
+    if (!nestedRaw) return { skill: null, promptText: input };
+    const nestedSpace = nestedRaw.indexOf(" ");
+    const nestedCmd = (nestedSpace >= 0 ? nestedRaw.slice(0, nestedSpace) : nestedRaw).trim();
+    const nestedPromptRaw = (nestedSpace >= 0 ? nestedRaw.slice(nestedSpace + 1) : "").trim();
+    const nestedSkill = findSkillByToken(nestedCmd);
+    if (!nestedSkill) return { skill: null, promptText: input };
+    return {
+      skill: nestedSkill,
+      promptText: buildPromptText(nestedSkill, nestedPromptRaw),
+      command: `/${nestedSkill.id}`,
+    };
+  }
+
+  const skill = findSkillByToken(cmdLower);
 
   if (!skill) return { skill: null, promptText: input };
 
   const rest = (firstSpace >= 0 ? raw.slice(firstSpace + 1) : "").trim();
-  const promptText = rest || tr(
-    this,
-    "view.skill.defaultPrompt",
-    "Please handle this task with skill {name}.",
-    { name: skill.name || skill.id },
-  );
-  return { skill, promptText };
+  return {
+    skill,
+    promptText: buildPromptText(skill, rest),
+    command: `/${skill.id}`,
+  };
 }
 
 function openSkillSelector() {
@@ -152,20 +194,22 @@ function openSkillSelector() {
     new Notice(tr(this, "view.skill.noneFound", "No available skills found. Check Skills directory settings."));
     return;
   }
-  const select = this.elements.skillSelect;
-  if (!select || select.disabled) {
-    new Notice(tr(this, "view.skill.notReady", "Skill dropdown is not ready yet. Try again shortly."));
+  const input = this.elements && this.elements.input;
+  if (!input || input.disabled) {
+    new Notice(tr(this, "view.skill.notReady", "Input area is not ready yet. Try again shortly."));
     return;
   }
-  select.focus();
-  if (typeof select.showPicker === "function") {
-    try {
-      select.showPicker();
-      return;
-    } catch {
-    }
+
+  const beforeCursor = String(input.value || "").slice(0, Number(input.selectionStart || 0));
+  if (!/^\s*\/[^\s]*$/.test(beforeCursor)) {
+    input.value = "/";
+    input.selectionStart = input.selectionEnd = 1;
   }
-  this.setRuntimeStatus(tr(this, "view.skill.selectHint", "Please choose a skill from the dropdown."), "info");
+  input.focus();
+  if (typeof this.syncLinkedContextPickerFromInputMention === "function") {
+    this.syncLinkedContextPickerFromInputMention();
+  }
+  this.setRuntimeStatus(tr(this, "view.skill.selectHint", "Type / to choose a skill command."), "info");
 }
 
 async function refreshModelList() {
@@ -211,6 +255,7 @@ async function applyModelSelection(modelID, options = {}) {
   if (this.elements.modelSelect) {
     this.elements.modelSelect.value = normalized;
   }
+  syncInlineModelSelectLabelFromSelect(this);
 
   try {
     if (normalized) {
@@ -226,6 +271,7 @@ async function applyModelSelection(modelID, options = {}) {
     this.plugin.settings.defaultModel = previousSetting;
     await this.plugin.saveSettings();
     if (this.elements.modelSelect) this.elements.modelSelect.value = previous;
+    syncInlineModelSelectLabelFromSelect(this);
     throw e;
   }
 }
@@ -239,7 +285,7 @@ async function openModelSelector(sessionId) {
   if (typeof this.updateModelSelectOptions === "function") this.updateModelSelectOptions();
 
   if (!select || select.disabled) {
-    new Notice(tr(this, "view.model.notReady", "Model dropdown is not ready yet. Try again shortly."));
+    new Notice(tr(this, "view.model.notReady", "Model picker is not ready yet. Try again shortly."));
     return;
   }
 
@@ -256,7 +302,7 @@ async function openModelSelector(sessionId) {
     } catch {
     }
   }
-  this.setRuntimeStatus(tr(this, "view.model.selectHint", "Please choose a model from the dropdown."), "info");
+  this.setRuntimeStatus(tr(this, "view.model.selectHint", "Please choose a model from the picker."), "info");
 }
 
 async function handleModelSlashCommand(userText, parsed) {
@@ -269,7 +315,7 @@ async function handleModelSlashCommand(userText, parsed) {
   });
 
   if (!parsed.args) {
-    this.appendAssistantMessage(sessionId, tr(this, "view.model.selectHint", "Please choose a model from the dropdown."), "");
+    this.appendAssistantMessage(sessionId, tr(this, "view.model.selectHint", "Please choose a model from the picker."), "");
     await this.plugin.persistState();
     this.renderMessages();
     this.refreshHistoryMenu();

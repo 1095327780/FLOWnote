@@ -791,12 +791,8 @@ function createRequestSessionMethods(deps = {}) {
 
   getFinalizeTimeoutConfig() {
     const configured = Math.max(15000, Number(this.settings.requestTimeoutMs) || 120000);
-    const isWsl = this.launchContext && this.launchContext.mode === "wsl";
-    const quietTimeoutMs = Math.min(configured, isWsl ? 90000 : 90000);
-    const maxTotalMs = Math.min(
-      Math.max(quietTimeoutMs * 2, 90000),
-      isWsl ? 180000 : 180000,
-    );
+    const quietTimeoutMs = configured;
+    const maxTotalMs = Math.max(quietTimeoutMs * 3, 10 * 60 * 1000);
     return { quietTimeoutMs, maxTotalMs };
   }
 

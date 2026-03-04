@@ -59,7 +59,7 @@ const MOBILE_CAPTURE_DEFAULTS = {
   baseUrl: "",
   model: "",
   dailyNotePath: "01-捕获层/每日笔记",
-  ideaSectionHeader: "### 💡 想法和灵感",
+  ideaSectionHeader: "## 记录",
   enableAiCleanup: true,
   enableUrlSummary: true,
   linkResolver: { ...LINK_RESOLVER_DEFAULTS },
@@ -133,7 +133,7 @@ function defaultDailyNotePathByLocale(locale) {
 
 function defaultIdeaSectionHeaderByLocale(locale) {
   const normalized = normalizeSupportedLocale(locale, DEFAULT_UI_LOCALE);
-  return normalized === "zh-CN" ? "### 💡 想法和灵感" : "### 💡 Ideas";
+  return normalized === "zh-CN" ? "## 记录" : "## Records";
 }
 
 function normalizeMobileSettings(raw) {
@@ -159,6 +159,8 @@ function normalizeMobileSettings(raw) {
   mc.baseUrl = String(mc.baseUrl || "").trim();
   mc.model = String(mc.model || "").trim();
   mc.dailyNotePath = String(mc.dailyNotePath || mcDefaults.dailyNotePath).trim();
+  if (mc.dailyNotePath === "01-捕获层/记录") mc.dailyNotePath = "01-捕获层/每日笔记";
+  if (mc.dailyNotePath === "01-Capture/Records") mc.dailyNotePath = "01-Capture/Daily Notes";
   mc.ideaSectionHeader = String(mc.ideaSectionHeader || mcDefaults.ideaSectionHeader).trim();
   mc.enableAiCleanup = typeof mc.enableAiCleanup === "boolean" ? mc.enableAiCleanup : mcDefaults.enableAiCleanup;
   mc.enableUrlSummary = typeof mc.enableUrlSummary === "boolean" ? mc.enableUrlSummary : mcDefaults.enableUrlSummary;

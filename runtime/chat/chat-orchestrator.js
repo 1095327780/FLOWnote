@@ -328,13 +328,26 @@ async function runSendPrompt(view, userText, options = {}) {
   let shouldRerenderModelPicker = false;
 
   try {
-    let prompt = view.plugin.skillService.buildInjectedPrompt(
-      skillMatch.skill,
-      view.plugin.settings.skillInjectMode,
-      skillMatch.promptText || userText,
-    );
-    if (typeof view.composePromptWithLinkedFiles === "function") {
-      prompt = await view.composePromptWithLinkedFiles(prompt, { linkedPaths: linkedContextFiles });
+    const skillCommand = skillMatch && typeof skillMatch.command === "string"
+      ? String(skillMatch.command).trim()
+      : "";
+    const useNativeSkillCommand = Boolean(skillMatch && skillMatch.skill && skillCommand);
+    let prompt = "";
+    if (useNativeSkillCommand) {
+      let commandArgs = String(skillMatch.promptText || "").trim();
+      if (typeof view.composePromptWithLinkedFiles === "function") {
+        commandArgs = await view.composePromptWithLinkedFiles(commandArgs, { linkedPaths: linkedContextFiles });
+      }
+      prompt = commandArgs ? `${skillCommand} ${commandArgs}` : skillCommand;
+    } else {
+      prompt = view.plugin.skillService.buildInjectedPrompt(
+        skillMatch.skill,
+        view.plugin.settings.skillInjectMode,
+        skillMatch.promptText || userText,
+      );
+      if (typeof view.composePromptWithLinkedFiles === "function") {
+        prompt = await view.composePromptWithLinkedFiles(prompt, { linkedPaths: linkedContextFiles });
+      }
     }
 
     const response = await view.plugin.opencodeClient.sendMessage({

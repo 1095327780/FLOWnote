@@ -56,74 +56,6 @@ function renderMain(main) {
 
   const composer = main.createDiv({ cls: "oc-composer" });
   this.elements.composer = composer;
-  const navRow = composer.createDiv({ cls: "oc-input-nav-row" });
-  const quick = navRow.createDiv({ cls: "oc-quick" });
-
-  const modelPicker = quick.createDiv({ cls: "oc-model-picker" });
-  const modelSelect = modelPicker.createEl("select", { cls: "oc-model-select" });
-  this.elements.modelSelect = modelSelect;
-  this.updateModelSelectOptions();
-  modelSelect.addEventListener("change", async () => {
-    try {
-      await this.applyModelSelection(modelSelect.value);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      modelSelect.value = this.selectedModel || "";
-      new Notice(tr(this, "view.model.switchFailed", "Model switch failed: {message}", { message: msg }));
-    }
-  });
-
-  const skillPicker = quick.createDiv({ cls: "oc-skill-picker" });
-  const skillSelect = skillPicker.createEl("select", { cls: "oc-skill-select" });
-  this.elements.skillSelect = skillSelect;
-  skillSelect.setAttr("title", tr(this, "view.skill.selectTitle", "Select skill"));
-  skillSelect.createEl("option", { value: "", text: tr(this, "view.skill.placeholder", "Skill /skills") });
-
-  const skills = this.plugin.skillService.getSkills();
-  const setSkillSelectTitle = (skill) => {
-    if (!skill) {
-      skillSelect.setAttr("title", tr(this, "view.skill.selectTitle", "Select skill"));
-      return;
-    }
-    const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
-    const mainFeature = this.getSkillPrimaryDescription(skill);
-    const detail = [label, `/${skill.id}`, mainFeature].filter(Boolean).join(" - ");
-    skillSelect.setAttr("title", detail || "选择技能");
-  };
-
-  skills.forEach((skill) => {
-    const label = String(skill.name || skill.id || "").trim() || String(skill.id || "");
-    const mainFeature = this.getSkillPrimaryDescription(skill);
-    const briefFeature = this.getSkillBriefDescription(skill);
-    skillSelect.createEl("option", {
-      value: skill.id,
-      text: briefFeature ? `${label} - ${briefFeature}` : label,
-      attr: { title: [label, `/${skill.id}`, mainFeature].filter(Boolean).join(" - ") },
-    });
-  });
-
-  if (!skills.length) {
-    skillSelect.disabled = true;
-    skillSelect.setAttr("title", tr(this, "view.skill.noneFound", "No available skills found. Check Skills directory."));
-  } else {
-    skillSelect.addEventListener("change", () => {
-      const selectedId = String(skillSelect.value || "");
-      const picked = skills.find((skill) => String(skill.id) === selectedId);
-      if (!picked) {
-        setSkillSelectTitle(null);
-        return;
-      }
-
-      setSkillSelectTitle(picked);
-      if (this.elements.input) {
-        this.elements.input.value = `/${picked.id} `;
-        this.elements.input.focus();
-      }
-      this.setRuntimeStatus(tr(this, "view.skill.commandFilled", "Skill command inserted: /{id}", { id: picked.id }), "info");
-    });
-  }
-
-  navRow.createDiv({ cls: "oc-nav-row-meta", text: tr(this, "view.shortcut.send", "Ctrl/Cmd + Enter to send") });
 
   const inputContainer = composer.createDiv({ cls: "oc-input-container" });
   const inputWrapper = inputContainer.createDiv({ cls: "oc-input-wrapper" });
@@ -144,7 +76,7 @@ function renderMain(main) {
 
   this.elements.input = inputWrapper.createEl("textarea", {
     cls: "oc-input",
-    attr: { placeholder: tr(this, "view.input.placeholder", "Type a message... supports skill injection and model switching") },
+    attr: { placeholder: tr(this, "view.input.placeholder", "Type your message...") },
   });
   this.elements.input.addEventListener("keydown", (ev) => {
     if (typeof this.handleLinkedContextInputKeydown === "function" && this.handleLinkedContextInputKeydown(ev)) {
@@ -165,33 +97,87 @@ function renderMain(main) {
       this.syncLinkedContextPickerFromInputMention();
     }
   });
+  const bindLinkedContextDropEvents = (targetEl) => {
+    if (!targetEl || typeof targetEl.addEventListener !== "function") return;
+    targetEl.addEventListener("dragenter", (event) => {
+      if (typeof this.handleLinkedContextInputDragOver === "function") {
+        this.handleLinkedContextInputDragOver(event);
+      }
+    });
+    targetEl.addEventListener("dragover", (event) => {
+      if (typeof this.handleLinkedContextInputDragOver === "function") {
+        this.handleLinkedContextInputDragOver(event);
+      }
+    });
+    targetEl.addEventListener("dragleave", (event) => {
+      if (typeof this.handleLinkedContextInputDragLeave === "function") {
+        this.handleLinkedContextInputDragLeave(event);
+      }
+    });
+    targetEl.addEventListener("drop", (event) => {
+      if (typeof this.handleLinkedContextInputDrop === "function") {
+        this.handleLinkedContextInputDrop(event);
+      }
+    });
+  };
+  bindLinkedContextDropEvents(inputContainer);
+  bindLinkedContextDropEvents(this.elements.input);
 
   const inputToolbar = inputWrapper.createDiv({ cls: "oc-input-toolbar" });
-  inputToolbar.createDiv({ cls: "oc-input-meta", text: "FLOWnote Compat Runtime" });
+  const inputToolbarLeft = inputToolbar.createDiv({ cls: "oc-input-toolbar-left" });
+  const inputToolbarRight = inputToolbar.createDiv({ cls: "oc-actions oc-actions-right" });
 
-  const actions = inputToolbar.createDiv({ cls: "oc-actions" });
-  this.elements.attachFileBtn = actions.createEl("button", { cls: "mod-muted oc-context-link-btn", text: "@" });
+  this.elements.attachFileBtn = inputToolbarLeft.createEl("button", { cls: "mod-muted oc-context-link-btn" });
   this.elements.attachFileBtn.setAttr("type", "button");
-  this.elements.attachFileBtn.setAttr("aria-label", tr(this, "view.context.attach", "Link Obsidian file context"));
-  this.elements.attachFileBtn.setAttr("title", tr(this, "view.context.attach", "Link Obsidian file context"));
+  this.elements.attachFileBtn.setAttr("aria-label", tr(this, "view.context.attach", "Link Obsidian file context (@)"));
+  this.elements.attachFileBtn.setAttr("title", tr(this, "view.context.attach", "Link Obsidian file context (@)"));
+  try {
+    setIcon(this.elements.attachFileBtn, "plus");
+  } catch {
+    this.elements.attachFileBtn.setText("+");
+  }
   this.elements.attachFileBtn.addEventListener("click", () => this.openLinkedContextFilePicker());
 
-  this.elements.sendBtn = actions.createEl("button", { cls: "mod-cta oc-send-btn", text: tr(this, "view.action.send", "Send") });
-  this.elements.cancelBtn = actions.createEl("button", { cls: "mod-muted oc-cancel-btn", text: tr(this, "view.action.cancel", "Cancel") });
+  const modelSelectWrap = inputToolbarLeft.createDiv({ cls: "oc-model-select-inline-wrap" });
+  const modelSelectText = modelSelectWrap.createSpan({
+    cls: "oc-model-select-inline-text",
+    text: tr(this, "view.model.placeholder", "Model"),
+  });
+  modelSelectWrap.createSpan({ cls: "oc-model-select-inline-caret", text: "▾" });
+  const modelSelect = modelSelectWrap.createEl("select", {
+    cls: "oc-model-select-inline",
+    attr: { "aria-label": tr(this, "view.model.selectTitle", "Select model") },
+  });
+  this.elements.modelSelect = modelSelect;
+  this.elements.modelSelectText = modelSelectText;
+  this.updateModelSelectOptions();
+  modelSelect.addEventListener("change", async () => {
+    try {
+      await this.applyModelSelection(modelSelect.value);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      modelSelect.value = this.selectedModel || "";
+      new Notice(tr(this, "view.model.switchFailed", "Model switch failed: {message}", { message: msg }));
+    }
+  });
+
+  this.elements.cancelBtn = inputToolbarRight.createEl("button", { cls: "mod-muted oc-cancel-btn", text: tr(this, "view.action.cancel", "Cancel") });
+  this.elements.sendBtn = inputToolbarRight.createEl("button", { cls: "mod-cta oc-send-btn" });
+  this.elements.sendBtn.setAttr("type", "button");
+  this.elements.sendBtn.setAttr("aria-label", tr(this, "view.action.send", "Send"));
+  this.elements.sendBtn.setAttr("title", tr(this, "view.action.sendShortcut", "Send (Ctrl/Cmd + Enter)"));
+  try {
+    setIcon(this.elements.sendBtn, "arrow-up");
+  } catch {
+    this.elements.sendBtn.setText("↑");
+  }
+  this.elements.cancelBtn.setAttr("type", "button");
+  this.elements.cancelBtn.setAttr("aria-label", tr(this, "view.action.cancel", "Cancel"));
   this.elements.cancelBtn.disabled = true;
 
   this.elements.sendBtn.addEventListener("click", () => this.handleSend());
   this.elements.cancelBtn.addEventListener("click", () => this.cancelSending());
   this.refreshLinkedContextIndicators();
-
-  composer.createDiv({
-    cls: "oc-hint",
-    text: tr(
-      this,
-      "view.hint",
-      "Supports session switching, skill/model dropdowns, provider auth, and error recovery. Use /skills and /model for quick switch.",
-    ),
-  });
 
   this.renderInlineQuestionPanel(this.plugin.sessionStore.getActiveMessages());
   const diagnosticsService = this.plugin && this.plugin.diagnosticsService;

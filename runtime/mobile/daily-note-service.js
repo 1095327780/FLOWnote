@@ -6,36 +6,40 @@ const URL_TRAILING_ASCII_PUNCTUATION_REGEX = /[.,;:!?]+$/;
 const URL_SUMMARY_LINE_REGEX = /^\s*>\s*📎\s*(https?:\/\/\S+|原始URL|OriginalURL)\s*-\s*(.+?)\s*$/i;
 const INLINE_URL_SUMMARY_REGEX = />\s*📎\s*(https?:\/\/\S+|原始URL|OriginalURL)\s*-\s*(.+?)\s*$/i;
 
-const DAILY_NOTE_TEMPLATE = `# {{date}}
+const DAILY_NOTE_TEMPLATE = `---
+创建时间: {{date}}
+类型: 每日笔记
+---
 
-## 📋 今日计划
-- [ ]
+# {{date}}
 
-## 📝 今日记录
+## 今天最重要的事
 
-### 💡 想法和灵感
+## 任务
 
-### 📖 学习笔记
+## 记录
 
-## 🔄 每日回顾
-- 今天做了什么：
-- 明天计划：
+## 晚间回顾
+
+## 明日计划
 `;
 
-const DAILY_NOTE_TEMPLATE_EN = `# {{date}}
+const DAILY_NOTE_TEMPLATE_EN = `---
+Created: {{date}}
+Type: Daily Note
+---
 
-## 📋 Today Plan
-- [ ]
+# {{date}}
 
-## 📝 Today Notes
+## Most Important Today
 
-### 💡 Ideas
+## Tasks
 
-### 📖 Learning Notes
+## Records
 
-## 🔄 Daily Review
-- What I did today:
-- Plan for tomorrow:
+## Evening Review
+
+## Tomorrow Plan
 `;
 
 function isZh(locale) {
@@ -65,7 +69,27 @@ function linkLabel(index, locale) {
 }
 
 function recordHeading(locale) {
-  return isZh(locale) ? "## 📝 今日记录" : "## 📝 Today Notes";
+  return isZh(locale) ? "## 记录" : "## Records";
+}
+
+function normalizeHeadingForCompare(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isRecordSectionHeading(value) {
+  const normalized = normalizeHeadingForCompare(value);
+  if (!normalized) return false;
+  return [
+    "## 记录",
+    "## 今日记录",
+    "## 📝 今日记录",
+    "## records",
+    "## today notes",
+    "## 📝 today notes",
+  ].includes(normalized);
 }
 
 function getDailyNoteTemplate(locale) {
@@ -327,6 +351,8 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
     }
   } else {
     const recordAnchors = [
+      "## 记录",
+      "## Records",
       "## 📝 今日记录",
       "## 📝 Today Notes",
       recordHeading("zh-CN"),
@@ -341,9 +367,17 @@ async function appendToIdeaSection(vault, file, entry, sectionHeader) {
     if (recordIdx !== -1) {
       const lineEnd = content.indexOf("\n", recordIdx);
       if (lineEnd !== -1) {
-        content = content.slice(0, lineEnd) + "\n" + insertBlock + content.slice(lineEnd);
+        if (isRecordSectionHeading(sectionHeader)) {
+          content = content.slice(0, lineEnd) + "\n" + entry + content.slice(lineEnd);
+        } else {
+          content = content.slice(0, lineEnd) + "\n" + insertBlock + content.slice(lineEnd);
+        }
       } else {
-        content = content + "\n" + insertBlock;
+        if (isRecordSectionHeading(sectionHeader)) {
+          content = content + "\n" + entry;
+        } else {
+          content = content + "\n" + insertBlock;
+        }
       }
     } else {
       content = content + "\n" + insertBlock;

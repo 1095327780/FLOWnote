@@ -352,3 +352,142 @@ test("event reducer should treat assistant finish field as completion signal", (
   const snap = reducer.snapshot();
   assert.equal(Boolean(snap.completed), true);
 });
+
+test("event reducer should emit skill block from official skill-instruction text before assistant tool steps", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_user",
+        role: "user",
+        sessionID: "ses_1",
+        time: { created: startedAt + 1 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_user_text",
+        type: "text",
+        sessionID: "ses_1",
+        messageID: "msg_user",
+        text: "<skill-instruction>\nBase directory for this skill: /Users/test/.opencode/skills/ah-month/\n</skill-instruction>",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_assistant",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_step_1",
+        type: "step-start",
+        sessionID: "ses_1",
+        messageID: "msg_assistant",
+      },
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.ok(Array.isArray(snap.blocks));
+  assert.equal(snap.blocks.length >= 2, true);
+  assert.equal(String(snap.blocks[0].tool || "").toLowerCase(), "skill");
+  assert.equal(snap.blocks[0].toolInput.skill, "ah-month");
+  assert.equal(String(snap.blocks[1].type || "").toLowerCase(), "step-start");
+});
+
+test("event reducer should keep skill block when assistant message id switches", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_user",
+        role: "user",
+        sessionID: "ses_1",
+        time: { created: startedAt + 1 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_user_text",
+        type: "text",
+        sessionID: "ses_1",
+        messageID: "msg_user",
+        text: "<skill-instruction>\nBase directory for this skill: /Users/test/.opencode/skills/ah-month/\n</skill-instruction>",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_assistant_1",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 10 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_step_1",
+        type: "step-start",
+        sessionID: "ses_1",
+        messageID: "msg_assistant_1",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_assistant_2",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 20 },
+      },
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.ok(Array.isArray(snap.blocks));
+  assert.equal(snap.blocks.length >= 1, true);
+  assert.equal(String(snap.blocks[0].tool || "").toLowerCase(), "skill");
+  assert.equal(snap.blocks[0].toolInput.skill, "ah-month");
+});

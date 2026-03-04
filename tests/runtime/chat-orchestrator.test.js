@@ -171,3 +171,101 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
     fixture.restore();
   }
 });
+
+test("runSendPrompt should keep explicit skill command for native command routing", async () => {
+  const fixture = loadRunSendPromptWithMockObsidian();
+  const runtimeState = {
+    sessions: [{ id: "s1", title: "新会话", updatedAt: 0 }],
+    activeSessionId: "s1",
+    messagesBySession: { s1: [] },
+  };
+
+  const sessionStore = createSessionStore(runtimeState);
+  let sentPrompt = "";
+  let buildInjectedPromptCalled = 0;
+
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { skillInjectMode: "summary", defaultModel: "" },
+      skillService: {
+        buildInjectedPrompt() {
+          buildInjectedPromptCalled += 1;
+          return "legacy-injected";
+        },
+      },
+      opencodeClient: {
+        async sendMessage(options) {
+          sentPrompt = String(options && options.prompt ? options.prompt : "");
+          return { text: "done", reasoning: "", meta: "", blocks: [] };
+        },
+      },
+      async createSession() {
+        throw new Error("createSession should not be called when active session exists");
+      },
+      async persistState() {},
+      markModelUnavailable() {
+        return { hidden: false };
+      },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "",
+    autoScrollEnabled: true,
+    silentAbortBudget: 0,
+    currentAbort: null,
+    linkedContextFiles: ["Project/alpha.md"],
+
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() {
+      return {
+        skill: { id: "ah-init", name: "ah-init" },
+        promptText: "请按技能执行当前任务",
+        command: "/ah-init",
+      };
+    },
+    getLinkedContextFilePaths() { return this.linkedContextFiles.slice(); },
+    clearLinkedContextFiles() {
+      this.linkedContextFiles = [];
+    },
+    composePromptWithLinkedFiles(prompt, options = {}) {
+      const linkedPaths = Array.isArray(options.linkedPaths) ? options.linkedPaths.slice() : [];
+      return `${prompt}\n\n[linked=${linkedPaths.join(",")}]`;
+    },
+
+    render() {},
+    renderMessages() {},
+    renderSidebar() {},
+    scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {},
+    setBusy() {},
+    setRuntimeStatus() {},
+
+    findMessageRow() { return null; },
+    hasReasoningBlock() { return false; },
+    renderAssistantBlocks() {},
+    removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {},
+    renderInlineQuestionPanel() {},
+    showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; },
+    removePendingQuestionRequest() {},
+    hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {},
+    handleToastEvent() {},
+    isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "/ah-init");
+
+    assert.equal(buildInjectedPromptCalled, 0);
+    assert.match(sentPrompt, /^\/ah-init\b/);
+    assert.match(sentPrompt, /请按技能执行当前任务/);
+    assert.match(sentPrompt, /\[linked=Project\/alpha\.md\]/);
+  } finally {
+    fixture.restore();
+  }
+});

@@ -117,6 +117,23 @@ class SdkTransport {
     return res.data || [];
   }
 
+  async listSessionMessages(options = {}) {
+    const sessionId = String(options.sessionId || "").trim();
+    if (!sessionId) return [];
+
+    const rawLimit = Number(options.limit || 200);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.max(1, Math.floor(rawLimit)) : 200;
+
+    const client = await this.ensureClient();
+    const res = await client.session.messages({
+      sessionID: sessionId,
+      directory: this.vaultPath,
+      limit,
+    }, { signal: options.signal });
+    const payload = res && res.data ? res.data : res;
+    return Array.isArray(payload) ? payload : [];
+  }
+
   async createSession(title) {
     const client = await this.ensureClient();
     const res = await client.session.create(title ? { directory: this.vaultPath, title } : { directory: this.vaultPath });

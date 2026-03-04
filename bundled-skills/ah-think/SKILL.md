@@ -1,151 +1,142 @@
 ---
 name: ah-think
-description: |
-  自适应思考引擎：基于问题类型、不确定性和目标动态编排思维模型，输出可执行结论。用于 ah-read、ah-card、ah-review 的思考门，也可独立用于决策、分析与复盘。
+description: Use when 需要在阅读、学习、做卡片笔记或决策时做更深层思考，包括澄清概念、检验论证、追溯根因、比较方案和提炼可迁移洞见。
 ---
 
-# AH Think
+# 思维模型工具箱
 
-`ah-think` 是 FLOW 的思考协议层，不是固定问答模板。
+目标：在“读、想、写、用”四个环节，用可执行的思维模型把模糊理解变成可复用洞见。
 
-## Goals
+## 启动即执行
 
-- 把模糊问题转成可执行结论。
-- 在不同场景（read/card/review）中提供可复用推理框架。
-- 避免“同一套问题问到底”的僵化循环。
+1. 识别当前任务类型：概念理解 / 观点检验 / 根因分析 / 方案决策 / 卡片提炼。
+2. 从模型库选择 1-2 个模型（默认不超过 2 个，避免过载）。
+3. 先征求用户意愿：继续深入，或直接记录。
+4. 按模型引导提问，产出可落盘结论或可执行下一步。
 
-## Non-Goals
+## 流程锁定规则（高优先级）
 
-- 不直接创建永久笔记文件。
-- 不替代 `ah-read`、`ah-card`、`ah-review` 的业务落地职责。
+- 用户出现“说不清/想不透/需要取舍/想把想法写成卡片”时，默认进入思维模型引导。
+- 仅在两种情况切换技能：
+  - 用户明确输入其他命令
+  - 用户明确要求停止本轮思考
+- 流程完成标志：已形成“结论/待验证假设/下一步动作”之一。
 
-## Mode Contract
+## 重要提醒
 
-- `mode=read`：判断阅读洞见是否值得交接制卡。
-- `mode=card`：压实候选洞见到可制卡质量。
-- `mode=review`：把反思转成可执行改进动作。
-- `mode=independent`：独立完成问题分析与决策建议。
+- 不一次堆太多模型；每轮优先 1 个主模型 + 1 个辅助模型。
+- 引导优先，不直接替用户下结论。
+- 用户说“先记下来/先跳过”时立即收口，不继续追问。
+- 所有示例都应可映射到用户当前问题，避免空泛说教。
 
-## Reference Routing (Progressive Disclosure)
+## 触发机制
 
-### Step 1: 必读核心（每次）
+- 主动触发：用户输入“用某模型想一想 / 帮我深入分析 / 我好像懂了但说不清”。
+- 路由触发：`ah-read`、`ah-card`、`ah-review` 需要深入追问时调用。
 
-- 编排入口：`references/adaptive-orchestration.md`
-- 模型选择：`references/model-catalog.md`
-- 输出结构：`references/thinking-output-schema.md`
-- 模式细节：`references/integration-profiles.md`
+## 主流程
 
-### Step 2: 按 mode 读取
+1. 阶段一：判定问题类型与目标产物（解释清楚 / 写卡片 / 做决策）。
+2. 阶段二：推荐 1-2 个候选模型并给出选择理由（最多不超过 2 个）。
+3. 阶段三：用户选择模型（或由 AI 默认选最匹配模型）。
+4. 阶段四：按模型提问并收敛到结论。
+5. 阶段五：输出“可记录版本”（适合写入笔记/卡片）。
 
-- `mode=read`：先看 `integration-profiles.md` 的 read 段。
-- `mode=card`：先看 `integration-profiles.md` 的 card 段。
-- `mode=review`：先看 `integration-profiles.md` 的 review 段。
+## 关键执行规则（确定性）
 
-### Step 3: 按需加载模型文件
+- 模型优先级：
+  - 概念理解 -> `费曼技巧` / `布鲁姆层级` / `苏格拉底式提问`
+  - 论证检验 -> `论证图谱` / `钢人化` / `证据分级`
+  - 根因分析 -> `5个为什么` / `因果回路` / `冰山模型`
+  - 决策取舍 -> `二阶思考` / `预检验(Pre-mortem)` / `机会成本`
+  - 卡片提炼 -> `原子化` / `渐进式摘要` / `Zettelkasten连接`（按轮次最多取其中 2 个）
+- 提问轮数默认 3-6 问；用户疲劳时降级到 1-2 问快速收口。
+- 固定开场问句：`这次你更想要哪种结果：解释清楚、写成卡片，还是辅助决策？`
+- 固定收口问句：`我先给你最小记录版本；要继续深挖，还是先记下来？`
+- 输出必须包含：
+  - 一句话结论
+  - 关键依据或假设
+  - 下一步动作（验证/记录/执行）
+- 若由 `ah-read` / `ah-card` / `ah-review` 路由进入，本轮输出后必须显式返回原技能继续。
 
-- 只加载 1-2 个主模型 + 0-1 个校验模型。
-- 不全量加载全部模型文件。
+## 模型库（20+）
 
-### Step 4: 输出校验
+完整模型库、触发词与禁用场景见：`references/model-library.md`
 
-- 按 `thinking-output-schema.md` 校验必填字段与 `confidence`。
+执行页与目录页分工：
 
-## Reference Index (按需读取)
+- 执行页（可直接按步骤提问）在 `references/` 的单模型文件中。
+- 目录页（`model-library.md`）用于选型与禁用判断，不替代完整执行步骤。
 
-### Core orchestration
+选型后读取规则（确定性）：
 
-- `references/adaptive-orchestration.md`
-- `references/model-catalog.md`
-- `references/thinking-output-schema.md`
-- `references/integration-profiles.md`
+1. 先读取对应执行页（如 `references/feynman-technique.md`）。
+2. 若该模型暂无执行页，改用 `model-library.md` 的“核心问题 + 不适用场景”做最小引导。
+3. 若用户需要深挖，再优先切换到有执行页的近邻模型。
 
-### Model files
+优先常用模型（首选）：
 
-- `references/feynman-technique.md`
-- `references/first-principles.md`
-- `references/inversion.md`
-- `references/second-order-thinking.md`
-- `references/socratic-questioning.md`
-- `references/circle-of-competence.md`
-- `references/five-whys.md`
-- `references/pre-mortem.md`
-- `references/steelman.md`
-- `references/evidence-calibration.md`
-- `references/abstraction-ladder.md`
-- `references/systems-leverage.md`
-- `references/uncertainty-calibration.md`
-- `references/bayesian-updating.md`
-- `references/cynefin.md`
-- `references/double-loop-learning.md`
-- `references/ooda-loop.md`
-- `references/goodharts-law.md`
-- `references/experience-model-prediction.md`
-- `references/discriminative-model.md`
-- `references/connection-model.md`
-- `references/abstraction-hierarchy.md`
-- `references/memory-encoding.md`
-- `references/implicit-explicit-model.md`
-- `references/information-speculation.md`
-- `references/iterative-construction-analysis.md`
-- `references/bottom-up-top-down-learning.md`
-- `references/inheritance-pioneering-learning.md`
+1. 费曼技巧
+2. 第一性原理
+3. 逆向思维
+4. 二阶思考
+5. 苏格拉底式提问
+6. 5个为什么
+7. 论证图谱
+8. 钢人化
+9. 布鲁姆层级
+10. 预检验（Pre-mortem）
 
-## Skill Contract
+## 输出标准
 
-### Inputs
+- 必须输出：
+  - 本轮使用模型
+  - 核心问题与简结论
+  - 可直接写入笔记的 3-8 行版本
+- 若用户不继续深入，输出“最小记录版本”并结束。
 
-- 待分析问题、观点或候选洞见。
-- 调用模式（independent/read/card/review）。
-- 目标与约束（时间、风险、信息完备度）。
+## 检查清单
 
-### Reads
+- [ ] 已识别问题类型
+- [ ] 已选择 1-2 个模型
+- [ ] 已完成引导提问并收敛
+- [ ] 已输出可记录版本
 
-- `references/adaptive-orchestration.md`
-- `references/model-catalog.md`
-- `references/thinking-output-schema.md`
-- `references/integration-profiles.md`
-- 按需读取少量模型文件（非全量）。
+## 渐进加载（按需读取）
 
-### Writes
+- 模型总览与触发词：`references/model-library.md`
+- 费曼技巧：`references/feynman-technique.md`
+- 布鲁姆层级：`references/bloom-taxonomy.md`
+- SQ3R 阅读法：`references/sq3r.md`
+- 主动回忆：`references/active-recall.md`
+- 间隔复习：`references/spaced-repetition.md`
+- 交错练习：`references/interleaving.md`
+- 第一性原理：`references/first-principles.md`
+- 逆向思维：`references/inversion.md`
+- 二阶思考：`references/second-order-thinking.md`
+- 苏格拉底式提问：`references/socratic-questioning.md`
+- 论证图谱：`references/argument-mapping.md`
+- 钢人化：`references/steelman.md`
+- 证据分级：`references/evidence-grading.md`
+- 反例思维：`references/counterexample-thinking.md`
+- 能力圈：`references/circle-of-competence.md`
+- 5个为什么：`references/five-whys.md`
+- 因果回路：`references/causal-loop.md`
+- 冰山模型：`references/iceberg-model.md`
+- 杠杆点：`references/leverage-points.md`
+- MECE 拆解：`references/mece.md`
+- 预检验：`references/pre-mortem.md`
+- 机会成本：`references/opportunity-cost.md`
+- OODA 循环：`references/ooda-loop.md`
+- 期望值思维：`references/expected-value.md`
+- 原子化：`references/atomicity.md`
+- 渐进式摘要：`references/progressive-summarization.md`
+- Zettelkasten连接：`references/zettelkasten-linking.md`
+- Cornell 提问栏思维：`references/cornell-question-column.md`
 
-- 无强制文件写入。
-- 返回结构化思考包供上游技能落地。
+## 相关技能
 
-### Calls
-
-- 协议参照：`Read ../ah-memory/SKILL.md`（仅跨会话协作时）。
-- 可被调用方：`ah-read`、`ah-card`、`ah-review`。
-
-### Return
-
-- 模型选择与理由。
-- 结构化结论（按 `thinking-output-schema.md`）。
-- `confidence`、边界条件、下一步动作、`handoff_hint`。
-
-### Failure Handling
-
-- 问题定义不清：先重述问题与输出目标。
-- 信息不足：列最小补齐信息，不强行下结论。
-- 用户负荷高：降级最小输出（结论 + 1 个动作）。
-- 模型冲突：保留分歧并给验证路径。
-
-## Minimal Execution Flow
-
-1. 识别 mode 与问题类型（概念/决策/复盘/学习设计）。
-2. 读取 4 份核心参考并确定最小模型包。
-3. 短回合提问与中途总结（避免连续盘问）。
-4. 输出结构化思考包并标注边界与置信度。
-5. 在 read/card/review 场景返回是否交接下游技能。
-
-## Anti-Rigid Guardrails
-
-- 单轮默认 2-4 问后先总结，不机械追问。
-- 同一问题句式不重复超过 2 次。
-- 达到可执行结论即收口，不追求“问满”。
-- 证据不足时先补证据，不先做复杂模型堆叠。
-
-## Quality Bar
-
-- 模型选择必须可解释，不能“默认固定模型”。
-- 输出必须有动作、边界、风险与置信度。
-- 结论要能被上游技能直接消费（read/card/review）。
+- `ah-read`：阅读后深度理解
+- `ah-card`：从想法到高质量卡片
+- `ah-review`：复盘中做高质量反思
+- `ah-note`：早间计划前澄清优先级

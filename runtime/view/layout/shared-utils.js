@@ -35,6 +35,16 @@ function isLinkableContextFile(file) {
   return LINKED_CONTEXT_ALLOWED_EXTENSIONS.has(ext);
 }
 
+function isLinkableContextFolder(target) {
+  if (!target || typeof target !== "object") return false;
+  const pathValue = normalizeLinkedContextPath(target.path || "");
+  if (!pathValue) return false;
+  if (Array.isArray(target.children)) return true;
+  const ext = String(target.extension || "").trim().toLowerCase();
+  if (ext) return false;
+  return !/\.[A-Za-z0-9_-]+$/.test(pathValue);
+}
+
 function createLinkableContextEntry(file) {
   if (!file || typeof file !== "object") return null;
   const filePath = normalizeLinkedContextPath(file.path || file.file?.path || file.name || "");
@@ -134,12 +144,26 @@ function updateModelSelectOptions() {
   const normalizedModels = [...new Set(models.map((model) => String(model || "").trim()).filter(Boolean))];
 
   modelSelect.empty();
-  modelSelect.createEl("option", { value: "", text: tr(this, "view.model.placeholder", "Model /models") });
+  modelSelect.createEl("option", { value: "", text: tr(this, "view.model.placeholder", "Model") });
   appendGroupedModelOptions(modelSelect, normalizedModels, this);
 
   const canRestoreSelection = selectedBefore && normalizedModels.includes(selectedBefore);
   modelSelect.value = canRestoreSelection ? selectedBefore : "";
   this.selectedModel = modelSelect.value;
+  syncInlineModelSelectLabel.call(this);
+}
+
+function syncInlineModelSelectLabel() {
+  const modelSelect = this.elements && this.elements.modelSelect;
+  const modelSelectText = this.elements && this.elements.modelSelectText;
+  if (!modelSelect || !modelSelectText) return;
+
+  const option = modelSelect.options && modelSelect.selectedIndex >= 0
+    ? modelSelect.options[modelSelect.selectedIndex]
+    : null;
+  const displayText = String((option && option.text) || "").trim() || tr(this, "view.model.placeholder", "Model");
+  modelSelectText.textContent = displayText;
+  modelSelectText.setAttribute("title", displayText);
 }
 
 function renderSidebarToggleIcon(button) {
@@ -240,6 +264,7 @@ module.exports = {
   normalizeLinkedContextPath,
   displayNameFromPath,
   isLinkableContextFile,
+  isLinkableContextFolder,
   createLinkableContextEntry,
   sharedLayoutMethods,
 };

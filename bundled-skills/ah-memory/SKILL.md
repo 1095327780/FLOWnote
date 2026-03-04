@@ -1,90 +1,88 @@
 ---
 name: ah-memory
-description: |
-  FLOW 记忆协议中枢：统一跨技能状态读写、任务交接和恢复规则。用于任何需要跨会话续跑、跨技能协同或状态一致性的场景。
+description: Use when 需要在多个 ah-* 技能之间持续追踪进度、同步待办与避免会话切换后状态丢失时。
 ---
 
-# AH Memory Protocol Hub
+# AI 记忆系统
 
-`ah-memory` 是整套 FLOW skills 的协议中枢，不直接执行业务流程。
+目标：在所有 ah-* 技能之间统一状态追踪，确保“可继续、可回溯、不丢任务”。
 
-## Goals
+## 启动即执行
 
-- 统一状态文件路径、结构和状态枚举。
-- 统一各技能在启动/执行/结束三个阶段的记忆接口。
-- 统一跨技能交接（handoff）格式，支持中断后恢复。
+1. 读取 `Meta/.ai-memory/STATUS.md`。
+2. 根据当前技能识别相关待处理项（阅读/制卡/项目/回顾/缓冲任务）。
+3. 若存在待处理项，先提示用户：继续处理或开始新任务。
 
-## Non-Goals
+## 流程锁定规则（高优先级）
 
-- 不定义业务技能的详细对话文案。
-- 不替代各技能自己的领域流程（阅读、制卡、复盘等）。
+- 记忆流程是底层能力，不因用户提及其他主题而中断。
+- 仅在两种情况允许提前退出：
+  - 用户明确输入其他命令并要求切换。
+  - 用户明确要求停止当前任务。
+- 流程完成标志：任务文件已更新 + `STATUS.md` 已整合 + 下一步已明确。
 
-## Canonical State File
+## 重要提醒
 
-- 唯一路径：`Meta/.ai-memory/STATUS.md`
-- 唯一结构（v2）：
-  - `## 阅读整理`
-  - `## 卡片笔记`
-  - `## 项目`
-  - `## 回顾`
-- 唯一状态值：
-  - `待开始`
-  - `进行中(N/M)`
-  - `待交接:<skill>`
-  - `已完成`
-  - `阻塞:<原因>`
+- 禁止使用示例数据，状态与进度必须来自真实文件或用户确认。
+- 禁止跳过结束整合；未写回 `STATUS.md` 视为未完成。
+- 输出必须包含具体文件路径与更新内容，不能只说“已同步”。
 
-## Skill Contract
+## 核心机制（保持原功能）
 
-### Inputs
+### 两阶段更新
 
-- 当前 skill 名称。
-- 当前任务上下文（可选）。
-- 用户是否选择继续上次任务。
+1. 阶段 1（会话中，高频）：更新任务专属文件。
+2. 阶段 2（结束前，低频）：整合到 `STATUS.md`。
 
-### Reads
+### 检查点写入
 
-- `Meta/.ai-memory/STATUS.md`
-- 按需读取任务专属进度文件（见 references）。
+- 在每个关键节点写入一次任务专属文件。
+- 会话结束前必须完成一次最终整合，避免跨会话状态丢失。
 
-### Writes
+## 目录规范
 
-- `Meta/.ai-memory/STATUS.md`
-- 任务专属进度文件（按技能类型）。
+必须使用以下结构：
 
-### Calls
+```text
+Meta/.ai-memory/
+├── STATUS.md
+├── reading/
+├── cards/
+├── projects/
+├── legacy/
+└── reviews/
+```
 
-- 无直接子技能调用。
-- 通过协议约束所有 `ah-*` 技能行为。
+## 状态传递规则
 
-### Return
+- 读取方：每个技能启动时读取 `STATUS.md` 的相关区块。
+- 写入方：每个技能结束时写回本次增量状态。
+- 常见传递：`ah-read -> ah-card`、`ah-review -> ah-note/ah-week/ah-month`、`ah-project -> ah-archive`。
 
-- 标准化状态快照。
-- 下一步可执行动作（最多 3 条）。
+## 输出标准
 
-### Failure Handling
+- 必须输出：本次更新了哪些文件、更新了哪些状态、是否产生新的待办。
+- 若有未完成项，必须输出明确下一步（建议技能 + 对应路径）。
+- 输出内容必须可追溯，不允许仅给“已更新”这类模糊结果。
 
-- 如果 `STATUS.md` 缺失：创建最小 v2 骨架后继续。
-- 如果状态非法：按 `references/status-schema.md` 纠正并记录一次修复。
-- 如果交接目标不存在：改写为 `阻塞:<原因>` 并返回人工决策提示。
+## 检查清单
 
-## Reference Routing
+- [ ] 已读取 `Meta/.ai-memory/STATUS.md`
+- [ ] 已识别并提示相关待处理项
+- [ ] 已在关键节点更新任务专属文件
+- [ ] 已在结束阶段整合更新 `STATUS.md`
+- [ ] 已写明跨技能传递与下一步建议
 
-- 字段定义、状态转换：`references/status-schema.md`
-- 周末/月末提醒协议：`references/cadence-reminders.md`
-- 跨技能接口规范：`references/skill-interface-spec.md`
-- 交接场景与示例：`references/handoff-playbooks.md`
-- 启动/结束检查项：`references/checklists.md`
+## 渐进加载（按需读取）
 
-## Minimal Execution Flow
+- 接口与异常规则：`references/skill-interface-spec.md`
+- 全局状态与缓冲区模板：`references/status-and-buffer-rules.md`
+- 任务专属文件模板：`references/task-file-templates.md`
 
-1. 启动阶段：读取 `STATUS.md`，提取当前 skill 相关条目。
-2. 执行阶段：关键节点写入任务专属进度文件。
-3. 结束阶段：回写 `STATUS.md`，必要时写入 `待交接:<skill>`。
-4. 返回阶段：给出下一步建议，优先指向可直接执行的 skill。
+## 相关技能
 
-## Integration Rules for All Skills
-
-- 任何 `ah-*` 技能若存在跨会话语义，必须实现本文件 `Skill Contract`。
-- 所有调用路径统一使用：`Read ../<skill-name>/SKILL.md`。
-- 禁止使用环境耦合路径或旧版硬编码路径。
+- `ah`：统一入口，启动时展示待处理项
+- `ah-note`：早晨拉取缓冲任务
+- `ah-read` / `ah-card`：阅读到制卡的状态接力
+- `ah-review` / `ah-week` / `ah-month`：残留任务分层清理
+- `ah-project` / `ah-archive`：项目状态流转与归档

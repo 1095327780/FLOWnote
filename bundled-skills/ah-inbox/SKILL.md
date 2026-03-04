@@ -1,86 +1,75 @@
 ---
 name: ah-inbox
-description: |
-  想法批处理技能：集中清理多天积压想法，逐条分流到项目执行笔记、卡片候选、任务或跳过，并回写状态与交接。用于周中清仓、周回顾前整理和积压治理场景。
+description: 想法批量整理助手。用于集中处理 ah-review 中未处理完或被延期的每日记录，执行批量扫描、去向决策与回写标记，确保残留记录进入清空闭环。
 ---
 
-# AH Inbox
+# 想法批量整理助手
 
-`ah-inbox` 在 FLOW 中承担 **想法积压治理器**：处理“当天没消化完”的想法 backlog。
+目标：把“每日回顾没来得及处理的记录”批量清掉，避免长期堆积。
 
-## FLOW Position
+## 启动即执行
 
-- 输入：跨天未处理想法（来自每日笔记/回顾残留）。
-- 输出：清晰去向（项目/卡片/任务/跳过）+ 续跑状态。
+1. 扫描 `01-捕获层/每日笔记/`（默认最近 7 天，可由用户指定范围）。
+2. 优先提取已标记 `⏭️ 待 /ah-inbox` 的记录。
+3. 再提取未处理记录（无 `→`、无 `✅`、无 `⏭️` 标记）。
 
-## Reusable Resources
+## 流程锁定规则（高优先级）
 
-- 清仓原则：`references/inbox-principles.md`
-- 选单规则：`references/backlog-selection.md`
-- 分流协议：`references/batch-routing.md`
-- 状态续跑：`references/status-and-resume.md`
-- 质量检查：`references/quality-checklist.md`
-- 批处理模板：`assets/批处理记录模板.md`
+- 用户在处理中提到“阅读/项目/复盘”等词，默认视为当前记录输入，不自动切换技能。
+- 仅在两种情况允许切换：
+  - 用户明确输入其他命令（如 `/ah-card`）
+  - 用户明确要求停止本轮整理
+- 流程完成标志：候选记录已处理或明确延期，且输出汇总。
 
-## Skill Contract
+## 重要提醒
 
-### Inputs
+- 禁止使用示例数据，所有处理必须基于真实日记内容。
+- `ah-inbox` 的核心对象是“残留记录”，不是重做当日完整回顾。
+- 转永久笔记必须调用 `ah-card`，不直接套模板生成。
 
-- 待处理想法列表（多天/多篇日记）。
-- 用户处理偏好（快清仓/稳妥筛选）。
-- 可选：项目上下文与优先级。
+## 主流程
 
-### Reads
+1. 扫描并展示候选（按“延期优先”排序）。
+2. 逐条或批量决策去向。
+3. 回写日记标记。
+4. 输出批量结果与剩余待处理数。
 
-- 近期每日笔记与回顾残留。
-- `Meta/.ai-memory/STATUS.md`
-- `references/inbox-principles.md`
-- `references/backlog-selection.md`
-- `references/batch-routing.md`
-- `references/status-and-resume.md`
-- `references/quality-checklist.md`
-- `assets/批处理记录模板.md`
+## 去向决策（确定性）
 
-### Writes
+每条记录仅能选一种：
 
-- 想法处理标记（在原日记或汇总记录中）。
-- 项目执行日志/洞见候选（按分流规则）。
-- 批处理记录文件（可选但建议）。
-- `STATUS.md` 的“回顾/卡片笔记/项目”分区。
+1. 转永久笔记（调用 `ah-card`）
+2. 转任务（写入任务区）
+3. 标记已处理（保留记录）
+4. 继续延期（保留 `⏭️ 待 /ah-inbox`）
 
-### Calls
+## 回写标记规范
 
-- 协议入口：`Read ../ah-memory/SKILL.md`
-- 模糊条目澄清：`Read ../ah-think/SKILL.md`
-- 正式制卡：`Read ../ah-card/SKILL.md`
-- 回顾兜底：`Read ../ah-week/SKILL.md` 或 `Read ../ah-month/SKILL.md`
+- 转永久笔记：`→ [[笔记名]]`
+- 转任务：`→ 任务`
+- 已处理：`✅ 已处理`
+- 延期：`⏭️ 待 /ah-inbox`
 
-### Return
+## 输出标准
 
-- 本轮处理统计（项目/转卡/任务/跳过/待澄清）。
-- 剩余 backlog 与续跑入口。
-- 若存在可转项，返回 `待交接:ah-card`。
+- 必须输出：总候选数、四类去向数量、剩余延期数量。
+- 必须包含：新建永久笔记列表（如有）与新增任务列表（如有）。
+- 有未处理残留时，明确提示下次继续使用 `/ah-inbox`。
 
-### Failure Handling
+## 检查清单
 
-- 条目过多：按批处理并写 `进行中(N/M)`。
-- 决策不明：标记“待澄清”，禁止强行转卡。
-- 源条目缺上下文：保留原句并回链来源，不做过度推断。
-- 会话中断：先写批处理记录与状态，再结束。
+- [ ] 已扫描并提取候选记录
+- [ ] 已完成去向决策并回写标记
+- [ ] 已调用 `ah-card` 处理高价值记录（如有）
+- [ ] 已输出批量处理汇总
 
-## Workflow
+## 渐进加载（按需读取）
 
-1. **Scan**：按 `backlog-selection.md` 汇总近期待处理条目。
-2. **Batch**：按 `status-and-resume.md` 拆分批次并标记 `进行中(N/M)`。
-3. **Route**：按 `batch-routing.md` 逐条分流到项目/卡片/任务/跳过。
-4. **Escalate**：模糊条目调用 `ah-think`，仍不清晰则留“待澄清”。
-5. **Record**：按 `批处理记录模板.md` 写本轮决策与剩余项。
-6. **Handoff**：可转卡项写 `待交接:ah-card` 并返回候选清单。
-7. **State Update**：完成则写 `已完成`，未完成保留 `进行中(N/M)`。
+- 扫描与路由规则：`references/workflow-and-routing-rules.md`
+- 汇报与确认模板：`references/output-templates.md`
 
-## Quality Bar
+## 相关技能
 
-- 每条 backlog 想法必须有去向，不允许“看过但不标记”。
-- 项目细节优先落项目日志，迁移洞见才转卡。
-- 清仓优先级应体现“不过夜 -> 不过周 -> 不过月”。
-- 返回必须包含剩余量与下次续跑入口。
+- `ah-review`：每日回顾后将残留记录移交 inbox
+- `ah-card`：将高价值记录转为永久笔记
+- `ah-week`：周回顾时复核仍未处理的残留记录

@@ -54,3 +54,38 @@ test("sdk sendMessage should emit polling updates when event stream fallback is 
   assert.equal(result.messageId, "msg_poll");
   assert.equal(tokenUpdates.includes("polling-stream"), true);
 });
+
+test("sdk listSessionMessages should call official session.messages endpoint", async () => {
+  const transport = createTransport();
+  let captured = null;
+
+  transport.ensureClient = async () => ({
+    session: {
+      messages: async (params, options) => {
+        captured = {
+          params,
+          hasSignal: Boolean(options && Object.prototype.hasOwnProperty.call(options, "signal")),
+        };
+        return {
+          data: [
+            { info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
+          ],
+        };
+      },
+    },
+  });
+
+  const list = await transport.listSessionMessages({
+    sessionId: "ses_1",
+    limit: 50,
+    signal: undefined,
+  });
+
+  assert.equal(Array.isArray(list), true);
+  assert.equal(list.length, 1);
+  assert.ok(captured && captured.params);
+  assert.equal(captured.params.sessionID, "ses_1");
+  assert.equal(captured.params.directory, "/vault");
+  assert.equal(captured.params.limit, 50);
+  assert.equal(captured.hasSignal, true);
+});
