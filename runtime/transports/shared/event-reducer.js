@@ -62,6 +62,7 @@ function createTransportEventReducer(options) {
   const reasoningByPart = new Map();
   const blockPartById = new Map();
   const partKindById = new Map();
+  const partAliasToCanonicalId = new Map();
   const promptedPermissionIds = new Set();
   const promptedQuestionIds = new Set();
   const activeQuestionIds = new Set();
@@ -134,6 +135,7 @@ function createTransportEventReducer(options) {
     reasoningByPart.clear();
     blockPartById.clear();
     partKindById.clear();
+    partAliasToCanonicalId.clear();
     for (const [id, part] of stickyBlocks) {
       blockPartById.set(id, part);
       partKindById.set(id, String(part && part.type ? part.type : ""));
@@ -325,6 +327,32 @@ function createTransportEventReducer(options) {
     updateBlocks();
   };
 
+  const resolveCanonicalPartId = (part) => {
+    if (!part || typeof part !== "object") return "";
+    const type = typeof part.type === "string" ? part.type : "";
+    if (type === "tool") {
+      const callId = typeof part.callID === "string" ? part.callID.trim() : "";
+      if (callId) return `tool:${callId}`;
+    }
+    const rawId = typeof part.id === "string" ? part.id.trim() : "";
+    if (rawId) return rawId;
+    const messageRef = typeof part.messageID === "string" ? part.messageID : "unknown";
+    return `${type || "part"}:${messageRef}`;
+  };
+
+  const tryAdoptActiveAssistantMessageId = (candidateId, partType = "") => {
+    const nextId = String(candidateId || "").trim();
+    if (!nextId) return false;
+    if (messageId) return nextId === messageId;
+    if (latestUserMessageId && nextId === latestUserMessageId) return false;
+    const normalizedType = String(partType || "").trim().toLowerCase();
+    // Prefer structured assistant parts when message.updated arrives late.
+    if (normalizedType === "text" && !latestUserMessageId) return false;
+    messageId = nextId;
+    activeMessageCreatedAt = Math.max(activeMessageCreatedAt || 0, startedAt || Date.now());
+    return true;
+  };
+
   const consumeMessagePartUpdated = (event) => {
     const props = event.properties && typeof event.properties === "object" ? event.properties : {};
     const part = props.part && typeof props.part === "object" ? props.part : null;
@@ -335,10 +363,18 @@ function createTransportEventReducer(options) {
       if (partStart > 0 && partStart < startedAt - 1000) return;
     }
     tryCaptureSkillInstruction(part, delta);
-    if (!messageId) return;
-    if (typeof part.messageID !== "string" || part.messageID !== messageId) return;
+    const partMessageId = typeof part.messageID === "string" ? part.messageID : "";
+    if (!messageId) {
+      const adopted = tryAdoptActiveAssistantMessageId(partMessageId, part.type);
+      if (!adopted) return;
+    }
+    if (!partMessageId || partMessageId !== messageId) return;
 
-    const partId = typeof part.id === "string" && part.id ? part.id : `${part.type || "part"}:${part.messageID || "unknown"}`;
+    const rawPartId = typeof part.id === "string" ? part.id.trim() : "";
+    const partId = resolveCanonicalPartId(part);
+    if (rawPartId && rawPartId !== partId) {
+      partAliasToCanonicalId.set(rawPartId, partId);
+    }
     partKindById.set(partId, String(part.type || ""));
 
     if (part.type === "text") {
@@ -378,12 +414,60 @@ function createTransportEventReducer(options) {
     updateBlocks();
   };
 
+  const consumeMessagePartDelta = (event) => {
+    const props = event.properties && typeof event.properties === "object" ? event.properties : {};
+    const sid = typeof props.sessionID === "string" ? props.sessionID : "";
+    if (sid && sid !== sessionId) return;
+    const msgId = typeof props.messageID === "string" ? props.messageID : "";
+    if (!messageId) {
+      const adopted = tryAdoptActiveAssistantMessageId(msgId, "");
+      if (!adopted) return;
+    }
+    if (msgId && msgId !== messageId) return;
+
+    const rawPartId = typeof props.partID === "string" ? props.partID.trim() : "";
+    if (!rawPartId) return;
+
+    const field = typeof props.field === "string" ? props.field.trim().toLowerCase() : "";
+    if (field && !/(\.|^)text$/.test(field)) return;
+
+    const delta = typeof props.delta === "string" ? props.delta : "";
+    if (!delta) return;
+
+    const partId = partAliasToCanonicalId.get(rawPartId) || rawPartId;
+    const knownType = String(partKindById.get(partId) || "");
+    if (knownType === "reasoning") {
+      idleSeen = false;
+      const current = reasoningByPart.get(partId) || "";
+      const next = mergeSnapshotText(current, delta);
+      if (next !== current) {
+        reasoningByPart.set(partId, next);
+        const prevPart = blockPartById.get(partId);
+        if (prevPart && typeof prevPart === "object") {
+          blockPartById.set(partId, Object.assign({}, prevPart, { text: next }));
+        }
+        updateReasoning();
+        updateBlocks();
+      }
+      return;
+    }
+
+    idleSeen = false;
+    const current = textByPart.get(partId) || "";
+    const next = mergeSnapshotText(current, delta);
+    if (next !== current) {
+      textByPart.set(partId, next);
+      updateText();
+    }
+  };
+
   const consumeMessagePartRemoved = (event) => {
     const props = event.properties && typeof event.properties === "object" ? event.properties : {};
     const sid = typeof props.sessionID === "string" ? props.sessionID : "";
     if (sid && sid !== sessionId) return;
-    const partId = typeof props.partID === "string" ? props.partID : "";
-    if (!partId) return;
+    const rawPartId = typeof props.partID === "string" ? props.partID : "";
+    if (!rawPartId) return;
+    const partId = partAliasToCanonicalId.get(rawPartId) || rawPartId;
     const partType = String(partKindById.get(partId) || "");
     if (partType === "text") {
       textByPart.delete(partId);
@@ -403,6 +487,11 @@ function createTransportEventReducer(options) {
 
     if (event.type === "message.part.updated") {
       consumeMessagePartUpdated(event);
+      return done;
+    }
+
+    if (event.type === "message.part.delta") {
+      consumeMessagePartDelta(event);
       return done;
     }
 

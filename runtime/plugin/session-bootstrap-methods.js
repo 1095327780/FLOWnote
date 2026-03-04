@@ -114,12 +114,40 @@ const sessionBootstrapMethods = {
     const leaves = this.app.workspace.getLeavesOfType(this.getViewType());
     if (leaves.length) {
       await this.app.workspace.revealLeaf(leaves[0]);
-      return;
+    } else {
+      const leaf = this.app.workspace.getRightLeaf(false);
+      await leaf.setViewState({ type: this.getViewType(), active: true });
+      await this.app.workspace.revealLeaf(leaf);
     }
 
-    const leaf = this.app.workspace.getRightLeaf(false);
-    await leaf.setViewState({ type: this.getViewType(), active: true });
-    await this.app.workspace.revealLeaf(leaf);
+    void this.bootstrapData({ waitRemote: false, startRemote: true }).catch((e) => {
+      this.log(`activate view bootstrap failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    void this.refreshDiagnosticsStatus({ ttlMs: 10_000, force: false, applyView: true });
+  },
+
+  async refreshDiagnosticsStatus(options = {}) {
+    const service = this.diagnosticsService;
+    if (!service || typeof service.runCached !== "function") return null;
+
+    const ttlMs = Math.max(0, Number(options.ttlMs || 10_000));
+    const force = Boolean(options.force);
+    let result = null;
+    try {
+      result = await service.runCached(ttlMs, force);
+    } catch (e) {
+      this.log(`refresh diagnostics failed: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+
+    const applyView = options.applyView !== false;
+    if (applyView) {
+      const view = this.getAssistantView();
+      if (view && typeof view.applyStatus === "function") {
+        view.applyStatus(result);
+      }
+    }
+    return result;
   },
 
   async loadPersistedData() {
@@ -129,19 +157,9 @@ const sessionBootstrapMethods = {
     this.schemaVersion = Number.isFinite(rawSchemaVersion) && rawSchemaVersion > 0
       ? Math.floor(rawSchemaVersion)
       : RUNTIME_SCHEMA_VERSION;
-    const extractRawTransportMode = (value) => String(value || "").trim().toLowerCase();
-    const markTransportModeMigrationIfNeeded = (rawMode) => {
-      const normalized = extractRawTransportMode(this.settings && this.settings.transportMode);
-      if (!rawMode || rawMode === normalized) return;
-      if (typeof this.markTransportModeCompatNormalization !== "function") return;
-      if (this.markTransportModeCompatNormalization(rawMode)) {
-        this.transportModeMigrationDirty = true;
-      }
-    };
 
     if (raw.settings || raw.runtimeState) {
       const rawSettings = raw.settings || {};
-      const rawTransportMode = extractRawTransportMode(rawSettings.transportMode);
       this.settings = runtime.normalizeSettings(rawSettings);
       const runtimeStateRaw = raw.runtimeState || { sessions: [], activeSessionId: "", messagesBySession: {} };
       let beforeSnapshot = "";
@@ -159,17 +177,14 @@ const sessionBootstrapMethods = {
       }
       this.runtimeStateMigrationDirty = Boolean(beforeSnapshot && afterSnapshot && beforeSnapshot !== afterSnapshot);
       this.ensureRuntimeStateShape();
-      markTransportModeMigrationIfNeeded(rawTransportMode);
       this.ensureModelCatalogState();
       return;
     }
 
-    const rawTransportMode = extractRawTransportMode(raw.transportMode);
     this.settings = runtime.normalizeSettings(raw);
     this.runtimeState = runtime.migrateLegacyMessages({ sessions: [], activeSessionId: "", messagesBySession: {} });
     this.runtimeStateMigrationDirty = false;
     this.ensureRuntimeStateShape();
-    markTransportModeMigrationIfNeeded(rawTransportMode);
     this.ensureModelCatalogState();
   },
 
@@ -424,6 +439,9 @@ const sessionBootstrapMethods = {
   async bootstrapData(options = {}) {
     const force = Boolean(options && options.force);
     const waitRemote = Boolean(options && options.waitRemote);
+    const startRemote = Object.prototype.hasOwnProperty.call(options || {}, "startRemote")
+      ? Boolean(options.startRemote)
+      : true;
 
     if (force) {
       this.bootstrapLocalDone = false;
@@ -432,7 +450,7 @@ const sessionBootstrapMethods = {
 
     await this.bootstrapLocalData({ force });
 
-    const shouldStartRemote = force || !this.bootstrapRemoteDone;
+    const shouldStartRemote = startRemote && (force || !this.bootstrapRemoteDone);
     if (shouldStartRemote && !this.bootstrapInflight) {
       this.bootstrapInflight = (async () => {
         try {
@@ -458,6 +476,7 @@ const sessionBootstrapMethods = {
       remoteDone: Boolean(this.bootstrapRemoteDone),
       remoteAt: Number(this.bootstrapRemoteAt || 0),
       remoteInflight: Boolean(this.bootstrapInflight),
+      remoteSkipped: !startRemote,
     };
   },
 };

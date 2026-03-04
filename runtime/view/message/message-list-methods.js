@@ -10,6 +10,16 @@ const {
   showCopyFeedback,
 } = domUtils;
 
+const MAX_RENDER_MARKDOWN_CHARS = 24000;
+const MAX_RENDER_REASONING_CHARS = 16000;
+
+function clampRenderText(value, maxLen = MAX_RENDER_MARKDOWN_CHARS) {
+  const raw = String(value || "");
+  const limit = Math.max(512, Number(maxLen) || MAX_RENDER_MARKDOWN_CHARS);
+  if (raw.length <= limit) return raw;
+  return `${raw.slice(0, limit)}\n\n...(truncated ${raw.length - limit} chars)`;
+}
+
 function renderMessages(options = {}) {
   const container = this.elements.messages;
   if (!container) return;
@@ -192,7 +202,7 @@ function renderMessageItem(parent, message) {
     const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
     if (message.role === "assistant" && message.reasoning && !hasReasoningBlocks) {
       const reasoningBody = this.ensureReasoningContainer(row, true);
-      if (reasoningBody) reasoningBody.textContent = message.reasoning;
+      if (reasoningBody) reasoningBody.textContent = clampRenderText(message.reasoning, MAX_RENDER_REASONING_CHARS);
     } else if (message.role === "assistant" && hasReasoningBlocks) {
       this.removeStandaloneReasoningContainer(row);
     }
@@ -205,7 +215,7 @@ function renderMessageItem(parent, message) {
     return;
   }
 
-  const textForRender = normalizeMarkdownForDisplay(message.text || "");
+  const textForRender = normalizeMarkdownForDisplay(clampRenderText(message.text || "", MAX_RENDER_MARKDOWN_CHARS));
   const hasReasoning = Boolean(message.reasoning && String(message.reasoning).trim());
   const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
   const hasBlocks = this.visibleAssistantBlocks(message.blocks).length > 0;
@@ -226,12 +236,14 @@ function renderMessageItem(parent, message) {
   }
 
   if (message.role === "assistant" && hasReasoning && !hasReasoningBlocks) {
-    const reasoningBody = this.ensureReasoningContainer(row, !textForRender);
-    if (reasoningBody) {
-      const reasoningText = normalizeMarkdownForDisplay(message.reasoning || "");
-      this.renderMarkdownSafely(reasoningBody, reasoningText, () => {
-        this.enhanceCodeBlocks(reasoningBody);
-      });
+      const reasoningBody = this.ensureReasoningContainer(row, !textForRender);
+      if (reasoningBody) {
+        const reasoningText = normalizeMarkdownForDisplay(
+          clampRenderText(message.reasoning || "", MAX_RENDER_REASONING_CHARS),
+        );
+        this.renderMarkdownSafely(reasoningBody, reasoningText, () => {
+          this.enhanceCodeBlocks(reasoningBody);
+        });
     }
   } else if (message.role === "assistant" && hasReasoningBlocks) {
     this.removeStandaloneReasoningContainer(row);

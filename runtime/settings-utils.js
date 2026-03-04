@@ -60,8 +60,6 @@ function normalizeLinkResolver(raw) {
 
 const DEFAULT_SETTINGS = {
   uiLanguage: "auto",
-  transportMode: "compat",
-  experimentalSdkEnabled: false,
   cliPath: "",
   autoDetectCli: true,
   skillsDir: ".opencode/skills",
@@ -94,19 +92,12 @@ function migrateLegacySettings(raw) {
   delete data.customProviderId;
   delete data.customApiKey;
   delete data.customBaseUrl;
-
-  const transportModeRaw = String(data.transportMode || "").trim().toLowerCase();
-  if (!transportModeRaw) data.transportMode = "compat";
-  else if (!["sdk", "compat"].includes(transportModeRaw)) data.transportMode = "compat";
-  else data.transportMode = transportModeRaw;
+  delete data.transportMode;
+  delete data.experimentalSdkEnabled;
 
   if (data.prependSkillPrompt === false && !data.skillInjectMode) data.skillInjectMode = "off";
   if (data.prependSkillPrompt === true && !data.skillInjectMode) data.skillInjectMode = "summary";
   delete data.prependSkillPrompt;
-
-  if (typeof data.experimentalSdkEnabled !== "boolean") {
-    data.experimentalSdkEnabled = false;
-  }
 
   return data;
 }
@@ -121,11 +112,6 @@ function normalizeSettings(raw) {
     else merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
   }
 
-  if (!["sdk", "compat"].includes(String(merged.transportMode || "").trim().toLowerCase())) {
-    merged.transportMode = "compat";
-  }
-  merged.experimentalSdkEnabled = Boolean(merged.experimentalSdkEnabled);
-  if (!merged.experimentalSdkEnabled) merged.transportMode = "compat";
   if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
   if (!["auto", "native", "wsl"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
     merged.launchStrategy = "auto";
@@ -135,7 +121,6 @@ function normalizeSettings(raw) {
   merged.cliPath = String(merged.cliPath || "").trim();
   merged.skillsDir = String(merged.skillsDir || DEFAULT_SETTINGS.skillsDir).trim();
   merged.defaultModel = String(merged.defaultModel || "").trim();
-  merged.transportMode = String(merged.transportMode || "compat").trim().toLowerCase();
   merged.launchStrategy = String(merged.launchStrategy || "auto").trim().toLowerCase();
   merged.wslDistro = String(merged.wslDistro || "").trim();
 

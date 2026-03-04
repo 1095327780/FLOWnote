@@ -615,6 +615,7 @@ body.theme-dark .oc-surface {
 }
 
 .oc-connection-indicator {
+  position: relative;
   display: inline-flex;
   align-items: center;
   min-height: 30px;
@@ -622,12 +623,25 @@ body.theme-dark .oc-surface {
 }
 
 .oc-connection-dot {
+  cursor: pointer;
   width: 10px;
   height: 10px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--text-warning) 48%, var(--oc-border));
   background: color-mix(in srgb, var(--text-warning) 70%, black 30%);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--background-primary) 82%, transparent);
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+}
+
+.oc-connection-dot:hover {
+  filter: brightness(1.08);
+  transform: scale(1.06);
+}
+
+.oc-connection-dot:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--background-primary) 60%, transparent),
+    0 0 0 4px color-mix(in srgb, rgb(var(--oc-brand-rgb)) 42%, transparent);
 }
 
 .oc-connection-dot.ok {
@@ -643,6 +657,55 @@ body.theme-dark .oc-surface {
 .oc-connection-dot.warn {
   border-color: color-mix(in srgb, var(--text-warning) 55%, var(--oc-border));
   background: color-mix(in srgb, var(--text-warning) 72%, black 28%);
+}
+
+.oc-connection-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 80;
+  width: min(420px, calc(100vw - 32px));
+  border-radius: 10px;
+  border: 1px solid var(--oc-border);
+  background: color-mix(in srgb, var(--background-primary) 96%, black 4%);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+  padding: 10px 12px;
+}
+
+.oc-connection-popover.is-open {
+  display: block;
+}
+
+.oc-connection-popover-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 7px;
+}
+
+.oc-connection-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.oc-connection-popover-line {
+  font-size: 12px;
+  line-height: 1.42;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.oc-connection-popover-line code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  border: 1px solid var(--oc-border);
+  background: color-mix(in srgb, var(--background-secondary) 84%, transparent);
+  color: var(--text-normal);
+  padding: 3px 6px;
 }
 
 .oc-select,

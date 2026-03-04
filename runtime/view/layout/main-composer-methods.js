@@ -1,6 +1,145 @@
 const { Notice, setIcon } = require("obsidian");
 const { tr } = require("./shared-utils");
 
+function normalizeDiagnosticsResult(result) {
+  const raw = result && typeof result === "object" ? result : {};
+  const connection = raw.connection && typeof raw.connection === "object" ? raw.connection : {};
+  const executable = raw.executable && typeof raw.executable === "object" ? raw.executable : {};
+  return {
+    connection: {
+      ok: Boolean(connection.ok),
+      mode: String(connection.mode || "sdk"),
+      error: String(connection.error || "").trim(),
+    },
+    executable: {
+      ok: Boolean(executable.ok),
+      path: String(executable.path || "").trim(),
+      hint: String(executable.hint || "").trim(),
+    },
+  };
+}
+
+function connectionCheckCommands() {
+  if (typeof process !== "undefined" && process && process.platform === "win32") {
+    return ["opencode --version", "where opencode"];
+  }
+  return ["opencode --version", "which opencode"];
+}
+
+function isLikelyMissingOpenCode(result) {
+  const normalized = normalizeDiagnosticsResult(result);
+  if (!normalized.executable.ok) return true;
+  const err = normalized.connection.error.toLowerCase();
+  if (!err) return false;
+  return /not found|command not found|enoent|executable not found|未找到|找不到/.test(err);
+}
+
+function isLikelyWindowsWslInstallIssue(result) {
+  const isWindows = typeof process !== "undefined" && process && process.platform === "win32";
+  if (!isWindows) return false;
+  if (isLikelyMissingOpenCode(result)) return false;
+  const normalized = normalizeDiagnosticsResult(result);
+  const err = normalized.connection.error.toLowerCase();
+  return /wsl|failed to fetch|econnrefused|err_connection_refused|127\.0\.0\.1|connection/i.test(err);
+}
+
+function renderConnectionStatusPopoverContent(view, result) {
+  const popover = view.elements && view.elements.statusPopover;
+  if (!popover) return;
+  const hasResult = Boolean(result && typeof result === "object" && result.connection && result.executable);
+  const normalized = normalizeDiagnosticsResult(result);
+  popover.empty();
+
+  const title = popover.createDiv({ cls: "oc-connection-popover-title" });
+  const body = popover.createDiv({ cls: "oc-connection-popover-body" });
+
+  const appendLine = (text) => {
+    if (!text) return;
+    body.createDiv({ cls: "oc-connection-popover-line", text: String(text) });
+  };
+
+  const appendCommand = (cmd) => {
+    if (!cmd) return;
+    const line = body.createDiv({ cls: "oc-connection-popover-line" });
+    line.createEl("code", { text: String(cmd) });
+  };
+
+  const appendCheckCommands = () => {
+    connectionCheckCommands().forEach((cmd) => appendCommand(cmd));
+  };
+
+  if (!hasResult) {
+    title.setText("正在检测 OpenCode 连接状态");
+    appendLine("点击绿色状态点会自动刷新连接状态。");
+    appendLine("如果长时间无法连接，可先检查本机安装：");
+    appendCheckCommands();
+    return;
+  }
+
+  if (normalized.connection.ok) {
+    title.setText("OpenCode成功连接");
+    appendLine(`连接模式：${normalized.connection.mode.toUpperCase()}`);
+    if (normalized.executable.path) appendLine(`执行路径：${normalized.executable.path}`);
+    return;
+  }
+
+  if (isLikelyMissingOpenCode(normalized)) {
+    title.setText("OpenCode连接失败：未检测到可用安装");
+    appendLine("请先在终端检查 OpenCode 是否安装正常：");
+    appendCheckCommands();
+    if (normalized.executable.hint) appendLine(`提示：${normalized.executable.hint}`);
+    if (normalized.connection.error) appendLine(`错误：${normalized.connection.error}`);
+    return;
+  }
+
+  if (isLikelyWindowsWslInstallIssue(normalized)) {
+    title.setText("OpenCode连接失败：可能是 Windows + WSL 安装导致");
+    appendLine("请改为在 Windows 本机用 Node.js 安装 OpenCode：");
+    appendCommand("node -v");
+    appendCommand("npm -v");
+    appendCommand("npm install -g @opencode-ai/opencode");
+    appendCommand("opencode --version");
+    appendCommand("where opencode");
+    appendLine("安装后重启 Obsidian，再点击状态点刷新连接。");
+    if (normalized.connection.error) appendLine(`错误：${normalized.connection.error}`);
+    return;
+  }
+
+  title.setText("OpenCode连接失败");
+  appendLine("可先执行以下命令检查连接：");
+  appendCheckCommands();
+  if (normalized.connection.error) appendLine(`错误：${normalized.connection.error}`);
+}
+
+function closeConnectionStatusPopover(view) {
+  const popover = view.elements && view.elements.statusPopover;
+  if (!popover) return;
+  popover.removeClass("is-open");
+  if (view.elements && view.elements.statusDot) {
+    view.elements.statusDot.setAttribute("aria-expanded", "false");
+  }
+}
+
+function openConnectionStatusPopover(view) {
+  const popover = view.elements && view.elements.statusPopover;
+  if (!popover) return;
+  popover.addClass("is-open");
+  if (view.elements && view.elements.statusDot) {
+    view.elements.statusDot.setAttribute("aria-expanded", "true");
+  }
+}
+
+async function refreshConnectionStatusPopover(view, force = true) {
+  const diagnosticsService = view && view.plugin ? view.plugin.diagnosticsService : null;
+  if (!diagnosticsService || typeof diagnosticsService.runCached !== "function") {
+    renderConnectionStatusPopoverContent(view, null);
+    return;
+  }
+  const result = await diagnosticsService.runCached(0, Boolean(force));
+  view.applyStatus(result);
+  renderConnectionStatusPopoverContent(view, result);
+}
+
 function renderMain(main) {
   main.empty();
   if (typeof this.closeLinkedContextFilePicker === "function") {
@@ -13,8 +152,50 @@ function renderMain(main) {
 
   const connectionIndicator = toolbarLeft.createDiv({ cls: "oc-connection-indicator" });
   this.elements.statusDot = connectionIndicator.createDiv({ cls: "oc-connection-dot warn" });
+  this.elements.statusDot.setAttr("role", "button");
+  this.elements.statusDot.setAttr("tabindex", "0");
+  this.elements.statusDot.setAttr("aria-haspopup", "dialog");
+  this.elements.statusDot.setAttr("aria-expanded", "false");
   this.elements.statusDot.setAttribute("aria-label", tr(this, "view.connection.unknown", "Connection status unknown"));
   this.elements.statusDot.setAttribute("title", tr(this, "view.connection.unknown", "Connection status unknown"));
+  this.elements.statusPopover = connectionIndicator.createDiv({ cls: "oc-connection-popover" });
+  renderConnectionStatusPopoverContent(this, this.latestDiagnosticsResult || null);
+
+  const toggleConnectionPopover = () => {
+    const popover = this.elements && this.elements.statusPopover;
+    if (!popover) return;
+    if (popover.hasClass("is-open")) {
+      closeConnectionStatusPopover(this);
+      return;
+    }
+    openConnectionStatusPopover(this);
+    renderConnectionStatusPopoverContent(this, this.latestDiagnosticsResult || null);
+    void refreshConnectionStatusPopover(this, true).catch((error) => {
+      if (this.plugin && typeof this.plugin.log === "function") {
+        this.plugin.log(`refresh connection popover failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      renderConnectionStatusPopoverContent(this, this.latestDiagnosticsResult || null);
+    });
+  };
+
+  const onDotActivate = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleConnectionPopover();
+  };
+  this.elements.statusDot.addEventListener("click", onDotActivate);
+  this.elements.statusDot.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      onDotActivate(event);
+    }
+  });
+  connectionIndicator.addEventListener("click", (event) => event.stopPropagation());
+  if (!this.connectionPopoverDocumentBound) {
+    this.connectionPopoverDocumentBound = true;
+    this.registerDomEvent(document, "click", () => {
+      closeConnectionStatusPopover(this);
+    });
+  }
 
   const settingsBtn = this.buildIconButton(toolbarRight, "settings", tr(this, "view.settings", "Settings"), () => this.openSettings());
   settingsBtn.addClass("oc-toolbar-btn");
@@ -24,7 +205,6 @@ function renderMain(main) {
   this.bindMessagesScrollTracking();
   this.elements.inlineQuestionHost = messagesWrapper.createDiv({ cls: "oc-inline-question-host" });
   this.renderMessages();
-  void this.refreshPendingQuestionRequests({ silent: true }).catch(() => {});
 
   const navSidebar = messagesWrapper.createDiv({ cls: "oc-nav-sidebar visible" });
   const topBtn = navSidebar.createEl("button", { cls: "oc-nav-btn oc-nav-btn-top" });
@@ -183,18 +363,31 @@ function renderMain(main) {
   const diagnosticsService = this.plugin && this.plugin.diagnosticsService;
   if (diagnosticsService) {
     const cached = diagnosticsService.getLastResult();
-    if (cached) this.applyStatus(cached);
-    diagnosticsService
-      .runCached(15000, false)
-      .then((r) => this.applyStatus(r))
-      .catch(() => {
-      });
+    if (cached) {
+      this.applyStatus(cached);
+      renderConnectionStatusPopoverContent(this, cached);
+    }
+    if (typeof diagnosticsService.runCached === "function") {
+      void diagnosticsService.runCached(10_000, false)
+        .then((result) => {
+          if (result) {
+            this.applyStatus(result);
+            renderConnectionStatusPopoverContent(this, result);
+          }
+        })
+        .catch((error) => {
+          if (this.plugin && typeof this.plugin.log === "function") {
+            this.plugin.log(`view diagnostics refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        });
+    }
   }
 }
 
 function applyStatus(result) {
   const dot = this.elements.statusDot;
   if (!dot) return;
+  this.latestDiagnosticsResult = result && typeof result === "object" ? result : null;
 
   dot.removeClass("ok", "error", "warn");
 

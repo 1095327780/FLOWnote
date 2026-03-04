@@ -491,3 +491,166 @@ test("event reducer should keep skill block when assistant message id switches",
   assert.equal(String(snap.blocks[0].tool || "").toLowerCase(), "skill");
   assert.equal(snap.blocks[0].toolInput.skill, "ah-month");
 });
+
+test("event reducer should consume message.part.delta updates for text parts", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_t1",
+        type: "text",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_1",
+      messageID: "msg_a",
+      partID: "prt_t1",
+      field: "text",
+      delta: "正在处理",
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_1",
+      messageID: "msg_a",
+      partID: "prt_t1",
+      field: "text",
+      delta: "正在处理你的请求",
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.equal(snap.text, "正在处理你的请求");
+});
+
+test("event reducer should merge tool part updates by callID even when part id changes", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "part_tool_running",
+        type: "tool",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        callID: "call_1",
+        tool: "background_output",
+        state: {
+          status: "running",
+          input: { task_id: "task_1" },
+          time: { start: startedAt + 10 },
+        },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "part_tool_completed",
+        type: "tool",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        callID: "call_1",
+        tool: "background_output",
+        state: {
+          status: "completed",
+          title: "Background output",
+          input: { task_id: "task_1" },
+          output: "done",
+          metadata: {},
+          time: { start: startedAt + 10, end: startedAt + 30 },
+        },
+      },
+    },
+  });
+
+  const snap = reducer.snapshot();
+  const tools = (Array.isArray(snap.blocks) ? snap.blocks : [])
+    .filter((block) => block && String(block.type || "").toLowerCase() === "tool");
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].id, "tool:call_1");
+  assert.equal(tools[0].status, "completed");
+});
+
+test("event reducer should adopt assistant message id from reasoning part when message.updated is delayed", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_user",
+        role: "user",
+        sessionID: "ses_1",
+        time: { created: startedAt + 1 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_reasoning_1",
+        type: "reasoning",
+        sessionID: "ses_1",
+        messageID: "msg_assistant",
+        text: "思考中",
+      },
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.equal(snap.messageId, "msg_assistant");
+  assert.equal(snap.reasoning, "思考中");
+});

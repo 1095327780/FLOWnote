@@ -1,4 +1,8 @@
 const { tFromContext } = require("../../i18n-runtime");
+const INTERNAL_NOISY_TOOL_NAMES = new Set([
+  "background_output",
+  "background_cancel",
+]);
 
 function ensureReasoningContainer(row, openByDefault) {
   let details = row.querySelector(".oc-message-reasoning");
@@ -438,6 +442,11 @@ function visibleAssistantBlocks(rawBlocks) {
     const type = String(block.type || "").trim().toLowerCase();
     if (!type) return false;
     if (type === "step-start" || type === "step-finish") return false;
+    if (type === "tool") {
+      const toolName = String((block.tool || "")).trim().toLowerCase();
+      const status = normalizeBlockStatus(block.status);
+      if (INTERNAL_NOISY_TOOL_NAMES.has(toolName) && status !== "error") return false;
+    }
     return true;
   });
 }

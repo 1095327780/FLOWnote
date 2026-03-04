@@ -3,27 +3,19 @@ const assert = require("node:assert/strict");
 
 const { normalizeSettings } = require("../../runtime/settings-utils");
 
-test("normalizeSettings should default to compat and disable sdk by default", () => {
-  const out = normalizeSettings({ transportMode: "sdk" });
-  assert.equal(out.experimentalSdkEnabled, false);
-  assert.equal(out.transportMode, "compat");
+test("normalizeSettings should remove legacy transport flags by default", () => {
+  const out = normalizeSettings({});
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "experimentalSdkEnabled"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "transportMode"), false);
 });
 
-test("normalizeSettings should keep sdk mode when experimental flag is enabled", () => {
+test("normalizeSettings should drop legacy transport flags from persisted input", () => {
   const out = normalizeSettings({
-    transportMode: "sdk",
-    experimentalSdkEnabled: true,
+    transportMode: "compat",
+    experimentalSdkEnabled: false,
   });
-  assert.equal(out.experimentalSdkEnabled, true);
-  assert.equal(out.transportMode, "sdk");
-});
-
-test("normalizeSettings should normalize invalid transport values to compat", () => {
-  const out = normalizeSettings({
-    transportMode: "invalid",
-    experimentalSdkEnabled: true,
-  });
-  assert.equal(out.transportMode, "compat");
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "experimentalSdkEnabled"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "transportMode"), false);
 });
 
 test("normalizeSettings should drop legacy plugin-side auth fields", () => {

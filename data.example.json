@@ -1,8 +1,6 @@
 {
   "schemaVersion": 1,
   "settings": {
-    "transportMode": "compat",
-    "experimentalSdkEnabled": false,
     "cliPath": "",
     "autoDetectCli": true,
     "skillsDir": ".opencode/skills",

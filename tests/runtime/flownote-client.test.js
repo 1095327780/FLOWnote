@@ -38,69 +38,45 @@ function createTransportClass(label, options = {}) {
   return TransportMock;
 }
 
-test("FLOWnoteClient should use compat path when experimental sdk is disabled", async () => {
-  const SdkTransport = createTransportClass("sdk");
-  const CompatTransport = createTransportClass("compat");
-  const client = new FLOWnoteClient({
-    settings: { transportMode: "sdk", experimentalSdkEnabled: false },
-    SdkTransport,
-    CompatTransport,
-  });
-
-  const result = await client.testConnection();
-  assert.equal(result.mode, "compat");
-  assert.equal(CompatTransport.instances[0].calls.length, 1);
-  assert.equal(SdkTransport.instances[0].calls.length, 0);
-  assert.equal(client.lastMode, "compat");
+test("FLOWnoteClient should require injected SdkTransport", async () => {
+  assert.throws(() => new FLOWnoteClient({ settings: {} }), /SdkTransport/);
 });
 
-test("FLOWnoteClient should use sdk path only when experimental sdk is enabled", async () => {
+test("FLOWnoteClient should use sdk path", async () => {
   const SdkTransport = createTransportClass("sdk");
-  const CompatTransport = createTransportClass("compat");
   const client = new FLOWnoteClient({
-    settings: { transportMode: "sdk", experimentalSdkEnabled: true },
+    settings: {},
     SdkTransport,
-    CompatTransport,
   });
 
   const result = await client.testConnection();
   assert.equal(result.mode, "sdk");
   assert.equal(SdkTransport.instances[0].calls.length, 1);
-  assert.equal(CompatTransport.instances[0].calls.length, 0);
   assert.equal(client.lastMode, "sdk");
 });
 
-test("FLOWnoteClient should fallback to compat when sdk experimental path fails", async () => {
+test("FLOWnoteClient should fail fast when sdk path fails", async () => {
   const SdkTransport = createTransportClass("sdk", { failTestConnection: true });
-  const CompatTransport = createTransportClass("compat");
   const client = new FLOWnoteClient({
-    settings: { transportMode: "sdk", experimentalSdkEnabled: true },
+    settings: {},
     SdkTransport,
-    CompatTransport,
   });
 
-  const result = await client.testConnection();
-  assert.equal(result.mode, "compat");
+  await assert.rejects(async () => client.testConnection(), /sdk failed/);
   assert.equal(SdkTransport.instances[0].calls.length, 1);
-  assert.equal(CompatTransport.instances[0].calls.length, 1);
-  assert.equal(client.lastMode, "compat");
 });
 
 test("FLOWnoteClient listSessionMessages should return transport result", async () => {
   const SdkTransport = createTransportClass("sdk", {
     sessionMessages: [{ id: "m1", info: { role: "assistant" }, parts: [] }],
   });
-  const CompatTransport = createTransportClass("compat", {
-    sessionMessages: [{ id: "m2", info: { role: "assistant" }, parts: [] }],
-  });
   const client = new FLOWnoteClient({
-    settings: { transportMode: "compat", experimentalSdkEnabled: false },
+    settings: {},
     SdkTransport,
-    CompatTransport,
   });
 
   const list = await client.listSessionMessages({ sessionId: "s1" });
   assert.equal(Array.isArray(list), true);
   assert.equal(list.length, 1);
-  assert.equal(CompatTransport.instances[0].calls[0], "listSessionMessages:s1");
+  assert.equal(SdkTransport.instances[0].calls[0], "listSessionMessages:s1");
 });

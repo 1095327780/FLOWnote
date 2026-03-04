@@ -34,11 +34,17 @@ function resolveCommandFromSet(commandName, names) {
   const normalized = normalizeSlashCommandName(commandName);
   if (!normalized) return { use: false, command: "" };
 
-  if (names.has(normalized)) {
+  const set = names instanceof Set ? names : new Set();
+  if (!set.size) {
+    // If command discovery temporarily fails, keep slash command routing instead of degrading to plain text.
     return { use: true, command: normalized };
   }
-  if (normalized === "model" && names.has("models")) return { use: true, command: "models" };
-  if (normalized === "models" && names.has("model")) return { use: true, command: "model" };
+
+  if (set.has(normalized)) {
+    return { use: true, command: normalized };
+  }
+  if (normalized === "model" && set.has("models")) return { use: true, command: "models" };
+  if (normalized === "models" && set.has("model")) return { use: true, command: "model" };
   return { use: false, command: normalized };
 }
 

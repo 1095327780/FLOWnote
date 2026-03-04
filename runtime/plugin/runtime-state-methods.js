@@ -18,14 +18,6 @@ const runtimeStateMethods = {
     this.runtimeState.lastLaunchProfile = this.normalizeLaunchProfile(this.runtimeState.lastLaunchProfile);
   },
 
-  markTransportModeCompatNormalization(rawValue) {
-    this.ensureRuntimeStateShape();
-    if (this.runtimeState.migrationFlags.transportModeCompatNormalized) return false;
-    this.runtimeState.migrationFlags.transportModeCompatNormalized = true;
-    this.log(`settings migration applied: transportMode ${String(rawValue || "unknown")} -> compat`);
-    return true;
-  },
-
   normalizeLaunchProfile(profile) {
     if (!profile || typeof profile !== "object") return null;
     const mode = String(profile.mode || "").trim().toLowerCase() === "wsl" ? "wsl" : "native";

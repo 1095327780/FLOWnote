@@ -8,6 +8,7 @@ const {
   payloadLooksInProgress,
   normalizeMarkdownForDisplay,
   chooseRicherResponse,
+  blocksFingerprint,
 } = require("../../runtime/assistant-payload-utils");
 
 test("normalizeMarkdownForDisplay should trim noisy spacing", () => {
@@ -176,6 +177,131 @@ test("extractAssistantPayloadFromEnvelope should compact large raw tool payloads
     Object.prototype.hasOwnProperty.call(block.raw.state, "output"),
     false,
   );
+});
+
+test("extractAssistantPayloadFromEnvelope should dedupe same tool call by callID", () => {
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        id: "tool_part_running",
+        type: "tool",
+        callID: "call_1",
+        tool: "background_output",
+        state: {
+          status: "running",
+          input: { task_id: "task_1" },
+          time: { start: 1 },
+        },
+      },
+      {
+        id: "tool_part_completed",
+        type: "tool",
+        callID: "call_1",
+        tool: "background_output",
+        state: {
+          status: "completed",
+          input: { task_id: "task_1" },
+          output: "{\"done\":true}",
+          title: "Background output",
+          metadata: {},
+          time: { start: 1, end: 2 },
+        },
+      },
+    ],
+  });
+
+  assert.equal(Array.isArray(payload.blocks), true);
+  const tools = payload.blocks.filter((block) => block && block.type === "tool");
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].id, "tool:call_1");
+  assert.equal(tools[0].status, "completed");
+});
+
+test("extractAssistantPayloadFromEnvelope should humanize tool title when sdk title is missing", () => {
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        id: "tool_part_1",
+        type: "tool",
+        tool: "background_output",
+        state: {
+          status: "running",
+          input: { task_id: "task_1" },
+          time: { start: 1 },
+        },
+      },
+    ],
+  });
+
+  assert.equal(payload.blocks.length, 1);
+  assert.equal(payload.blocks[0].title, "background output");
+});
+
+test("extractAssistantPayloadFromEnvelope should expose live tool output while running", () => {
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        id: "tool_part_live",
+        type: "tool",
+        tool: "background_output",
+        state: {
+          status: "running",
+          input: { task_id: "task_1" },
+          output: "step 1\nstep 2",
+          time: { start: 1 },
+        },
+      },
+    ],
+  });
+
+  assert.equal(payload.blocks.length, 1);
+  const block = payload.blocks[0];
+  assert.equal(block.type, "tool");
+  assert.equal(block.status, "running");
+  assert.match(String(block.detail || ""), /输出\(实时\)/);
+  assert.match(String(block.detail || ""), /step 2/);
+  assert.match(String(block.preview || ""), /step 1/);
+});
+
+test("blocksFingerprint should change when detail content changes with same length", () => {
+  const beforePayload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        id: "tool_part_live",
+        type: "tool",
+        tool: "background_output",
+        state: {
+          status: "running",
+          output: "abc123",
+          time: { start: 1 },
+        },
+      },
+    ],
+  });
+
+  const afterPayload = extractAssistantPayloadFromEnvelope({
+    info: { role: "assistant" },
+    parts: [
+      {
+        id: "tool_part_live",
+        type: "tool",
+        tool: "background_output",
+        state: {
+          status: "running",
+          output: "abd123",
+          time: { start: 1 },
+        },
+      },
+    ],
+  });
+
+  const before = blocksFingerprint(beforePayload.blocks || []);
+  const after = blocksFingerprint(afterPayload.blocks || []);
+  assert.notEqual(before, after);
 });
 
 test("extractAssistantPayloadFromEnvelope should surface info.error even when role is non-assistant", () => {

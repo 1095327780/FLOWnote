@@ -261,12 +261,42 @@ function compactPartRaw(part, type) {
   return base;
 }
 
+function humanizeToolName(toolName) {
+  const raw = String(toolName || "").trim();
+  if (!raw) return "";
+  if (/^[a-z0-9_-]+$/i.test(raw)) {
+    return raw.replace(/[_-]+/g, " ").trim();
+  }
+  return raw;
+}
+
+function upsertBlockById(blocks, indexById, block) {
+  if (!block || typeof block !== "object") return;
+  const id = typeof block.id === "string" ? block.id.trim() : "";
+  if (!id) {
+    blocks.push(block);
+    return;
+  }
+  if (!indexById.has(id)) {
+    indexById.set(id, blocks.length);
+    blocks.push(block);
+    return;
+  }
+  const index = Number(indexById.get(id));
+  if (Number.isFinite(index) && index >= 0 && index < blocks.length) {
+    blocks[index] = block;
+  }
+}
+
 function toPartBlock(part, index) {
   if (!part || typeof part !== "object") return null;
   const type = typeof part.type === "string" ? part.type : "";
   if (!type || type === "text") return null;
 
-  const id = typeof part.id === "string" && part.id ? part.id : `${type}:${index}`;
+  const toolCallId = type === "tool" && typeof part.callID === "string" && part.callID.trim()
+    ? part.callID.trim()
+    : "";
+  const id = toolCallId ? `tool:${toolCallId}` : (typeof part.id === "string" && part.id ? part.id : `${type}:${index}`);
   const block = {
     id,
     type,
@@ -296,14 +326,18 @@ function toPartBlock(part, index) {
     const state = part.state && typeof part.state === "object" ? part.state : {};
     const status = typeof state.status === "string" ? state.status : "pending";
     const input = state.input && typeof state.input === "object" ? state.input : {};
+    const outputText = typeof state.output === "string" ? state.output : "";
+    const hasOutputText = Boolean(outputText.trim());
     const displayName =
       (typeof state.title === "string" && state.title.trim()) ||
       (typeof input.skill === "string" && input.skill.trim() ? `Skill: ${input.skill.trim()}` : "") ||
+      humanizeToolName(toolName) ||
       toolName;
 
     block.title = displayName;
     block.status = status;
     block.summary = `工具: ${toolName}`;
+    block.callId = toolCallId;
     block.metadata = state.metadata || null;
     block.tool = toolName;
     block.toolInput = input;
@@ -343,11 +377,11 @@ function toPartBlock(part, index) {
     }
 
     if (status === "completed") {
-      if (typeof state.output === "string" && state.output.trim()) {
+      if (hasOutputText) {
         chunks.push("输出:");
-        chunks.push(stringifyForDisplay(state.output, 1800));
-        block.preview = makePreviewText(state.output, 280);
-        const parsedOutput = parseJsonObject(state.output);
+        chunks.push(stringifyForDisplay(outputText, 1800));
+        block.preview = makePreviewText(outputText, 280);
+        const parsedOutput = parseJsonObject(outputText);
         if (parsedOutput) {
           block.parsedOutput = parsedOutput;
         }
@@ -369,6 +403,11 @@ function toPartBlock(part, index) {
         chunks.push(errText.trim());
         block.preview = makePreviewText(errText, 220);
       }
+    } else if (hasOutputText) {
+      // Show incremental tool output while the step is running to match official live feedback.
+      chunks.push("输出(实时):");
+      chunks.push(stringifyForDisplay(outputText, 2000));
+      block.preview = makePreviewText(outputText, 280);
     }
 
     if (!block.preview) {
@@ -486,6 +525,8 @@ function blocksFingerprint(blocks) {
         const detail = String(b && b.detail ? b.detail : "");
         const summary = String(b && b.summary ? b.summary : "").replace(/\s+/g, " ").trim();
         const title = String(b && b.title ? b.title : "").replace(/\s+/g, " ").trim();
+        const detailHead = detail.slice(0, 48).replace(/\s+/g, " ").trim();
+        const detailTail = detail.slice(-48).replace(/\s+/g, " ").trim();
         return [
           String((b && b.id) || ""),
           String((b && b.type) || ""),
@@ -493,6 +534,8 @@ function blocksFingerprint(blocks) {
           title.slice(0, 64),
           summary.slice(0, 96),
           String(detail.length),
+          detailHead,
+          detailTail,
         ].join("|");
       })
       .join("||");
@@ -584,6 +627,7 @@ function extractAssistantParts(parts) {
   const reasoningChunks = new Map();
   const metaChunks = [];
   const blocks = [];
+  const blockIndexById = new Map();
 
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i];
@@ -599,7 +643,7 @@ function extractAssistantParts(parts) {
     if (type === "reasoning") {
       if (typeof part.text === "string") collectPartText(reasoningChunks, part, i, part.text);
       const reasoningBlock = toPartBlock(part, i);
-      if (reasoningBlock) blocks.push(reasoningBlock);
+      if (reasoningBlock) upsertBlockById(blocks, blockIndexById, reasoningBlock);
       continue;
     }
 
@@ -615,7 +659,7 @@ function extractAssistantParts(parts) {
 
     const block = toPartBlock(part, i);
     if (block) {
-      blocks.push(block);
+      upsertBlockById(blocks, blockIndexById, block);
     }
   }
 

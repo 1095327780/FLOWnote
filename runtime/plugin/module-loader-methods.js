@@ -15,7 +15,6 @@ function createModuleLoaderMethods(options = {}) {
       const view = require("../flownote-view");
       const client = require("../flownote-client");
       const sdkTransport = require("../sdk-transport");
-      const compatTransport = require("../compat-transport");
       const sessionStore = require("../session-store");
       const diagnosticsService = require("../diagnostics-service");
       const settingsTab = require("../settings-tab");
@@ -29,7 +28,6 @@ function createModuleLoaderMethods(options = {}) {
         FLOWnoteAssistantView: view && view.FLOWnoteAssistantView ? view.FLOWnoteAssistantView : null,
         FLOWnoteClient: client && client.FLOWnoteClient ? client.FLOWnoteClient : null,
         SdkTransport: sdkTransport && sdkTransport.SdkTransport ? sdkTransport.SdkTransport : null,
-        CompatTransport: compatTransport && compatTransport.CompatTransport ? compatTransport.CompatTransport : null,
         SessionStore: sessionStore && sessionStore.SessionStore ? sessionStore.SessionStore : null,
         DiagnosticsService: diagnosticsService && diagnosticsService.DiagnosticsService ? diagnosticsService.DiagnosticsService : null,
         FLOWnoteSettingsTab: settingsTab && settingsTab.FLOWnoteSettingsTab ? settingsTab.FLOWnoteSettingsTab : null,
@@ -44,7 +42,6 @@ function createModuleLoaderMethods(options = {}) {
         ["FLOWnoteAssistantView", this.runtimeModules.FLOWnoteAssistantView],
         ["FLOWnoteClient", this.runtimeModules.FLOWnoteClient],
         ["SdkTransport", this.runtimeModules.SdkTransport],
-        ["CompatTransport", this.runtimeModules.CompatTransport],
         ["SessionStore", this.runtimeModules.SessionStore],
         ["DiagnosticsService", this.runtimeModules.DiagnosticsService],
         ["FLOWnoteSettingsTab", this.runtimeModules.FLOWnoteSettingsTab],

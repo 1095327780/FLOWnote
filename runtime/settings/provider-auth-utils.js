@@ -179,6 +179,41 @@ const PROVIDER_COUNTRY_HINTS = [
   },
 ];
 
+const COMMON_PROVIDER_HINTS = [
+  "openai",
+  "deepseek",
+  "qwen",
+  "dashscope",
+  "alibaba",
+  "moonshot",
+  "kimi",
+  "zhipu",
+  "glm",
+  "chatglm",
+  "hunyuan",
+  "tencent",
+  "doubao",
+  "volcengine",
+  "volc",
+  "bytedance",
+  "minimax",
+  "baidu",
+  "ernie",
+  "siliconflow",
+  "stepfun",
+  "yi",
+  "01ai",
+  "智谱",
+  "通义",
+  "豆包",
+  "百川",
+  "讯飞",
+  "腾讯",
+  "百度",
+  "阿里",
+  "月之暗面",
+];
+
 const COUNTRY_NAME_FALLBACKS = {
   CN: { "zh-CN": "中国", en: "China" },
   US: { "zh-CN": "美国", en: "United States" },
@@ -361,6 +396,23 @@ class ProviderAuthUtilsMethods {
       .join(" ")
       .toLowerCase();
     return content.includes(query);
+  }
+
+  isCommonProviderEntry(entry) {
+    const row = entry && typeof entry === "object" ? entry : {};
+    const countryCode = normalizeCountryCode(row.countryCode);
+    if (countryCode === "CN") return true;
+
+    const hintText = normalizeSearchToken([
+      row.providerID,
+      row.providerName,
+      row.countryLabel,
+      row.methodText,
+      row && row.provider && row.provider.displayName,
+      row && row.provider && row.provider.name,
+    ].filter(Boolean).join(" "));
+    if (!hintText) return false;
+    return COMMON_PROVIDER_HINTS.some((hint) => hintText.includes(normalizeSearchToken(hint)));
   }
 
 }

@@ -87,34 +87,37 @@ class ProviderAuthSectionMethods {
         { totalProviders, visibleCount, connectedCount },
       ));
 
-      const locale = this.plugin && typeof this.plugin.getEffectiveLocale === "function"
-        ? String(this.plugin.getEffectiveLocale() || "")
-        : "en";
-      const countryGroupsMap = new Map();
+      const groupMap = new Map();
       entries.forEach((entry) => {
-        const key = String(entry.countryCode || "ZZ");
-        let group = countryGroupsMap.get(key);
+        const key = this.isCommonProviderEntry(entry) ? "common" : "others";
+        let group = groupMap.get(key);
         if (!group) {
+          const label = key === "common"
+            ? t("settings.providerAuth.groupCommon", "常用")
+            : t("settings.providerAuth.groupOthers", "其他");
           group = {
             key,
-            label: String(entry.countryLabel || this.resolveProviderCountryLabel(key)),
+            label,
             entries: [],
           };
-          countryGroupsMap.set(key, group);
+          groupMap.set(key, group);
         }
         group.entries.push(entry);
       });
 
-      const countryGroups = Array.from(countryGroupsMap.values()).sort((a, b) => {
-        if (a.key === "ZZ" && b.key !== "ZZ") return 1;
-        if (a.key !== "ZZ" && b.key === "ZZ") return -1;
-        return a.label.localeCompare(b.label, locale || undefined);
+      const groups = Array.from(groupMap.values()).sort((a, b) => {
+        if (a.key === b.key) return 0;
+        if (a.key === "common") return -1;
+        return 1;
       });
 
-      countryGroups.forEach((group) => {
+      groups.forEach((group) => {
         const inGroup = group.entries;
 
-        inGroup.sort((a, b) => a.providerName.localeCompare(b.providerName));
+        inGroup.sort((a, b) => {
+          if (a.isConnected !== b.isConnected) return a.isConnected ? -1 : 1;
+          return a.providerName.localeCompare(b.providerName);
+        });
 
         const groupDetails = listEl.createEl("details");
         groupDetails.open = Boolean(query);
@@ -150,6 +153,7 @@ class ProviderAuthSectionMethods {
     };
 
     const loadProviders = async () => {
+      if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: start");
       refreshBtn.disabled = true;
       refreshBtn.setText(t("settings.providerAuth.refreshBusy", "刷新中..."));
       expandBtn.disabled = true;
@@ -158,7 +162,9 @@ class ProviderAuthSectionMethods {
       listEl.empty();
 
       try {
+        if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: listProviders");
         const providerResult = await this.plugin.opencodeClient.listProviders();
+        if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: listProviderAuthMethods");
         const authMapResult = await this.plugin.opencodeClient.listProviderAuthMethods();
 
         const providers = Array.isArray(providerResult && providerResult.all) ? [...providerResult.all] : [];
@@ -171,22 +177,51 @@ class ProviderAuthSectionMethods {
           .localeCompare(String(b && b.name ? b.name : b && b.id ? b.id : "")));
         this.providerAuthSnapshot = { providers, connectedSet, authMap };
         if (typeof this.plugin.refreshModelCatalog === "function") {
-          await this.plugin.refreshModelCatalog({
-            connectedProviders: connectedSet,
-            providerResult,
-          });
-          const view = typeof this.plugin.getAssistantView === "function" ? this.plugin.getAssistantView() : null;
-          if (view && typeof view.render === "function") view.render();
+          try {
+            if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: refreshModelCatalog");
+            await this.plugin.refreshModelCatalog({
+              connectedProviders: connectedSet,
+              providerResult,
+              notifyView: true,
+            });
+          } catch (refreshError) {
+            if (this.plugin && typeof this.plugin.log === "function") {
+              this.plugin.log(
+                `refresh model catalog from provider settings failed: ${
+                  refreshError instanceof Error ? refreshError.message : String(refreshError)
+                }`,
+              );
+            }
+          }
         }
+        if (typeof this.plugin.refreshDiagnosticsStatus === "function") {
+          try {
+            if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: diagnostics");
+            await this.plugin.refreshDiagnosticsStatus({ ttlMs: 0, force: true, applyView: true });
+          } catch (diagnosticsError) {
+            if (this.plugin && typeof this.plugin.log === "function") {
+              this.plugin.log(
+                `refresh diagnostics from provider settings failed: ${
+                  diagnosticsError instanceof Error ? diagnosticsError.message : String(diagnosticsError)
+                }`,
+              );
+            }
+          }
+        }
+        if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: render");
         renderFromSnapshot();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        if (this.plugin && typeof this.plugin.log === "function") {
+          this.plugin.log(`provider refresh: failed ${msg}`);
+        }
         statusEl.setText(t("settings.providerAuth.readFailed", "读取失败：{message}", { message: msg }));
         listEl.createDiv({
           text: t("settings.providerAuth.readFailedDetail", "读取 Provider 信息失败：{message}", { message: msg }),
           cls: "setting-item-description",
         });
       } finally {
+        if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: done");
         refreshBtn.disabled = false;
         refreshBtn.setText(t("settings.providerAuth.refresh", "刷新 Provider 状态"));
         expandBtn.disabled = false;
@@ -201,7 +236,10 @@ class ProviderAuthSectionMethods {
     expandBtn.addEventListener("click", () => toggleAllDetails(true));
     collapseBtn.addEventListener("click", () => toggleAllDetails(false));
     refreshBtn.addEventListener("click", loadProviders);
-    void loadProviders();
+    renderFromSnapshot();
+    if (!this.providerAuthSnapshot) {
+      void loadProviders();
+    }
   }
 
   renderProviderRow(context) {

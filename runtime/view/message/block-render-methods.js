@@ -24,6 +24,13 @@ const {
   patchHash,
 } = blockUtilsInternal;
 
+function clampRenderText(value, maxLen = 12000) {
+  const raw = String(value || "");
+  const limit = Math.max(512, Number(maxLen) || 12000);
+  if (raw.length <= limit) return raw;
+  return `${raw.slice(0, limit)}\n\n...(truncated ${raw.length - limit} chars)`;
+}
+
 function renderReasoningPart(container, block, messagePending) {
   const details = container.createEl("details", { cls: "oc-thinking-block oc-part-reasoning" });
   const status = this.resolveDisplayBlockStatus(block, messagePending);
@@ -38,7 +45,7 @@ function renderReasoningPart(container, block, messagePending) {
   });
 
   const body = details.createDiv({ cls: "oc-thinking-content" });
-  const detailText = typeof block.detail === "string" ? block.detail : "";
+  const detailText = clampRenderText(typeof block.detail === "string" ? block.detail : "", 16000);
   const content = normalizeMarkdownForDisplay(detailText);
   if (content) {
     if (messagePending) {
@@ -70,7 +77,7 @@ function renderToolPart(container, block, messagePending) {
     const suffix = questionItems.length > 1 ? ` (+${questionItems.length - 1})` : "";
     summaryText = truncateSummaryText(`${firstQuestion}${suffix}`);
   }
-  const detailText = String((block && block.detail) || "").trim();
+  const detailText = clampRenderText(String((block && block.detail) || "").trim(), 12000);
 
   const details = container.createEl("details", { cls: "oc-tool-call" });
   details.addClass(`is-${status}`);
@@ -120,7 +127,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   void message;
   void blockIndex;
   const status = this.resolveDisplayBlockStatus(block, messagePending);
-  const detailText = String((block && block.detail) || "").trim();
+  const detailText = clampRenderText(String((block && block.detail) || "").trim(), 12000);
   const entries = extractPatchFileEntries(block, detailText);
   const hash = patchHash(block);
   const shortHash = hash ? hash.slice(0, 12) : "";
@@ -187,13 +194,13 @@ function renderGenericPart(container, block, messagePending) {
   const title = typeof block.title === "string" ? block.title.trim() : "";
   if (title) card.createDiv({ cls: "oc-part-title", text: title });
 
-  const summary = typeof block.summary === "string" ? block.summary.trim() : "";
+  const summary = clampRenderText(typeof block.summary === "string" ? block.summary.trim() : "", 2400);
   if (summary) card.createDiv({ cls: "oc-part-summary", text: summary });
 
-  const preview = typeof block.preview === "string" ? block.preview.trim() : "";
+  const preview = clampRenderText(typeof block.preview === "string" ? block.preview.trim() : "", 3200);
   if (preview) card.createDiv({ cls: "oc-part-preview", text: preview });
 
-  const detail = typeof block.detail === "string" ? block.detail.trim() : "";
+  const detail = clampRenderText(typeof block.detail === "string" ? block.detail.trim() : "", 12000);
   if (detail) {
     const details = card.createEl("details", { cls: "oc-part-details" });
     details.createEl("summary", { text: tFromContext(this, "view.block.viewDetail", "View details") });
@@ -232,7 +239,7 @@ function renderAssistantBlocks(row, message) {
 }
 
 function renderAssistantMeta(row, message) {
-  const metaText = typeof message.meta === "string" ? message.meta.trim() : "";
+  const metaText = clampRenderText(typeof message.meta === "string" ? message.meta.trim() : "", 8000);
   if (!metaText) return;
   const pre = row.createEl("pre", { cls: "oc-message-meta", text: metaText });
   if (/error|failed|失败|status=\d{3}/i.test(metaText)) {

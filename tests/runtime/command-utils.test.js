@@ -28,6 +28,10 @@ test("resolveCommandFromSet should support alias fallback", () => {
   assert.deepEqual(resolveCommandFromSet("unknown", names), { use: false, command: "unknown" });
 });
 
+test("resolveCommandFromSet should keep slash routing when command list is unavailable", () => {
+  assert.deepEqual(resolveCommandFromSet("init", new Set()), { use: true, command: "init" });
+});
+
 test("findLatestAssistantMessage should pick newest assistant message", () => {
   const latest = findLatestAssistantMessage(
     [

@@ -64,28 +64,8 @@ class FLOWnoteAssistantView extends ItemView {
   }
 
   async onOpen() {
-    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     this.selectedModel = this.plugin.settings.defaultModel || "";
-    try {
-      await this.plugin.bootstrapData({ waitRemote: false });
-    } catch (e) {
-      new Notice(t("view.bootstrapFailed", "初始化失败: {message}", { message: e instanceof Error ? e.message : String(e) }));
-    }
     this.render();
-    const activeSessionId = String(this.plugin.sessionStore.state().activeSessionId || "").trim();
-    if (activeSessionId && typeof this.plugin.ensureSessionMessagesLoaded === "function") {
-      void this.plugin
-        .ensureSessionMessagesLoaded(activeSessionId, { force: false })
-        .then(async (changed) => {
-          if (!changed) return;
-          await this.plugin.persistState();
-          this.render();
-        })
-        .catch((error) => {
-          this.plugin.log(`initial session history hydrate failed: ${error instanceof Error ? error.message : String(error)}`);
-        });
-    }
-    void this.refreshPendingQuestionRequests({ force: true, silent: false }).catch(() => {});
   }
 
   onClose() {

@@ -1,5 +1,5 @@
+const fs = require("fs");
 const path = require("path");
-const { pathToFileURL } = require("url");
 const { createLinkedAbortController } = require("./http-utils");
 const { rt } = (() => {
   try {
@@ -39,62 +39,266 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function loadBundledSdkClientModule() {
+  return require("./vendor/opencode-sdk-v2-client.cjs");
+}
+
+function normalizeBaseUrl(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+function isLikelyNetworkFetchError(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (!message) return false;
+  return /failed to fetch|err_connection_refused|econnrefused|networkerror|network error/i.test(message);
+}
+
 class SdkTransport {
   constructor(options) {
     this.vaultPath = options.vaultPath;
     this.settings = options.settings;
     this.logger = typeof options.logger === "function" ? options.logger : () => {};
+    this.getPreferredLaunch = typeof options.getPreferredLaunch === "function" ? options.getPreferredLaunch : null;
+    this.onLaunchSuccess = typeof options.onLaunchSuccess === "function" ? options.onLaunchSuccess : null;
     this.client = null;
+    this.clientInitPromise = null;
+    this.bootstrapTransport = null;
+    this.baseUrl = "http://127.0.0.1:4096";
     this.commandCache = {
       at: 0,
       items: [],
     };
+    this.sdkTraceFile = "";
   }
 
   log(line) {
     this.logger(line);
   }
 
+  resolveSdkTraceFile() {
+    if (this.sdkTraceFile) return this.sdkTraceFile;
+    const base = String(this.vaultPath || "").trim();
+    if (!base) return "";
+    this.sdkTraceFile = path.join(base, ".obsidian", "plugins", "flownote", "sdk-runtime-trace.log");
+    return this.sdkTraceFile;
+  }
+
+  trace(line) {
+    if (!this.settings || !this.settings.debugLogs) return;
+    const file = this.resolveSdkTraceFile();
+    if (!file) return;
+    try {
+      fs.appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
+    } catch {
+    }
+  }
+
   updateSettings(settings) {
     this.settings = settings;
+    if (this.bootstrapTransport && typeof this.bootstrapTransport.updateSettings === "function") {
+      try {
+        this.bootstrapTransport.updateSettings(settings);
+      } catch {
+      }
+    }
+  }
+
+  getBootstrapTransport() {
+    if (this.bootstrapTransport) return this.bootstrapTransport;
+    const { CompatTransport } = require("./compat-transport");
+    this.bootstrapTransport = new CompatTransport({
+      vaultPath: this.vaultPath,
+      settings: this.settings,
+      logger: (line) => this.log(`sdk bootstrap: ${line}`),
+      getPreferredLaunch: this.getPreferredLaunch || undefined,
+      onLaunchSuccess: this.onLaunchSuccess || undefined,
+    });
+    return this.bootstrapTransport;
+  }
+
+  async probeBaseUrl(baseUrl) {
+    const normalized = normalizeBaseUrl(baseUrl);
+    if (!normalized) return false;
+    if (!globalThis || typeof globalThis.fetch !== "function") return false;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1200);
+    try {
+      const url = `${normalized}/global/health`;
+      const res = await globalThis.fetch(url, { method: "GET", signal: ctrl.signal });
+      return Boolean(res && res.ok);
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async ensureServiceBaseUrl(options = {}) {
+    const forceStart = Boolean(options && options.forceStart);
+    const fallbackUrl = "http://127.0.0.1:4096";
+
+    if (!forceStart) {
+      const candidate = normalizeBaseUrl(this.baseUrl || fallbackUrl) || fallbackUrl;
+      this.log(`sdk ensureServiceBaseUrl probe ${candidate}`);
+      const ok = await this.probeBaseUrl(candidate);
+      if (ok) {
+        this.baseUrl = candidate;
+        this.trace(`sdk ensureServiceBaseUrl probe ok ${candidate}`);
+        return this.baseUrl;
+      }
+      this.log(`sdk ensureServiceBaseUrl probe failed ${candidate}`);
+      this.trace(`sdk ensureServiceBaseUrl probe failed ${candidate}`);
+    }
+
+    this.log("sdk ensureServiceBaseUrl launch local opencode serve");
+    this.trace("sdk ensureServiceBaseUrl launch local opencode serve");
+    const bootstrap = this.getBootstrapTransport();
+    const launched = normalizeBaseUrl(await bootstrap.ensureStarted());
+    this.baseUrl = launched || fallbackUrl;
+    this.log(`sdk ensureServiceBaseUrl launch ok ${this.baseUrl}`);
+    this.trace(`sdk ensureServiceBaseUrl launch ok ${this.baseUrl}`);
+    return this.baseUrl;
+  }
+
+  async recoverFromNetworkFailure(actionName, error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    this.log(`sdk ${actionName}: network failure, recovering transport: ${msg}`);
+    this.trace(`sdk ${actionName}: network failure, recovering transport: ${msg}`);
+    this.client = null;
+    this.clientInitPromise = null;
+    this.baseUrl = "http://127.0.0.1:4096";
+    if (this.bootstrapTransport && typeof this.bootstrapTransport.stop === "function") {
+      try {
+        await this.bootstrapTransport.stop();
+      } catch {
+      }
+      this.bootstrapTransport = null;
+    }
+    await this.ensureServiceBaseUrl({ forceStart: true });
   }
 
   async ensureClient() {
     if (this.client) return this.client;
+    if (this.clientInitPromise) return this.clientInitPromise;
 
-    let mod = null;
-    const importErrors = [];
-    try {
-      mod = await import("@opencode-ai/sdk/v2/client");
-    } catch (e) {
-      importErrors.push(`@opencode-ai/sdk/v2/client: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    if (!mod) {
-      const local = path.join(this.vaultPath, ".opencode/node_modules/@opencode-ai/sdk/dist/v2/client.js");
+    this.clientInitPromise = (async () => {
+      this.log("sdk ensureClient start");
+      this.trace("sdk ensureClient start");
       try {
-        mod = await import(pathToFileURL(local).href);
-      } catch (e) {
-        importErrors.push(`${local}: ${e instanceof Error ? e.message : String(e)}`);
+        const nodeVersion = process && process.versions ? process.versions.node : "";
+        const electronVersion = process && process.versions ? process.versions.electron : "";
+        const chromeVersion = process && process.versions ? process.versions.chrome : "";
+        const procType = process && process.type ? process.type : "unknown";
+        this.log(`sdk env node=${nodeVersion} electron=${electronVersion} chrome=${chromeVersion} processType=${procType}`);
+        this.trace(`sdk env node=${nodeVersion} electron=${electronVersion} chrome=${chromeVersion} processType=${procType}`);
+      } catch {
       }
-    }
+      let clientMod = null;
+      const importErrors = [];
+      try {
+        this.log("sdk ensureClient load bundled opencode sdk begin");
+        this.trace("sdk ensureClient load bundled opencode sdk begin");
+        clientMod = loadBundledSdkClientModule();
+        this.log("sdk ensureClient load bundled opencode sdk ok");
+        this.trace("sdk ensureClient load bundled opencode sdk ok");
+      } catch (e) {
+        importErrors.push(`bundled opencode sdk: ${e instanceof Error ? e.message : String(e)}`);
+        this.log(`sdk ensureClient load bundled opencode sdk failed: ${e instanceof Error ? e.message : String(e)}`);
+        this.trace(`sdk ensureClient load bundled opencode sdk failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
 
-    if (!mod || typeof mod.createOpencodeClient !== "function") {
+      const looksLikeReadableStream = (value) => (
+        Boolean(value)
+        && typeof value === "object"
+        && typeof value.getReader === "function"
+        && typeof value.tee === "function"
+      );
+
+      const applyDuplexForStreamingBody = (method, init) => {
+        const normalizedMethod = typeof method === "string" ? method.toUpperCase() : "GET";
+        if (normalizedMethod === "GET" || normalizedMethod === "HEAD") return;
+        if (!init || typeof init !== "object") return;
+        if (!Object.prototype.hasOwnProperty.call(init, "body")) return;
+        if (init.body === undefined || init.body === null) return;
+        if (typeof init.duplex === "string") return;
+        if (looksLikeReadableStream(init.body)) {
+          init.duplex = "half";
+        }
+      };
+
+      const safeFetch = (request, requestInit) => {
+        if (!globalThis || typeof globalThis.fetch !== "function") {
+          throw new Error(rt("当前环境不支持 fetch", "fetch is unavailable in current runtime"));
+        }
+
+        if (typeof Request !== "undefined" && request instanceof Request && requestInit === undefined) {
+          return globalThis.fetch(request);
+        }
+
+        if (!request || typeof request !== "object") {
+          const init = requestInit && typeof requestInit === "object" ? { ...requestInit } : requestInit;
+          const method = init && typeof init === "object" && typeof init.method === "string" ? init.method : "GET";
+          if (init && typeof init === "object") applyDuplexForStreamingBody(method, init);
+          return globalThis.fetch(request, init);
+        }
+        const method = typeof request.method === "string" ? request.method.toUpperCase() : "GET";
+        const init = {
+          method,
+          headers: request.headers,
+          signal: request.signal,
+          redirect: request.redirect,
+          cache: request.cache,
+          credentials: request.credentials,
+          integrity: request.integrity,
+          keepalive: request.keepalive,
+          mode: request.mode,
+          referrer: request.referrer,
+          referrerPolicy: request.referrerPolicy,
+        };
+        if (method !== "GET" && method !== "HEAD") {
+          init.body = request.body;
+          if (typeof request.duplex === "string") init.duplex = request.duplex;
+        }
+        applyDuplexForStreamingBody(method, init);
+        return globalThis.fetch(request.url, init);
+      };
+
+      if (clientMod && typeof clientMod.createOpencodeClient === "function") {
+        const baseUrl = await this.ensureServiceBaseUrl();
+        try {
+          this.log("sdk ensureClient createOpencodeClient begin");
+          this.trace("sdk ensureClient createOpencodeClient begin");
+          this.client = clientMod.createOpencodeClient({
+            baseUrl,
+            directory: this.vaultPath,
+            throwOnError: true,
+            timeout: this.settings.requestTimeoutMs,
+            fetch: safeFetch,
+          });
+          this.log("sdk ensureClient createOpencodeClient ok");
+          this.trace("sdk ensureClient createOpencodeClient ok");
+          this.log(`sdk client ready ${baseUrl}`);
+          this.trace(`sdk client ready ${baseUrl}`);
+          return this.client;
+        } catch (e) {
+          importErrors.push(`createOpencodeClient: ${e instanceof Error ? e.message : String(e)}`);
+          this.log(`sdk ensureClient createOpencodeClient failed: ${e instanceof Error ? e.message : String(e)}`);
+          this.trace(`sdk ensureClient createOpencodeClient failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
       const details = importErrors.length ? `; ${importErrors.join(" | ")}` : "";
       throw new Error(rt(
         "FLOWnote SDK(v2) 加载失败：createOpencodeClient 不可用{details}",
         "FLOWnote SDK(v2) load failed: createOpencodeClient is unavailable{details}",
         { details },
       ));
-    }
-
-    this.client = mod.createOpencodeClient({
-      directory: this.vaultPath,
-      throwOnError: true,
-      timeout: this.settings.requestTimeoutMs,
+    })().finally(() => {
+      this.clientInitPromise = null;
     });
 
-    return this.client;
+    return this.clientInitPromise;
   }
 
   parseModel() {
@@ -144,21 +348,67 @@ class SdkTransport {
     try {
       const client = await this.ensureClient();
       const res = await client.config.providers({ directory: this.vaultPath });
-      const providers = res.data || [];
+      const payload = res && Object.prototype.hasOwnProperty.call(res, "data") ? res.data : res;
+      const providers = Array.isArray(payload)
+        ? payload
+        : payload && Array.isArray(payload.providers)
+          ? payload.providers
+          : payload && Array.isArray(payload.all)
+            ? payload.all
+            : [];
+      this.log(`sdk listModels: providers=${providers.length}`);
       const out = [];
-      for (const p of providers) {
-        const models = p.models || {};
-        for (const key of Object.keys(models)) out.push(`${p.id}/${key}`);
+      for (const provider of providers) {
+        const providerID = String(provider && provider.id ? provider.id : "").trim();
+        if (!providerID) continue;
+
+        const models = provider && provider.models;
+        if (Array.isArray(models)) {
+          for (const item of models) {
+            const modelID = String(
+              typeof item === "string"
+                ? item
+                : item && typeof item === "object"
+                  ? (item.id || item.model || item.name || "")
+                  : "",
+            ).trim();
+            if (!modelID) continue;
+            out.push(`${providerID}/${modelID}`);
+          }
+          continue;
+        }
+
+        if (models && typeof models === "object") {
+          for (const key of Object.keys(models)) {
+            const modelID = String(key || "").trim();
+            if (!modelID) continue;
+            out.push(`${providerID}/${modelID}`);
+          }
+        }
       }
-      return out.sort();
-    } catch {
+      const models = [...new Set(out)].sort((a, b) => a.localeCompare(b));
+      this.log(`sdk listModels: models=${models.length}`);
+      return models;
+    } catch (e) {
+      this.log(`sdk listModels failed: ${e instanceof Error ? e.message : String(e)}`);
       return [];
     }
   }
 
   async listProviders() {
-    const client = await this.ensureClient();
-    const res = await client.provider.list({ directory: this.vaultPath });
+    this.log("sdk listProviders: ensureClient");
+    let client = await this.ensureClient();
+    this.log("sdk listProviders: request");
+    let res;
+    try {
+      res = await client.provider.list({ directory: this.vaultPath });
+    } catch (e) {
+      if (!isLikelyNetworkFetchError(e)) throw e;
+      await this.recoverFromNetworkFailure("listProviders", e);
+      client = await this.ensureClient();
+      res = await client.provider.list({ directory: this.vaultPath });
+    }
+    this.log("sdk listProviders: response");
     const payload = res && res.data ? res.data : res || {};
     const all = Array.isArray(payload.all) ? payload.all : [];
     const connected = Array.isArray(payload.connected) ? payload.connected : [];
@@ -171,8 +421,16 @@ class SdkTransport {
   }
 
   async listProviderAuthMethods() {
-    const client = await this.ensureClient();
-    const res = await client.provider.auth({ directory: this.vaultPath });
+    let client = await this.ensureClient();
+    let res;
+    try {
+      res = await client.provider.auth({ directory: this.vaultPath });
+    } catch (e) {
+      if (!isLikelyNetworkFetchError(e)) throw e;
+      await this.recoverFromNetworkFailure("listProviderAuthMethods", e);
+      client = await this.ensureClient();
+      res = await client.provider.auth({ directory: this.vaultPath });
+    }
     const payload = res && res.data ? res.data : res || {};
     return payload && typeof payload === "object" ? payload : {};
   }
@@ -692,12 +950,19 @@ class SdkTransport {
     return { ok: true, model: modelID };
   }
 
-  async switchModel(options) {
-    return this.setDefaultModel(options);
-  }
-
   async stop() {
+    const bootstrap = this.bootstrapTransport;
+    this.clientInitPromise = null;
     this.client = null;
+    this.bootstrapTransport = null;
+    this.baseUrl = "http://127.0.0.1:4096";
+    if (bootstrap && typeof bootstrap.stop === "function") {
+      try {
+        await bootstrap.stop();
+      } catch (e) {
+        this.log(`sdk bootstrap close failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   }
 }
 

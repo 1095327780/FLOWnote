@@ -71,6 +71,8 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
   try {
     let detachType = "";
     let clientStopped = 0;
+    let bootstrapCalls = 0;
+    let diagnosticsRefreshCalls = 0;
     const app = {
       vault: {
         adapter: { basePath: "/tmp/vault" },
@@ -114,7 +116,6 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
         constructor() {}
       },
       SdkTransport: class {},
-      CompatTransport: class {},
       ExecutableResolver: class {},
     });
     plugin.loadPersistedData = async () => {
@@ -130,7 +131,14 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
       };
     };
     plugin.getVaultPath = () => "/tmp/vault";
-    plugin.bootstrapData = async () => ({ localDone: true, remoteDone: false });
+    plugin.bootstrapData = async () => {
+      bootstrapCalls += 1;
+      return { localDone: true, remoteDone: false };
+    };
+    plugin.refreshDiagnosticsStatus = async () => {
+      diagnosticsRefreshCalls += 1;
+      return null;
+    };
     plugin.persistState = async () => {};
     plugin.log = () => {};
 
@@ -139,6 +147,8 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
 
     assert.equal(detachType, "flownote-view");
     assert.equal(clientStopped, 1);
+    assert.equal(bootstrapCalls, 1);
+    assert.equal(diagnosticsRefreshCalls, 1);
     assert.equal(fixture.noticeMessages.length, 0);
   } finally {
     fixture.restore();

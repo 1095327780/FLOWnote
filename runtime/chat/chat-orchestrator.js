@@ -83,46 +83,74 @@ function renderDraftBlocks(view, draftId) {
 }
 
 function createTransportHandlers(view, sessionId, draftId) {
+  const queueFrame = (flush, state) => {
+    if (!state || typeof state !== "object") return;
+    if (state.scheduled) return;
+    if (typeof requestAnimationFrame === "function") {
+      state.scheduled = requestAnimationFrame(() => {
+        state.scheduled = 0;
+        flush();
+      });
+      return;
+    }
+    flush();
+  };
+
+  const tokenState = { latest: "", scheduled: 0 };
+  const reasoningState = { latest: "", scheduled: 0 };
+
+  const flushToken = () => {
+    const partial = String(tokenState.latest || "");
+    view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, partial);
+    if (partial.trim()) {
+      view.setRuntimeStatus(tr(view, "view.runtime.generating", "Generating response..."), "working");
+    }
+
+    const messages = view.elements.messages;
+    if (!messages) return;
+    const target = view.findMessageRow(draftId);
+    if (target) {
+      const body = target.querySelector(".oc-message-content");
+      if (body) body.textContent = partial;
+    }
+    view.scheduleScrollMessagesToBottom();
+  };
+
+  const flushReasoning = () => {
+    const partialReasoning = String(reasoningState.latest || "");
+    view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, partialReasoning);
+    if (partialReasoning.trim()) {
+      view.setRuntimeStatus(tr(view, "view.runtime.reasoning", "Model is reasoning..."), "working");
+    }
+
+    const messages = view.elements.messages;
+    if (!messages) return;
+    const target = view.findMessageRow(draftId);
+    if (!target) return;
+
+    const currentDraft = view.plugin
+      .sessionStore
+      .getActiveMessages()
+      .find((msg) => msg && msg.id === draftId);
+    const hasReasoningBlocks = view.hasReasoningBlock(currentDraft && currentDraft.blocks);
+    if (hasReasoningBlocks && currentDraft) {
+      renderDraftBlocks(view, draftId);
+    } else {
+      const reasoningBody = view.ensureReasoningContainer(target, true);
+      if (reasoningBody) reasoningBody.textContent = partialReasoning || "...";
+    }
+    view.scheduleScrollMessagesToBottom();
+  };
+
   return {
     onToken: (partial) => {
-      view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, partial);
-      if (String(partial || "").trim()) {
-        view.setRuntimeStatus(tr(view, "view.runtime.generating", "Generating response..."), "working");
-      }
-
-      const messages = view.elements.messages;
-      if (!messages) return;
-      const target = view.findMessageRow(draftId);
-      if (target) {
-        const body = target.querySelector(".oc-message-content");
-        if (body) body.textContent = partial;
-      }
-      view.scheduleScrollMessagesToBottom();
+      tokenState.latest = String(partial || "");
+      queueFrame(flushToken, tokenState);
     },
 
     onReasoning: (partialReasoning) => {
-      view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, partialReasoning);
-      if (String(partialReasoning || "").trim()) {
-        view.setRuntimeStatus(tr(view, "view.runtime.reasoning", "Model is reasoning..."), "working");
-      }
-
-      const messages = view.elements.messages;
-      if (!messages) return;
-      const target = view.findMessageRow(draftId);
-      if (!target) return;
-
-      const currentDraft = view.plugin
-        .sessionStore
-        .getActiveMessages()
-        .find((msg) => msg && msg.id === draftId);
-      const hasReasoningBlocks = view.hasReasoningBlock(currentDraft && currentDraft.blocks);
-      if (hasReasoningBlocks && currentDraft) {
-        renderDraftBlocks(view, draftId);
-      } else {
-        const reasoningBody = view.ensureReasoningContainer(target, true);
-        if (reasoningBody) reasoningBody.textContent = partialReasoning || "...";
-      }
-      view.scheduleScrollMessagesToBottom();
+      reasoningState.latest = String(partialReasoning || "");
+      queueFrame(flushReasoning, reasoningState);
     },
 
     onBlocks: (blocks) => {

@@ -5,7 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "build": "npm run build:release",
-    "build:release": "node scripts/build-release.mjs",
+    "build:sdk-vendor": "node scripts/build-sdk-vendor.mjs",
+    "build:release": "npm run build:sdk-vendor && node scripts/build-release.mjs",
     "guard:repo-hygiene": "node scripts/guard-repo-hygiene.js",
     "guard:source-of-truth": "node scripts/guard-source-of-truth.js",
     "guard:runtime-contract": "node scripts/guard-runtime-contract.js",
@@ -20,5 +21,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.2.16"
   }
 }

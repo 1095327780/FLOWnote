@@ -31,13 +31,14 @@ class DiagnosticsService {
 
   async runFresh() {
     const executable = await this.resolver.resolve(this.plugin.settings.cliPath);
+    const defaultMode = "sdk";
 
-    let connection = { ok: false, mode: this.plugin.settings.transportMode, error: "" };
+    let connection = { ok: false, mode: defaultMode, error: "" };
     try {
       const result = await this.plugin.opencodeClient.testConnection();
-      connection = { ok: true, mode: result.mode || this.plugin.settings.transportMode, error: "" };
+      connection = { ok: true, mode: result.mode || defaultMode, error: "" };
     } catch (e) {
-      connection = { ok: false, mode: this.plugin.settings.transportMode, error: e instanceof Error ? e.message : String(e) };
+      connection = { ok: false, mode: defaultMode, error: e instanceof Error ? e.message : String(e) };
     }
 
     this.lastResult = { at: Date.now(), executable, connection };

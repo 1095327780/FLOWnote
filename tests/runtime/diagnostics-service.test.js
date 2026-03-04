@@ -21,11 +21,11 @@ class ResolverMock {
 test("runCached should reuse cached result within ttl", async () => {
   let connectionCalls = 0;
   const plugin = {
-    settings: { cliPath: "", transportMode: "compat" },
+    settings: { cliPath: "" },
     opencodeClient: {
       async testConnection() {
         connectionCalls += 1;
-        return { mode: "compat" };
+        return { mode: "sdk" };
       },
     },
   };
@@ -42,11 +42,11 @@ test("runCached should reuse cached result within ttl", async () => {
 test("runCached should bypass cache when force=true", async () => {
   let connectionCalls = 0;
   const plugin = {
-    settings: { cliPath: "", transportMode: "compat" },
+    settings: { cliPath: "" },
     opencodeClient: {
       async testConnection() {
         connectionCalls += 1;
-        return { mode: "compat" };
+        return { mode: "sdk" };
       },
     },
   };
@@ -64,12 +64,12 @@ test("runCached should singleflight concurrent requests", async () => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const plugin = {
-    settings: { cliPath: "", transportMode: "compat" },
+    settings: { cliPath: "" },
     opencodeClient: {
       async testConnection() {
         connectionCalls += 1;
         await gate;
-        return { mode: "compat" };
+        return { mode: "sdk" };
       },
     },
   };
@@ -84,4 +84,3 @@ test("runCached should singleflight concurrent requests", async () => {
   assert.equal(service.resolver.calls, 1);
   assert.deepEqual(r1, r2);
 });
-

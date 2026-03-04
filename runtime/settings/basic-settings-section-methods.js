@@ -228,41 +228,6 @@ class BasicSettingsSectionMethods {
       .setHeading();
 
     new Setting(containerEl)
-      .setName(t("settings.basic.experimentalSdkName", "实验功能：启用 SDK 传输"))
-      .setDesc(t(
-        "settings.basic.experimentalSdkDesc",
-        "默认关闭。生产建议使用 compat 传输；仅在调试场景中开启 SDK。",
-      ))
-      .addToggle((toggle) => {
-        toggle
-          .setValue(Boolean(this.plugin.settings.experimentalSdkEnabled))
-          .onChange(async (value) => {
-            this.plugin.settings.experimentalSdkEnabled = Boolean(value);
-            if (!this.plugin.settings.experimentalSdkEnabled) {
-              this.plugin.settings.transportMode = "compat";
-            }
-            await this.plugin.saveSettings();
-            this.display();
-          });
-      });
-
-    if (this.plugin.settings.experimentalSdkEnabled) {
-      new Setting(containerEl)
-        .setName(t("settings.basic.transportModeName", "实验传输模式"))
-        .setDesc(t("settings.basic.transportModeDesc", "兼容模式为稳定路径；SDK 模式仅用于实验排障。"))
-        .addDropdown((dropdown) => {
-          dropdown
-            .addOption("compat", t("settings.basic.transportModeCompat", "compat（稳定）"))
-            .addOption("sdk", t("settings.basic.transportModeSdk", "sdk（实验）"))
-            .setValue(String(this.plugin.settings.transportMode || "compat"))
-            .onChange(async (value) => {
-              this.plugin.settings.transportMode = value === "sdk" ? "sdk" : "compat";
-              await this.plugin.saveSettings();
-            });
-        });
-    }
-
-    new Setting(containerEl)
       .setName(t("settings.basic.skillsDirName", "内置 Skills 安装目录"))
       .setDesc(t(
         "settings.basic.skillsDirDesc",

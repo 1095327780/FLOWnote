@@ -393,7 +393,6 @@ class FLOWnoteAssistantPlugin extends Plugin {
       this.ensureFacadeMethodsLoaded();
 
       this.runtimeStateMigrationDirty = false;
-      this.transportModeMigrationDirty = false;
       this.bootstrapInflight = null;
       this.bootstrapLocalDone = false;
       this.bootstrapRemoteDone = false;
@@ -414,7 +413,6 @@ class FLOWnoteAssistantPlugin extends Plugin {
         getPreferredLaunch: () => this.getPreferredLaunchProfile(),
         onLaunchSuccess: (profile) => this.rememberLaunchProfile(profile),
         SdkTransport: runtime.SdkTransport,
-        CompatTransport: runtime.CompatTransport,
       });
       this.diagnosticsService = new runtime.DiagnosticsService(this, runtime.ExecutableResolver);
 
@@ -454,14 +452,24 @@ class FLOWnoteAssistantPlugin extends Plugin {
       });
 
       this.addSettingTab(new runtime.FLOWnoteSettingsTab(this.app, this));
-      await this.bootstrapData({ waitRemote: false });
-      if (this.runtimeStateMigrationDirty || this.transportModeMigrationDirty) {
+      if (this.runtimeStateMigrationDirty) {
         this.runtimeStateMigrationDirty = false;
-        this.transportModeMigrationDirty = false;
         void this.persistState().catch((e) => {
           this.log(`persist migrated runtime state failed: ${e instanceof Error ? e.message : String(e)}`);
         });
       }
+
+      // Startup bootstrap: sync bundled skills/templates and warm remote model/provider cache in background.
+      void this.bootstrapData({ waitRemote: false, startRemote: true })
+        .then(() => {
+          if (typeof this.refreshDiagnosticsStatus === "function") {
+            return this.refreshDiagnosticsStatus({ ttlMs: 0, force: true, applyView: true });
+          }
+          return null;
+        })
+        .catch((e) => {
+          this.log(`startup bootstrap failed: ${e instanceof Error ? e.message : String(e)}`);
+        });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[FLOWnote] load failed", e);
