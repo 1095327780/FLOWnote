@@ -48,6 +48,55 @@ function splitDropTextTokens(rawText) {
     .filter(Boolean);
 }
 
+function extractStructuredDropTokens(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text || !/^[{\[]/.test(text)) return [];
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+
+  const out = [];
+  const seen = new Set();
+  const push = (value) => {
+    const token = String(value || "").trim();
+    if (!token || seen.has(token)) return;
+    seen.add(token);
+    out.push(token);
+  };
+
+  const visit = (value, key = "", depth = 0) => {
+    if (depth > 5 || value == null) return;
+    if (typeof value === "string") {
+      const token = value.trim();
+      if (!token) return;
+      if (
+        !key
+        || /(?:path|file|folder|name|url)$/i.test(key)
+        || /^(?:obsidian:\/\/|file:\/\/|[A-Za-z]:[\\/]|\/|\\\\)/.test(token)
+        || token.includes("/")
+      ) {
+        push(token);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, key, depth + 1));
+      return;
+    }
+    if (typeof value !== "object") return;
+    Object.entries(value).forEach(([childKey, childValue]) => {
+      visit(childValue, childKey, depth + 1);
+    });
+  };
+
+  visit(parsed);
+  return out;
+}
+
 function extractWikiLinkTargets(rawText) {
   const text = String(rawText || "");
   const targets = [];
@@ -318,6 +367,36 @@ function collectDropCandidateTokens(dataTransfer) {
     pushRaw(file.name);
   });
 
+  const itemList = dataTransfer && dataTransfer.items
+    ? Array.from(dataTransfer.items)
+    : [];
+  itemList.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+
+    let file = null;
+    try {
+      file = typeof item.getAsFile === "function" ? item.getAsFile() : null;
+    } catch {
+      file = null;
+    }
+    if (file && typeof file === "object") {
+      pushRaw(file.path);
+      pushRaw(file.name);
+      pushRaw(file.webkitRelativePath);
+    }
+
+    let entry = null;
+    try {
+      entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+    } catch {
+      entry = null;
+    }
+    if (entry && typeof entry === "object") {
+      pushRaw(entry.fullPath);
+      pushRaw(entry.name);
+    }
+  });
+
   LINKED_CONTEXT_DROP_TEXT_TYPES.forEach((type) => {
     let value = "";
     try {
@@ -355,6 +434,7 @@ function collectDropCandidateTokens(dataTransfer) {
   rawTokens.forEach((rawToken) => {
     pushExpanded(rawToken);
     splitDropTextTokens(rawToken).forEach((token) => pushExpanded(token));
+    extractStructuredDropTokens(rawToken).forEach((token) => pushExpanded(token));
     extractWikiLinkTargets(rawToken).forEach((token) => pushExpanded(token));
     pushExpanded(extractPathFromObsidianUri(rawToken));
   });
@@ -385,7 +465,25 @@ function looksLikeLinkedContextDropEvent(event) {
   const fileList = dataTransfer.files ? Array.from(dataTransfer.files) : [];
   if (fileList.length > 0) return true;
 
+  const itemList = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+  if (itemList.some((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (String(item.kind || "").toLowerCase() === "file") return true;
+    try {
+      if (typeof item.webkitGetAsEntry === "function" && item.webkitGetAsEntry()) return true;
+    } catch {
+    }
+    try {
+      if (typeof item.getAsFile === "function" && item.getAsFile()) return true;
+    } catch {
+    }
+    return false;
+  })) {
+    return true;
+  }
+
   const types = dataTransfer.types ? Array.from(dataTransfer.types).map((type) => String(type || "").toLowerCase()) : [];
+  if (types.includes("files")) return true;
   if (types.some((type) => type.includes("obsidian"))) return true;
   if (types.includes("text/uri-list")) {
     let uriList = "";

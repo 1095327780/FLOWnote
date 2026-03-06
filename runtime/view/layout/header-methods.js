@@ -1,5 +1,6 @@
 const { Notice, setIcon } = require("obsidian");
 const { tr } = require("./shared-utils");
+const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 
 function render() {
   this.clearInlineQuestionWidget(true);
@@ -26,7 +27,7 @@ function renderHeader(header) {
 
   const brand = header.createDiv({ cls: "oc-brand" });
   const logo = brand.createDiv({ cls: "oc-brand-logo" });
-  setIcon(logo, "bot");
+  setIcon(logo, FLOWNOTE_ICON_ID);
   brand.createDiv({ cls: "oc-brand-title", text: "FLOWnote" });
 
   const actions = header.createDiv({ cls: "oc-header-actions" });

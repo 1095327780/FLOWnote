@@ -18,6 +18,7 @@ const { questionFlowMethods } = require("./view/question-flow");
 const { runtimeStatusMethods } = require("./view/runtime-status");
 
 const VIEW_TYPE = "flownote-view";
+const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -49,6 +50,9 @@ class FLOWnoteAssistantView extends ItemView {
     this.forceBottomUntil = 0;
     this.lastManualScrollIntentAt = 0;
     this.linkedContextFiles = [];
+    this.patchDiffCache = new Map();
+    this.patchDiffInflight = new Map();
+    this.patchDiffCacheSessionId = "";
   }
 
   getViewType() {
@@ -60,7 +64,7 @@ class FLOWnoteAssistantView extends ItemView {
   }
 
   getIcon() {
-    return "bot";
+    return FLOWNOTE_ICON_ID;
   }
 
   async onOpen() {
@@ -76,6 +80,12 @@ class FLOWnoteAssistantView extends ItemView {
     this.unbindMessagesScrollTracking();
     this.forceBottomUntil = 0;
     this.lastManualScrollIntentAt = 0;
+    this.patchDiffCacheSessionId = "";
+    this.patchDiffCache.clear();
+    this.patchDiffInflight.clear();
+    this.questionAnswerStates.clear();
+    this.questionSubmitAt.clear();
+    this.pendingQuestionRequests.clear();
     if (this.currentAbort) {
       this.currentAbort.abort();
       this.currentAbort = null;

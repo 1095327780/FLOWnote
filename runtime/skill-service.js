@@ -85,11 +85,8 @@ class SkillService {
       this.allowedSkillIds = null;
       return;
     }
-
     const ids = Array.isArray(skillIds) ? skillIds : Array.from(skillIds);
-    const normalized = ids
-      .map((item) => String(item || "").trim())
-      .filter(Boolean);
+    const normalized = ids.map((item) => String(item || "").trim()).filter(Boolean);
     this.allowedSkillIds = new Set(normalized);
   }
 
@@ -101,15 +98,11 @@ class SkillService {
     }
 
     const entries = fs.readdirSync(root, { withFileTypes: true });
-    const allow = this.allowedSkillIds instanceof Set
-      ? this.allowedSkillIds
-      : null;
     const skills = [];
 
     for (const e of entries) {
       if (!e || String(e.name || "").startsWith(".")) continue;
       if (!e.isDirectory()) continue;
-      if (allow && !allow.has(e.name)) continue;
       const file = path.join(root, e.name, "SKILL.md");
       if (!fs.existsSync(file)) continue;
 

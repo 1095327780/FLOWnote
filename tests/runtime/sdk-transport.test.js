@@ -89,6 +89,47 @@ test("sdk listSessionMessages should call official session.messages endpoint", a
   assert.equal(captured.hasSignal, true);
 });
 
+test("sdk getSessionDiff should call official session.diff endpoint", async () => {
+  const transport = createTransport();
+  let captured = null;
+
+  transport.ensureClient = async () => ({
+    session: {
+      diff: async (params, options) => {
+        captured = {
+          params,
+          hasSignal: Boolean(options && Object.prototype.hasOwnProperty.call(options, "signal")),
+        };
+        return {
+          data: [
+            {
+              file: "notes/today.md",
+              before: "a\nb\n",
+              after: "a\nb\nc\n",
+              additions: 1,
+              deletions: 0,
+            },
+          ],
+        };
+      },
+    },
+  });
+
+  const diff = await transport.getSessionDiff({
+    sessionId: "ses_1",
+    messageId: "msg_1",
+    signal: undefined,
+  });
+
+  assert.equal(Array.isArray(diff), true);
+  assert.equal(diff.length, 1);
+  assert.ok(captured && captured.params);
+  assert.equal(captured.params.sessionID, "ses_1");
+  assert.equal(captured.params.messageID, "msg_1");
+  assert.equal(captured.params.directory, "/vault");
+  assert.equal(captured.hasSignal, true);
+});
+
 test("sdk listModels should parse official config.providers payload with providers array", async () => {
   const transport = createTransport();
 
@@ -320,4 +361,72 @@ test("sdk listProviders should recover and retry once on network fetch failure",
   assert.equal(ensureCount, 2);
   assert.equal(Array.isArray(out.all), true);
   assert.equal(out.connected.includes("openai"), true);
+});
+
+test("sdk sendMessage should keep polling when question is still pending", async () => {
+  const transport = createTransport();
+  let pollCalled = 0;
+  let onQuestionRequestCalled = 0;
+  let listCalls = 0;
+
+  transport.ensureClient = async () => ({
+    session: {
+      promptAsync: async () => ({ data: {} }),
+    },
+  });
+  transport.streamAssistantFromEvents = async () => ({
+    messageId: "msg_stream",
+    text: "intermediate",
+    reasoning: "",
+    meta: "",
+    blocks: [{ type: "step-finish", status: "completed", summary: "stop" }],
+    completed: true,
+  });
+  transport.listQuestions = async () => {
+    listCalls += 1;
+    if (listCalls <= 10) {
+      return [
+        {
+          id: "q_1",
+          sessionID: "ses_1",
+          questions: [{ question: "选择今天聚焦" }],
+        },
+      ];
+    }
+    return [];
+  };
+  transport.pollAssistantResult = async (
+    _client,
+    _sessionId,
+    _startedAt,
+    _signal,
+    _preferredMessageId,
+    _handlers,
+    isQuestionPending,
+  ) => {
+    pollCalled += 1;
+    assert.equal(typeof isQuestionPending, "function");
+    assert.equal(await isQuestionPending(), true);
+    return {
+      messageId: "msg_poll",
+      text: "after-answer",
+      reasoning: "",
+      meta: "",
+      blocks: [{ type: "step-finish", status: "completed", summary: "done" }],
+      completed: true,
+    };
+  };
+
+  const result = await transport.sendMessage({
+    sessionId: "ses_1",
+    prompt: "hello",
+    onQuestionRequest: () => {
+      onQuestionRequestCalled += 1;
+    },
+  });
+
+  assert.equal(pollCalled, 1);
+  assert.ok(onQuestionRequestCalled >= 1);
+  assert.equal(result.messageId, "msg_poll");
+  assert.equal(result.text, "after-answer");
 });

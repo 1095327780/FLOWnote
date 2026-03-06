@@ -47,12 +47,14 @@ class CaptureModal extends Modal {
     const actionsEl = footerEl.createEl("div", { cls: "oc-capture-actions" });
     const cancelBtn = actionsEl.createEl("button", {
       text: t("mobile.capture.cancel", "Cancel"),
-      cls: "oc-capture-btn oc-capture-btn-cancel",
+      cls: "oc-capture-btn oc-capture-btn-cancel mod-muted",
     });
     const submitBtn = actionsEl.createEl("button", {
       text: t("mobile.capture.submit", "Capture"),
-      cls: "oc-capture-btn oc-capture-btn-submit",
+      cls: "oc-capture-btn oc-capture-btn-submit mod-cta",
     });
+    cancelBtn.type = "button";
+    submitBtn.type = "button";
 
     cancelBtn.addEventListener("click", () => this.close());
 
@@ -106,7 +108,14 @@ class CaptureModal extends Modal {
 
         statusEl.textContent = t("mobile.capture.statusWriteNote", "📝 Writing note...");
         const vault = this.app.vault;
-        const dailyNote = await findOrCreateDailyNote(vault, mc.dailyNotePath, undefined, { locale });
+        const dailyNote = await findOrCreateDailyNote(vault, mc.dailyNotePath, undefined, {
+          locale,
+          skillsDir: this.plugin
+            && this.plugin.settings
+            && typeof this.plugin.settings.skillsDir === "string"
+            ? this.plugin.settings.skillsDir
+            : ".opencode/skills",
+        });
 
         const timeStr = formatTimeStr();
         const entry = formatCaptureEntry(timeStr, finalText, { locale });

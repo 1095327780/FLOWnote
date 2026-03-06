@@ -231,7 +231,7 @@ class BasicSettingsSectionMethods {
       .setName(t("settings.basic.skillsDirName", "内置 Skills 安装目录"))
       .setDesc(t(
         "settings.basic.skillsDirDesc",
-        "默认 .opencode/skills。插件会自动安装内置 skills，并忽略目录中的非内置 skills。通常无需修改。",
+        "默认 .opencode/skills。插件会自动安装/更新内置 skills，你也可以在该目录新增或修改 skills；斜杠命令会直接读取此目录。",
       ))
       .addText((text) => {
         text.setValue(this.plugin.settings.skillsDir).onChange(async (v) => {

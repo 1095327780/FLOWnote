@@ -108,6 +108,47 @@ function normalizeQuestionItem(rawItem, index) {
     ? rawItem
     : { question: String(rawItem || "") };
 
+  const resolveMultiSelect = (value) => {
+    const source = value && typeof value === "object" ? value : {};
+    const selectionMode = String(
+      source.selectionMode !== undefined
+        ? source.selectionMode
+        : source.selection_mode !== undefined
+          ? source.selection_mode
+          : source.type !== undefined
+            ? source.type
+            : source.kind,
+    ).trim().toLowerCase();
+    const maxSelectedRaw = Number(
+      source.maxSelections !== undefined
+        ? source.maxSelections
+        : source.maxSelection !== undefined
+          ? source.maxSelection
+          : source.max_select !== undefined
+            ? source.max_select
+            : source.max_selectable !== undefined
+              ? source.max_selectable
+              : source.maxChoices !== undefined
+                ? source.maxChoices
+                : source.max_choices !== undefined
+                  ? source.max_choices
+                  : 0,
+    );
+    const modeIsMulti = ["multiple", "multi", "multi-select", "multi_select", "checkbox", "checkboxes"].includes(selectionMode);
+    const maxSelected = Number.isFinite(maxSelectedRaw) ? maxSelectedRaw : 0;
+    return Boolean(
+      source.multiSelect
+      || source.multiple
+      || source.allowMultiple
+      || source.allow_multiple
+      || source.multi_select
+      || source.isMulti
+      || source.is_multi
+      || modeIsMulti
+      || maxSelected > 1,
+    );
+  };
+
   const question =
     (typeof obj.question === "string" && obj.question.trim()) ||
     (typeof obj.prompt === "string" && obj.prompt.trim()) ||
@@ -144,7 +185,7 @@ function normalizeQuestionItem(rawItem, index) {
     question,
     header: (typeof obj.header === "string" && obj.header.trim()) || `Q${index + 1}`,
     options,
-    multiSelect: Boolean(obj.multiSelect || obj.multiple || obj.allowMultiple),
+    multiSelect: resolveMultiSelect(obj),
   };
 }
 

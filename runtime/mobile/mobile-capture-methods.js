@@ -4,6 +4,7 @@ const { setRuntimeLocale } = require("../runtime-locale-state");
 const { normalizeMobileSettings } = require("./mobile-settings-utils");
 const { CaptureModal } = require("./capture-modal");
 const { MobileSettingsTab } = require("./mobile-settings-tab");
+const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 
 const mobileCaptureMethodsMixin = {
   /**
@@ -15,7 +16,7 @@ const mobileCaptureMethodsMixin = {
       await this.loadMobilePersistedData();
 
       // Ribbon icon
-      this.addRibbonIcon("lightbulb", t("commands.mobileQuickCapture", "快速捕获想法"), () => {
+      this.addRibbonIcon(FLOWNOTE_ICON_ID, t("commands.mobileQuickCapture", "快速捕获想法"), () => {
         this.openCaptureModal();
       });
 

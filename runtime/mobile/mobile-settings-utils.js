@@ -59,7 +59,7 @@ const MOBILE_CAPTURE_DEFAULTS = {
   baseUrl: "",
   model: "",
   dailyNotePath: "01-捕获层/每日笔记",
-  ideaSectionHeader: "## 记录",
+  ideaSectionHeader: "## 📝 记录",
   enableAiCleanup: true,
   enableUrlSummary: true,
   linkResolver: { ...LINK_RESOLVER_DEFAULTS },
@@ -133,7 +133,7 @@ function defaultDailyNotePathByLocale(locale) {
 
 function defaultIdeaSectionHeaderByLocale(locale) {
   const normalized = normalizeSupportedLocale(locale, DEFAULT_UI_LOCALE);
-  return normalized === "zh-CN" ? "## 记录" : "## Records";
+  return normalized === "zh-CN" ? "## 📝 记录" : "## 📝 Records";
 }
 
 function normalizeMobileSettings(raw) {

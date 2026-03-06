@@ -3,6 +3,8 @@ name: ah-memory
 description: Use when 需要在多个 ah-* 技能之间持续追踪进度、同步待办与避免会话切换后状态丢失时。
 ---
 
+> 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。
+
 # AI 记忆系统
 
 目标：在所有 ah-* 技能之间统一状态追踪，确保“可继续、可回溯、不丢任务”。

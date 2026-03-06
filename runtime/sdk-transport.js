@@ -34,19 +34,16 @@ const {
   hasTerminalPayload,
   chooseRicherResponse,
 } = require("./assistant-payload-utils");
-
+const { createQuestionTracker } = require("./transports/shared/question-tracker");
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
 function loadBundledSdkClientModule() {
   return require("./vendor/opencode-sdk-v2-client.cjs");
 }
-
 function normalizeBaseUrl(url) {
   return String(url || "").trim().replace(/\/+$/, "");
 }
-
 function isLikelyNetworkFetchError(error) {
   const message = error instanceof Error ? error.message : String(error || "");
   if (!message) return false;
@@ -297,37 +294,29 @@ class SdkTransport {
     })().finally(() => {
       this.clientInitPromise = null;
     });
-
     return this.clientInitPromise;
   }
-
   parseModel() {
     return parseModel(this.settings.defaultModel);
   }
-
   parseCommandModel() {
     return parseCommandModel(this.settings.defaultModel);
   }
-
   async testConnection() {
     const client = await this.ensureClient();
     await client.path.get({ directory: this.vaultPath });
     return { ok: true, mode: "sdk" };
   }
-
   async listSessions() {
     const client = await this.ensureClient();
     const res = await client.session.list({ directory: this.vaultPath });
     return res.data || [];
   }
-
   async listSessionMessages(options = {}) {
     const sessionId = String(options.sessionId || "").trim();
     if (!sessionId) return [];
-
     const rawLimit = Number(options.limit || 200);
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.max(1, Math.floor(rawLimit)) : 200;
-
     const client = await this.ensureClient();
     const res = await client.session.messages({
       sessionID: sessionId,
@@ -337,13 +326,25 @@ class SdkTransport {
     const payload = res && res.data ? res.data : res;
     return Array.isArray(payload) ? payload : [];
   }
-
+  async getSessionDiff(options = {}) {
+    const sessionId = String(options.sessionId || "").trim();
+    if (!sessionId) return [];
+    const messageId = String(options.messageId || options.messageID || "").trim();
+    const client = await this.ensureClient();
+    const params = {
+      sessionID: sessionId,
+      directory: this.vaultPath,
+    };
+    if (messageId) params.messageID = messageId;
+    const res = await client.session.diff(params, { signal: options.signal });
+    const payload = res && Object.prototype.hasOwnProperty.call(res, "data") ? res.data : res;
+    return Array.isArray(payload) ? payload : [];
+  }
   async createSession(title) {
     const client = await this.ensureClient();
     const res = await client.session.create(title ? { directory: this.vaultPath, title } : { directory: this.vaultPath });
     return res.data;
   }
-
   async listModels() {
     try {
       const client = await this.ensureClient();
@@ -575,7 +576,15 @@ class SdkTransport {
     return findLatestAssistantMessage(messages, startedAt);
   }
 
-  async pollAssistantResult(client, sessionId, startedAt, signal, preferredMessageId = "", handlers) {
+  async pollAssistantResult(
+    client,
+    sessionId,
+    startedAt,
+    signal,
+    preferredMessageId = "",
+    handlers,
+    isQuestionPending,
+  ) {
     const quietTimeoutMs = Math.max(10000, Number(this.settings.requestTimeoutMs) || 120000);
     const polled = await pollAssistantPayload({
       initialMessageId: preferredMessageId,
@@ -631,6 +640,9 @@ class SdkTransport {
         };
       },
       getSessionStatus: (requestSignal) => this.getSessionStatus(sessionId, requestSignal),
+      isQuestionPending: typeof isQuestionPending === "function"
+        ? (requestSignal) => isQuestionPending(requestSignal)
+        : undefined,
     });
 
     const payload = await ensureRenderablePayload({
@@ -707,171 +719,190 @@ class SdkTransport {
     const commandModel = this.parseCommandModel();
     const parsedCommand = this.parseSlashCommand(options.prompt);
     const resolvedCommand = parsedCommand ? await this.resolveCommandForEndpoint(parsedCommand.command) : { use: false, command: "" };
-
-    let streamed = null;
-    let directResponse = null;
-    let usedRealStreaming = false;
-    let shouldEmitPollingUpdates = false;
-
-    if (this.settings.enableStreaming) {
-      usedRealStreaming = true;
-      const linked = createLinkedAbortController(options.signal);
-      const eventSignal = linked.controller.signal;
-      const streamPromise = this.streamAssistantFromEvents(client, options.sessionId, startedAt, eventSignal, {
-        onToken: options.onToken,
-        onReasoning: options.onReasoning,
-        onBlocks: options.onBlocks,
-        onPermissionRequest: options.onPermissionRequest,
-        onQuestionRequest: options.onQuestionRequest,
-        onQuestionResolved: options.onQuestionResolved,
-        onPromptAppend: options.onPromptAppend,
-        onToast: options.onToast,
-      }).catch((e) => {
-        this.log(`sdk event stream fallback: ${e instanceof Error ? e.message : String(e)}`);
-        return null;
-      });
-
-      try {
-        if (parsedCommand && resolvedCommand.use) {
-          await client.session.command(
-            {
-              sessionID: options.sessionId,
-              directory: this.vaultPath,
-              command: resolvedCommand.command,
-              arguments: parsedCommand.arguments,
-              model: commandModel,
-            },
-            { signal: options.signal },
-          );
-        } else {
-          const effectivePrompt = parsedCommand ? options.prompt.replace(/^\//, "").trim() : options.prompt;
-          await client.session.promptAsync(
-            {
-              sessionID: options.sessionId,
-              directory: this.vaultPath,
-              noReply: false,
-              model,
-              parts: [{ type: "text", text: effectivePrompt || options.prompt }],
-            },
-            { signal: options.signal },
-          );
-        }
-        streamed = await streamPromise;
-      } finally {
-        linked.detach();
-        linked.controller.abort();
-      }
-      shouldEmitPollingUpdates = Boolean(
-        !streamed
-        || !hasTerminalPayload(streamed)
-        || !Boolean(streamed && streamed.completed),
-      );
-    } else if (parsedCommand && resolvedCommand.use) {
-      const commandRes = await client.session.command(
-        {
-          sessionID: options.sessionId,
-          directory: this.vaultPath,
-          command: resolvedCommand.command,
-          arguments: parsedCommand.arguments,
-          model: commandModel,
-        },
-        { signal: options.signal },
-      );
-      const data = commandRes && commandRes.data ? commandRes.data : commandRes;
-      const payload = extractAssistantPayloadFromEnvelope(data);
-      directResponse = {
-        messageId: data && data.info ? data.info.id : "",
-        text: payload.text || "",
-        reasoning: payload.reasoning || "",
-        meta: payload.meta || "",
-        blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
-        completed: true,
-      };
-    } else {
-      const promptRes = await client.session.prompt(
-        {
-          sessionID: options.sessionId,
-          directory: this.vaultPath,
-          noReply: false,
-          model,
-          parts: [{ type: "text", text: options.prompt }],
-        },
-        { signal: options.signal },
-      );
-      const data = promptRes && promptRes.data ? promptRes.data : promptRes;
-      const payload = extractAssistantPayloadFromEnvelope(data);
-      directResponse = {
-        messageId: data && data.info ? data.info.id : "",
-        text: payload.text || "",
-        reasoning: payload.reasoning || "",
-        meta: payload.meta || "",
-        blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
-        completed: true,
-      };
-    }
-
-    let finalized = streamed || directResponse;
-    if (
-      !finalized ||
-      !hasRenderablePayload(finalized) ||
-      (usedRealStreaming && (!hasTerminalPayload(finalized) || !Boolean(finalized && finalized.completed)))
-    ) {
-      const preferredMessageId = finalized && typeof finalized.messageId === "string" ? finalized.messageId : "";
-      const polled = await this.pollAssistantResult(
-        client,
-        options.sessionId,
-        startedAt,
-        options.signal,
-        preferredMessageId,
-        usedRealStreaming
-          ? (shouldEmitPollingUpdates ? options : null)
-          : options,
-      ).catch((e) => {
-        this.log(`sdk poll fallback failed: ${e instanceof Error ? e.message : String(e)}`);
-        return null;
-      });
-      finalized = chooseRicherResponse(finalized, polled);
-    }
-
-    const ensuredPayload = await ensureRenderablePayload({
-      payload: finalized || { text: "", reasoning: "", meta: "", blocks: [] },
-      getSessionStatus: (requestSignal) => this.getSessionStatus(options.sessionId, requestSignal),
-      signal: options.signal,
-    });
-    finalized = {
-      ...(finalized || { messageId: "" }),
-      text: ensuredPayload.text || "",
-      reasoning: ensuredPayload.reasoning || "",
-      meta: ensuredPayload.meta || "",
-      blocks: Array.isArray(ensuredPayload.blocks) ? ensuredPayload.blocks : [],
-    };
-
-    if (!usedRealStreaming && this.settings.enableStreaming) {
-      if (finalized.reasoning && options.onReasoning) options.onReasoning(finalized.reasoning);
-      if (options.onToken) options.onToken(finalized.text || "");
-      if (Array.isArray(finalized.blocks) && finalized.blocks.length && options.onBlocks) {
-        options.onBlocks(finalized.blocks);
-      }
-    }
-
-    this.log(`sendMessage done ${JSON.stringify({
+    const isCommandRequest = Boolean(parsedCommand && resolvedCommand.use);
+    const questionTracker = createQuestionTracker({
       sessionId: options.sessionId,
-      transport: "sdk",
-      hasText: Boolean(normalizedRenderableText(finalized.text || "")),
-      textLen: String(finalized.text || "").length,
-      normalizedTextLen: normalizedRenderableText(finalized.text || "").length,
-      reasoningLen: String(finalized.reasoning || "").length,
-      blockCount: Array.isArray(finalized.blocks) ? finalized.blocks.length : 0,
-      messageId: finalized.messageId || "",
-    })}`);
+      signal: options.signal,
+      isCommandRequest,
+      listQuestions: ({ signal }) => this.listQuestions({ signal }),
+      onQuestionRequest: options.onQuestionRequest,
+      onQuestionResolved: options.onQuestionResolved,
+      log: (line) => this.log(`sdk ${line}`),
+    });
 
-    return {
-      messageId: finalized.messageId || "",
-      text: finalized.text || "",
-      reasoning: finalized.reasoning || "",
-      meta: finalized.meta || "",
-      blocks: Array.isArray(finalized.blocks) ? finalized.blocks : [],
-    };
+    try {
+      let streamed = null;
+      let directResponse = null;
+      let usedRealStreaming = false;
+      let shouldEmitPollingUpdates = false;
+
+      if (this.settings.enableStreaming) {
+        usedRealStreaming = true;
+        const linked = createLinkedAbortController(options.signal);
+        const eventSignal = linked.controller.signal;
+        const streamPromise = this.streamAssistantFromEvents(client, options.sessionId, startedAt, eventSignal, {
+          onToken: options.onToken,
+          onReasoning: options.onReasoning,
+          onBlocks: options.onBlocks,
+          onPermissionRequest: options.onPermissionRequest,
+          onQuestionRequest: questionTracker.onQuestionRequest,
+          onQuestionResolved: questionTracker.onQuestionResolved,
+          onPromptAppend: options.onPromptAppend,
+          onToast: options.onToast,
+        }).catch((e) => {
+          this.log(`sdk event stream fallback: ${e instanceof Error ? e.message : String(e)}`);
+          return null;
+        });
+
+        try {
+          if (parsedCommand && resolvedCommand.use) {
+            await client.session.command(
+              {
+                sessionID: options.sessionId,
+                directory: this.vaultPath,
+                command: resolvedCommand.command,
+                arguments: parsedCommand.arguments,
+                model: commandModel,
+              },
+              { signal: options.signal },
+            );
+          } else {
+            const effectivePrompt = parsedCommand ? options.prompt.replace(/^\//, "").trim() : options.prompt;
+            await client.session.promptAsync(
+              {
+                sessionID: options.sessionId,
+                directory: this.vaultPath,
+                noReply: false,
+                model,
+                parts: [{ type: "text", text: effectivePrompt || options.prompt }],
+              },
+              { signal: options.signal },
+            );
+          }
+          streamed = await streamPromise;
+        } finally {
+          linked.detach();
+          linked.controller.abort();
+        }
+        const waitingForQuestionAfterStream = await questionTracker.isQuestionPending(options.signal);
+        shouldEmitPollingUpdates = Boolean(
+          !streamed
+          || !hasTerminalPayload(streamed)
+          || !Boolean(streamed && streamed.completed)
+          || waitingForQuestionAfterStream,
+        );
+      } else if (parsedCommand && resolvedCommand.use) {
+        const commandRes = await client.session.command(
+          {
+            sessionID: options.sessionId,
+            directory: this.vaultPath,
+            command: resolvedCommand.command,
+            arguments: parsedCommand.arguments,
+            model: commandModel,
+          },
+          { signal: options.signal },
+        );
+        const data = commandRes && commandRes.data ? commandRes.data : commandRes;
+        const payload = extractAssistantPayloadFromEnvelope(data);
+        directResponse = {
+          messageId: data && data.info ? data.info.id : "",
+          text: payload.text || "",
+          reasoning: payload.reasoning || "",
+          meta: payload.meta || "",
+          blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+          completed: true,
+        };
+      } else {
+        const promptRes = await client.session.prompt(
+          {
+            sessionID: options.sessionId,
+            directory: this.vaultPath,
+            noReply: false,
+            model,
+            parts: [{ type: "text", text: options.prompt }],
+          },
+          { signal: options.signal },
+        );
+        const data = promptRes && promptRes.data ? promptRes.data : promptRes;
+        const payload = extractAssistantPayloadFromEnvelope(data);
+        directResponse = {
+          messageId: data && data.info ? data.info.id : "",
+          text: payload.text || "",
+          reasoning: payload.reasoning || "",
+          meta: payload.meta || "",
+          blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+          completed: true,
+        };
+      }
+
+      let finalized = streamed || directResponse;
+      const waitingForQuestionBeforeFinalize = await questionTracker.isQuestionPending(options.signal);
+      if (
+        !finalized ||
+        !hasRenderablePayload(finalized) ||
+        waitingForQuestionBeforeFinalize ||
+        (usedRealStreaming && (!hasTerminalPayload(finalized) || !Boolean(finalized && finalized.completed)))
+      ) {
+        const preferredMessageId = finalized && typeof finalized.messageId === "string" ? finalized.messageId : "";
+        const polled = await this.pollAssistantResult(
+          client,
+          options.sessionId,
+          startedAt,
+          options.signal,
+          preferredMessageId,
+          usedRealStreaming
+            ? (shouldEmitPollingUpdates ? options : null)
+            : options,
+          (requestSignal) => questionTracker.isQuestionPending(requestSignal),
+        ).catch((e) => {
+          this.log(`sdk poll fallback failed: ${e instanceof Error ? e.message : String(e)}`);
+          return null;
+        });
+        finalized = chooseRicherResponse(finalized, polled);
+      }
+
+      const ensuredPayload = await ensureRenderablePayload({
+        payload: finalized || { text: "", reasoning: "", meta: "", blocks: [] },
+        getSessionStatus: (requestSignal) => this.getSessionStatus(options.sessionId, requestSignal),
+        signal: options.signal,
+      });
+      finalized = {
+        ...(finalized || { messageId: "" }),
+        text: ensuredPayload.text || "",
+        reasoning: ensuredPayload.reasoning || "",
+        meta: ensuredPayload.meta || "",
+        blocks: Array.isArray(ensuredPayload.blocks) ? ensuredPayload.blocks : [],
+      };
+
+      if (!usedRealStreaming && this.settings.enableStreaming) {
+        if (finalized.reasoning && options.onReasoning) options.onReasoning(finalized.reasoning);
+        if (options.onToken) options.onToken(finalized.text || "");
+        if (Array.isArray(finalized.blocks) && finalized.blocks.length && options.onBlocks) {
+          options.onBlocks(finalized.blocks);
+        }
+      }
+
+      this.log(`sendMessage done ${JSON.stringify({
+        sessionId: options.sessionId,
+        transport: "sdk",
+        hasText: Boolean(normalizedRenderableText(finalized.text || "")),
+        textLen: String(finalized.text || "").length,
+        normalizedTextLen: normalizedRenderableText(finalized.text || "").length,
+        reasoningLen: String(finalized.reasoning || "").length,
+        blockCount: Array.isArray(finalized.blocks) ? finalized.blocks.length : 0,
+        messageId: finalized.messageId || "",
+      })}`);
+
+      return {
+        messageId: finalized.messageId || "",
+        text: finalized.text || "",
+        reasoning: finalized.reasoning || "",
+        meta: finalized.meta || "",
+        blocks: Array.isArray(finalized.blocks) ? finalized.blocks : [],
+      };
+    } finally {
+      await questionTracker.stop();
+    }
   }
 
   async replyPermission(options) {
@@ -965,6 +996,4 @@ class SdkTransport {
     }
   }
 }
-
-
 module.exports = { SdkTransport };

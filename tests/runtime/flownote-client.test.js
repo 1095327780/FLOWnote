@@ -30,6 +30,14 @@ function createTransportClass(label, options = {}) {
       return Array.isArray(options.sessionMessages) ? options.sessionMessages : [];
     }
 
+    async getSessionDiff(payload) {
+      const sessionId = String(payload && payload.sessionId ? payload.sessionId : "");
+      const messageId = String(payload && payload.messageId ? payload.messageId : "");
+      this.calls.push(`getSessionDiff:${sessionId}:${messageId}`);
+      if (options.failGetSessionDiff) throw new Error(`${label} diff failed`);
+      return Array.isArray(options.sessionDiff) ? options.sessionDiff : [];
+    }
+
     async stop() {
       this.stopCalled += 1;
     }
@@ -79,4 +87,19 @@ test("FLOWnoteClient listSessionMessages should return transport result", async 
   assert.equal(Array.isArray(list), true);
   assert.equal(list.length, 1);
   assert.equal(SdkTransport.instances[0].calls[0], "listSessionMessages:s1");
+});
+
+test("FLOWnoteClient getSessionDiff should return transport result", async () => {
+  const SdkTransport = createTransportClass("sdk", {
+    sessionDiff: [{ file: "a.md", before: "", after: "x", additions: 1, deletions: 0 }],
+  });
+  const client = new FLOWnoteClient({
+    settings: {},
+    SdkTransport,
+  });
+
+  const list = await client.getSessionDiff({ sessionId: "s1", messageId: "m1" });
+  assert.equal(Array.isArray(list), true);
+  assert.equal(list.length, 1);
+  assert.equal(SdkTransport.instances[0].calls[0], "getSessionDiff:s1:m1");
 });

@@ -3,6 +3,8 @@ name: ah-legacy
 description: 旧笔记处理引导。用于处理初始化迁移后的遗留笔记，执行清单展示、知识型与项目型分流，并衔接 ah-card 与 ah-project 完成转化。
 ---
 
+> 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。
+
 # 旧笔记处理引导技能
 
 ## 概述

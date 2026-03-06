@@ -359,7 +359,7 @@ class InlineAskUserQuestionPanel {
     }
 
     this.updateOptionVisuals(qIdx);
-    if (this.config.immediateSelect) {
+    if (this.config.immediateSelect && !isMulti) {
       const result = {};
       result[q.question] = label;
       this.handleResolve(result);

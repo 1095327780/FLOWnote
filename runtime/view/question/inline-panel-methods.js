@@ -57,9 +57,85 @@ async function submitInlineQuestionResult(interaction, result) {
   });
 }
 
+function extractQuestionRequestIdFromBlock(block) {
+  const source = block && typeof block === "object" ? block : {};
+  const raw = source.raw && typeof source.raw === "object" ? source.raw : {};
+  const state = raw.state && typeof raw.state === "object" ? raw.state : {};
+  const request = state.request && typeof state.request === "object" ? state.request : {};
+
+  const candidates = [
+    source.requestID,
+    source.requestId,
+    raw.requestID,
+    raw.requestId,
+    raw.id,
+    state.requestID,
+    state.requestId,
+    request.id,
+    request.requestID,
+    request.requestId,
+  ];
+
+  for (const value of candidates) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function findQuestionInteractionFromLatestAssistantBlock(messages, activeSessionId) {
+  const list = Array.isArray(messages) ? messages : [];
+  const hasActiveRequest = Boolean(this.currentAbort && this.currentAbort.signal && !this.currentAbort.signal.aborted);
+  const now = Date.now();
+
+  for (let messageIndex = list.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = list[messageIndex];
+    if (!message || message.role !== "assistant") continue;
+    const messageCreatedAt = Number(message.createdAt || 0);
+    const isRecent = messageCreatedAt > 0 ? now - messageCreatedAt <= 3 * 60 * 1000 : false;
+    if (!message.pending && !hasActiveRequest && !isRecent) break;
+
+    const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
+      const block = blocks[blockIndex];
+      if (!block || typeof block !== "object") continue;
+      if (String(block.type || "").trim().toLowerCase() !== "tool") continue;
+      if (String(block.tool || "").trim().toLowerCase() !== "question") continue;
+
+      const status = String(block.status || "").trim().toLowerCase();
+      if (status === "error") continue;
+      const questions = this.extractQuestionItemsFromBlock(block);
+      if (!questions.length) continue;
+
+      const requestId = this.extractQuestionRequestIdFromBlock(block);
+      const fallbackKey = `${activeSessionId}::question-block::${String(message.id || messageIndex)}::${String(block.id || blockIndex)}`;
+      const key = requestId
+        ? this.getQuestionRequestInteractionKey(activeSessionId, requestId)
+        : fallbackKey;
+      const state = this.getQuestionAnswerState(key, questions.length);
+      if (state.submitted || state.sending) continue;
+
+      return {
+        key,
+        sessionId: activeSessionId,
+        message,
+        block,
+        questions,
+        state,
+        requestId,
+      };
+    }
+  }
+  return null;
+}
+
 function findActiveQuestionInteraction(messages) {
   const activeSessionId = String((this.plugin.sessionStore.state().activeSessionId || "")).trim();
-  if (!activeSessionId || !(this.pendingQuestionRequests instanceof Map)) return null;
+  if (!activeSessionId) return null;
+
+  if (!(this.pendingQuestionRequests instanceof Map)) {
+    return this.findQuestionInteractionFromLatestAssistantBlock(messages, activeSessionId);
+  }
 
   const pending = [];
   for (const request of this.pendingQuestionRequests.values()) {
@@ -88,7 +164,20 @@ function findActiveQuestionInteraction(messages) {
       requestId: request.id,
     };
   }
-  return null;
+
+  const fallback = this.findQuestionInteractionFromLatestAssistantBlock(messages, activeSessionId);
+  if (
+    fallback
+    && typeof this.refreshPendingQuestionRequests === "function"
+    && Date.now() - Number(this.pendingQuestionFallbackRefreshAt || 0) >= 300
+  ) {
+    this.pendingQuestionFallbackRefreshAt = Date.now();
+    void this.refreshPendingQuestionRequests({
+      minIntervalMs: 300,
+      silent: true,
+    }).catch(() => {});
+  }
+  return fallback;
 }
 
 function renderInlineQuestionPanel(messages) {
@@ -126,7 +215,10 @@ function renderInlineQuestionPanel(messages) {
     {
       title: tFromContext(this, "view.question.title", "FLOWnote has a question"),
       showCustomInput: true,
-      immediateSelect: interaction.questions.length === 1 && Array.isArray(interaction.questions[0].options) && interaction.questions[0].options.length > 0,
+      immediateSelect: interaction.questions.length === 1
+        && Array.isArray(interaction.questions[0].options)
+        && interaction.questions[0].options.length > 0
+        && !Boolean(interaction.questions[0].multiSelect),
     },
   );
   this.inlineQuestionWidget.render();
@@ -155,6 +247,8 @@ const inlinePanelMethods = {
   clearInlineQuestionWidget,
   formatInlineQuestionPayload,
   submitInlineQuestionResult,
+  extractQuestionRequestIdFromBlock,
+  findQuestionInteractionFromLatestAssistantBlock,
   findActiveQuestionInteraction,
   renderInlineQuestionPanel,
   prefillComposerInput,

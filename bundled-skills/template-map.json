@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "metaTemplatesDir": "Meta/模板",
+  "entries": [
+    {
+      "id": "daily-note",
+      "metaSource": "每日笔记模板.md",
+      "fallback": "ah-note/assets/每日笔记模板.md",
+      "targets": [
+        "ah-note/assets/每日笔记模板.md"
+      ]
+    },
+    {
+      "id": "weekly-note",
+      "metaSource": "周报模板.md",
+      "fallback": "ah-week/references/周报模板.md",
+      "targets": [
+        "ah-week/references/周报模板.md"
+      ]
+    },
+    {
+      "id": "monthly-note",
+      "metaSource": "月报模板.md",
+      "fallback": "ah-month/references/月报模板.md",
+      "targets": [
+        "ah-month/references/月报模板.md"
+      ]
+    },
+    {
+      "id": "yearly-note",
+      "metaSource": "年报模板.md",
+      "fallback": "ah-year/references/年报模板.md",
+      "targets": [
+        "ah-year/references/年报模板.md"
+      ]
+    },
+    {
+      "id": "literature-note",
+      "metaSource": "文献笔记模板.md",
+      "fallback": "ah-read/references/文献笔记模板.md",
+      "targets": [
+        "ah-read/references/文献笔记模板.md"
+      ]
+    },
+    {
+      "id": "evergreen-note",
+      "metaSource": "永久笔记模板.md",
+      "fallback": "ah-inbox/assets/永久笔记模板.md",
+      "targets": [
+        "ah-inbox/assets/永久笔记模板.md"
+      ]
+    },
+    {
+      "id": "project-note",
+      "metaSource": "项目模板.md",
+      "fallback": "ah-project/assets/项目模板.md",
+      "targets": [
+        "ah-project/assets/项目模板.md"
+      ]
+    },
+    {
+      "id": "progress-note",
+      "metaSource": "进度模板.md",
+      "fallback": "ah-read/assets/进度模板.md",
+      "targets": [
+        "ah-read/assets/进度模板.md"
+      ]
+    },
+    {
+      "id": "home-note",
+      "metaSource": "HOME模板.md",
+      "fallback": "ah-init/references/HOME模板.md",
+      "targets": [
+        "ah-init/references/HOME模板.md"
+      ]
+    },
+    {
+      "id": "topic-note",
+      "metaSource": "主题笔记模板.md",
+      "fallback": "ah-init/references/主题笔记模板.md",
+      "targets": [
+        "ah-init/references/主题笔记模板.md"
+      ]
+    },
+    {
+      "id": "domain-note",
+      "metaSource": "领域页模板.md",
+      "fallback": "ah-init/references/领域页模板.md",
+      "targets": [
+        "ah-init/references/领域页模板.md"
+      ]
+    }
+  ]
+}

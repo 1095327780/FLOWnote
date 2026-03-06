@@ -266,3 +266,24 @@ test("pollAssistantPayload should wait for terminal session status when completi
   assert.equal(result.completed, true);
   assert.equal(result.timedOut, false);
 });
+
+test("pollAssistantPayload should keep waiting while a question is pending", async () => {
+  let questionChecks = 0;
+  const result = await pollAssistantPayload({
+    quietTimeoutMs: 15000,
+    maxTotalMs: 60000,
+    noMessageTimeoutMs: 25,
+    sleep: async () => {},
+    getLatest: async () => null,
+    getSessionStatus: async () => ({ type: "idle" }),
+    isQuestionPending: async () => {
+      questionChecks += 1;
+      return questionChecks < 3;
+    },
+  });
+
+  assert.ok(questionChecks >= 3);
+  assert.equal(result.messageId, "");
+  assert.equal(String(result.payload && result.payload.text || ""), "");
+  assert.equal(result.timedOut, false);
+});

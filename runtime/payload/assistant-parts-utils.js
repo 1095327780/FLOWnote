@@ -258,6 +258,10 @@ function compactPartRaw(part, type) {
     return base;
   }
 
+  if (base.type === "stream-text") {
+    return base;
+  }
+
   return base;
 }
 
@@ -318,6 +322,18 @@ function toPartBlock(part, index) {
     block.summary = "";
     block.detail = reasoningText;
     block.preview = makePreviewText(reasoningText, 220);
+    return block;
+  }
+
+  if (type === "stream-text") {
+    const markdownText = typeof part.text === "string" ? part.text : "";
+    const time = part.time && typeof part.time === "object" ? part.time : {};
+    const completed = Number(time.completed || 0) > 0;
+    block.title = "中间输出";
+    block.status = completed ? "completed" : "running";
+    block.summary = "";
+    block.detail = markdownText;
+    block.preview = makePreviewText(markdownText, 220);
     return block;
   }
 

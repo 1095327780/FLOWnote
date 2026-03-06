@@ -50,9 +50,12 @@ function createDropEvent(payload = {}) {
     "text/html": String(payload.html || ""),
     "application/x-obsidian-link": String(payload.obsidian || ""),
   };
-  const types = Object.entries(dataByType)
-    .filter(([, value]) => value)
-    .map(([type]) => type);
+  const types = [...new Set([
+    ...Object.entries(dataByType)
+      .filter(([, value]) => value)
+      .map(([type]) => type),
+    ...((Array.isArray(payload.extraTypes) ? payload.extraTypes : []).map((type) => String(type || "").trim()).filter(Boolean)),
+  ])];
   let prevented = 0;
   let stopped = 0;
   const event = {
@@ -60,6 +63,7 @@ function createDropEvent(payload = {}) {
     relatedTarget: payload.relatedTarget || null,
     dataTransfer: {
       files: Array.isArray(payload.files) ? payload.files : [],
+      items: Array.isArray(payload.items) ? payload.items : [],
       types,
       dropEffect: "none",
       getData(type) {
@@ -381,6 +385,89 @@ test("handleLinkedContextInputDrop should append dropped folder path into linked
     assert.equal(getIndicatorRefreshCount(), 1);
     assert.equal(getFocusedCount(), 1);
     assert.equal(NoticeMock.messages.length, 0);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("extractLinkedContextPathsFromDropEvent should resolve dropped folders from item entry payload", () => {
+  const fixture = loadLinkedContextMethodsWithMockObsidian();
+  try {
+    const { linkedContextMethods } = fixture;
+    const { view } = createMockView(linkedContextMethods, {
+      filesByPath: {
+        "Areas/Projects": { children: [] },
+      },
+    });
+
+    const event = createDropEvent({
+      items: [{
+        kind: "file",
+        getAsFile() {
+          return {
+            path: "/Users/shanghao/vault/Areas/Projects",
+            name: "Projects",
+          };
+        },
+        webkitGetAsEntry() {
+          return {
+            isDirectory: true,
+            isFile: false,
+            fullPath: "/Areas/Projects",
+            name: "Projects",
+          };
+        },
+      }],
+      extraTypes: ["Files"],
+      textPlain: "Projects",
+    });
+
+    const out = linkedContextMethods.extractLinkedContextPathsFromDropEvent.call(view, event);
+    assert.deepEqual(out, ["Areas/Projects"]);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("handleLinkedContextInputDrop should intercept unsupported file-like item payload", () => {
+  const fixture = loadLinkedContextMethodsWithMockObsidian();
+  try {
+    const { linkedContextMethods, NoticeMock } = fixture;
+    NoticeMock.reset();
+
+    const { view, getFocusedCount, getIndicatorRefreshCount } = createMockView(linkedContextMethods, {
+      filesByPath: {
+        "Projects/Alpha.md": "md",
+      },
+    });
+
+    const event = createDropEvent({
+      items: [{
+        kind: "file",
+        getAsFile() {
+          return null;
+        },
+        webkitGetAsEntry() {
+          return {
+            isDirectory: true,
+            isFile: false,
+            fullPath: "/ExternalFolder",
+            name: "ExternalFolder",
+          };
+        },
+      }],
+      extraTypes: ["Files"],
+      textPlain: "ExternalFolder",
+    });
+
+    const handled = linkedContextMethods.handleLinkedContextInputDrop.call(view, event);
+    assert.equal(handled, true);
+    assert.equal(event.prevented, 1);
+    assert.equal(event.stopped, 1);
+    assert.deepEqual(view.linkedContextFiles, []);
+    assert.equal(getIndicatorRefreshCount(), 0);
+    assert.equal(getFocusedCount(), 1);
+    assert.equal(NoticeMock.messages.length, 1);
   } finally {
     fixture.restore();
   }

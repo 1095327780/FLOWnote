@@ -82,6 +82,24 @@ function renderDraftBlocks(view, draftId) {
   view.reorderAssistantMessageLayout(target);
 }
 
+function isQuestionToolBlock(block) {
+  if (!block || typeof block !== "object") return false;
+  if (String(block.type || "").trim().toLowerCase() !== "tool") return false;
+  const toolName = String(block.tool || "").trim().toLowerCase();
+  if (toolName === "question") return true;
+  const raw = block.raw && typeof block.raw === "object" ? block.raw : {};
+  const candidate =
+    String(raw.tool || "").trim().toLowerCase()
+    || String(raw.name || "").trim().toLowerCase()
+    || String(raw.type || "").trim().toLowerCase();
+  return candidate === "question";
+}
+
+function hasQuestionToolBlock(blocks) {
+  const list = Array.isArray(blocks) ? blocks : [];
+  return list.some((block) => isQuestionToolBlock(block));
+}
+
 function createTransportHandlers(view, sessionId, draftId) {
   const queueFrame = (flush, state) => {
     if (!state || typeof state !== "object") return;
@@ -98,11 +116,27 @@ function createTransportHandlers(view, sessionId, draftId) {
 
   const tokenState = { latest: "", scheduled: 0 };
   const reasoningState = { latest: "", scheduled: 0 };
+  const blockState = { latest: [], scheduled: 0 };
+  const questionRefreshState = { lastAt: 0 };
 
   const flushToken = () => {
+    const currentDraft = view.plugin
+      .sessionStore
+      .getActiveMessages()
+      .find((msg) => msg && msg.id === draftId);
+    if (!currentDraft || !currentDraft.pending) return;
     const partial = String(tokenState.latest || "");
     view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, partial);
-    if (partial.trim()) {
+    const refreshedDraft = view.plugin
+      .sessionStore
+      .getActiveMessages()
+      .find((msg) => msg && msg.id === draftId);
+    if (!refreshedDraft || !refreshedDraft.pending) return;
+    const displayedText = currentDraft && typeof currentDraft.text === "string"
+      ? String((refreshedDraft && refreshedDraft.text) || "")
+      : partial;
+
+    if (displayedText.trim()) {
       view.setRuntimeStatus(tr(view, "view.runtime.generating", "Generating response..."), "working");
     }
 
@@ -111,15 +145,41 @@ function createTransportHandlers(view, sessionId, draftId) {
     const target = view.findMessageRow(draftId);
     if (target) {
       const body = target.querySelector(".oc-message-content");
-      if (body) body.textContent = partial;
+      if (body) {
+        const hasStreamTextBlocks = Array.isArray(refreshedDraft.blocks)
+          && refreshedDraft.blocks.some((block) => String((block && block.type) || "").trim().toLowerCase() === "stream-text");
+        if (hasStreamTextBlocks) {
+          body.empty();
+        } else if (displayedText.trim() && typeof view.renderMarkdownSafely === "function") {
+          view.renderMarkdownSafely(body, displayedText, () => {
+            if (typeof view.enhanceCodeBlocks === "function") view.enhanceCodeBlocks(body);
+          });
+        } else {
+          body.textContent = displayedText;
+        }
+      }
     }
     view.scheduleScrollMessagesToBottom();
   };
 
   const flushReasoning = () => {
+    const currentDraft = view.plugin
+      .sessionStore
+      .getActiveMessages()
+      .find((msg) => msg && msg.id === draftId);
+    if (!currentDraft || !currentDraft.pending) return;
     const partialReasoning = String(reasoningState.latest || "");
     view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, partialReasoning);
-    if (partialReasoning.trim()) {
+    const refreshedDraft = view.plugin
+      .sessionStore
+      .getActiveMessages()
+      .find((msg) => msg && msg.id === draftId);
+    if (!refreshedDraft || !refreshedDraft.pending) return;
+    const displayedReasoning = currentDraft && typeof currentDraft.reasoning === "string"
+      ? String((refreshedDraft && refreshedDraft.reasoning) || "")
+      : partialReasoning;
+
+    if (displayedReasoning.trim()) {
       view.setRuntimeStatus(tr(view, "view.runtime.reasoning", "Model is reasoning..."), "working");
     }
 
@@ -128,17 +188,43 @@ function createTransportHandlers(view, sessionId, draftId) {
     const target = view.findMessageRow(draftId);
     if (!target) return;
 
+    const hasReasoningBlocks = view.hasReasoningBlock(refreshedDraft && refreshedDraft.blocks);
+    if (hasReasoningBlocks && refreshedDraft) {
+      view.removeStandaloneReasoningContainer(target);
+    } else {
+      const reasoningBody = view.ensureReasoningContainer(target, true);
+      if (reasoningBody) reasoningBody.textContent = displayedReasoning || "...";
+    }
+    view.scheduleScrollMessagesToBottom();
+  };
+
+  const flushBlocks = () => {
     const currentDraft = view.plugin
       .sessionStore
       .getActiveMessages()
       .find((msg) => msg && msg.id === draftId);
-    const hasReasoningBlocks = view.hasReasoningBlock(currentDraft && currentDraft.blocks);
-    if (hasReasoningBlocks && currentDraft) {
-      renderDraftBlocks(view, draftId);
-    } else {
-      const reasoningBody = view.ensureReasoningContainer(target, true);
-      if (reasoningBody) reasoningBody.textContent = partialReasoning || "...";
+    if (!currentDraft || !currentDraft.pending) return;
+    const blocks = Array.isArray(blockState.latest) ? blockState.latest : [];
+    view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, undefined, undefined, blocks);
+    const runtimeStatus = view.runtimeStatusFromBlocks(blocks);
+    if (runtimeStatus && runtimeStatus.text) {
+      view.setRuntimeStatus(runtimeStatus.text, runtimeStatus.tone);
     }
+
+    if (
+      hasQuestionToolBlock(blocks)
+      && typeof view.refreshPendingQuestionRequests === "function"
+      && Date.now() - Number(questionRefreshState.lastAt || 0) >= 300
+    ) {
+      questionRefreshState.lastAt = Date.now();
+      void view.refreshPendingQuestionRequests({
+        minIntervalMs: 300,
+        silent: true,
+      }).catch(() => {});
+    }
+
+    renderDraftBlocks(view, draftId);
+    view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
     view.scheduleScrollMessagesToBottom();
   };
 
@@ -154,15 +240,8 @@ function createTransportHandlers(view, sessionId, draftId) {
     },
 
     onBlocks: (blocks) => {
-      view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, undefined, undefined, blocks);
-      const runtimeStatus = view.runtimeStatusFromBlocks(blocks);
-      if (runtimeStatus && runtimeStatus.text) {
-        view.setRuntimeStatus(runtimeStatus.text, runtimeStatus.tone);
-      }
-
-      renderDraftBlocks(view, draftId);
-      view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
-      view.scheduleScrollMessagesToBottom();
+      blockState.latest = Array.isArray(blocks) ? blocks : [];
+      queueFrame(flushBlocks, blockState);
     },
 
     onPermissionRequest: async (permission) => {
@@ -218,6 +297,7 @@ function finalizeAssistantDraft(view, sessionId, draftId, response) {
     sessionId,
     draftId,
     {
+      messageId: response.messageId || "",
       text: response.text || "",
       reasoning: response.reasoning || "",
       meta: response.meta || "",

@@ -192,15 +192,14 @@ function listSlashCommandEntries() {
       search: `${command.slice(1)} ${name} ${description}`.toLowerCase(),
     });
   };
-  pushEntry({
-    type: "builtin",
-    command: "/models",
-    name: tr(this, "view.model.commandName", "Model"),
-    description: tr(this, "view.model.commandDescription", "Open model picker or switch model with /models <id>."),
-    insert: "/models ",
-    order: 0,
-  });
   const skillService = this.plugin && this.plugin.skillService;
+  if (skillService && typeof skillService.loadSkills === "function") {
+    try {
+      skillService.loadSkills();
+    } catch {
+      // ignore refresh error and keep current cache
+    }
+  }
   const skills = skillService && typeof skillService.getSkills === "function"
     ? skillService.getSkills()
     : [];

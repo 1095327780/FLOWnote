@@ -23,6 +23,71 @@ const {
   syncBundledContent: syncBundledContentImpl,
 } = require("./bundled-skills-flow-methods");
 
+const embeddedBundledSkillsModule = (() => {
+  try {
+    return require("../generated/bundled-skills-embedded");
+  } catch {
+    return {};
+  }
+})();
+
+const EMBEDDED_BUNDLED_SKILLS_VERSION = String(
+  embeddedBundledSkillsModule && embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_VERSION
+    ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_VERSION
+    : "",
+).trim();
+
+const EMBEDDED_BUNDLED_SKILLS_FILES = embeddedBundledSkillsModule
+&& embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
+&& typeof embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES === "object"
+  ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
+  : null;
+
+function hasEmbeddedBundledSkillsFiles() {
+  if (!EMBEDDED_BUNDLED_SKILLS_FILES) return false;
+  return Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES).length > 0;
+}
+
+function ensureEmbeddedBundledSkillsRoot(pluginRootDir) {
+  if (!pluginRootDir) return "";
+  if (!hasEmbeddedBundledSkillsFiles()) return "";
+
+  const embeddedRoot = path.join(pluginRootDir, ".bundled-skills-embedded");
+  const stampPath = path.join(embeddedRoot, ".stamp");
+  const version = EMBEDDED_BUNDLED_SKILLS_VERSION || "embedded";
+
+  try {
+    if (fs.existsSync(stampPath)) {
+      const currentStamp = String(fs.readFileSync(stampPath, "utf8") || "").trim();
+      if (currentStamp === version && fs.existsSync(embeddedRoot)) {
+        return embeddedRoot;
+      }
+    }
+  } catch {
+    // Fall through and rebuild the embedded mirror.
+  }
+
+  try {
+    fs.rmSync(embeddedRoot, { recursive: true, force: true });
+    fs.mkdirSync(embeddedRoot, { recursive: true });
+
+    const entries = Object.entries(EMBEDDED_BUNDLED_SKILLS_FILES);
+    for (const [rawRelativePath, rawBase64] of entries) {
+      const safeRelativePath = normalizeSafeRelativePath(rawRelativePath);
+      if (!safeRelativePath) continue;
+
+      const targetPath = path.join(embeddedRoot, safeRelativePath);
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, Buffer.from(String(rawBase64 || ""), "base64"));
+    }
+
+    fs.writeFileSync(stampPath, `${version}\n`, "utf8");
+    return embeddedRoot;
+  } catch {
+    return "";
+  }
+}
+
 function createBundledSkillsMethods(options = {}) {
   const pluginDirname = String(options.pluginDirname || "");
 
@@ -157,7 +222,13 @@ function createBundledSkillsMethods(options = {}) {
     },
 
     getBundledSkillsRoot() {
-      return path.join(this.getPluginRootDir(), "bundled-skills");
+      const pluginRootDir = this.getPluginRootDir();
+      const bundledRoot = path.join(pluginRootDir, "bundled-skills");
+      if (fs.existsSync(bundledRoot)) return bundledRoot;
+
+      const embeddedRoot = ensureEmbeddedBundledSkillsRoot(pluginRootDir);
+      if (embeddedRoot) return embeddedRoot;
+      return bundledRoot;
     },
 
     getBundledTemplateMapPath(rootDir = this.getBundledSkillsRoot()) {

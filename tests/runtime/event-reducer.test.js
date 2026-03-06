@@ -550,6 +550,207 @@ test("event reducer should consume message.part.delta updates for text parts", (
   assert.equal(snap.text, "正在处理你的请求");
 });
 
+test("event reducer should append short token deltas instead of replacing previous text", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "prt_t1",
+        type: "text",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_1",
+      messageID: "msg_a",
+      partID: "prt_t1",
+      field: "text",
+      delta: "K",
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_1",
+      messageID: "msg_a",
+      partID: "prt_t1",
+      field: "text",
+      delta: "ubernetes",
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_1",
+      messageID: "msg_a",
+      partID: "prt_t1",
+      field: "text",
+      delta: " Architecture",
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.equal(snap.text, "Kubernetes Architecture");
+});
+
+test("event reducer should append short deltas from message.part.updated before full snapshot arrives", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      delta: "K",
+      part: {
+        id: "prt_r1",
+        type: "reasoning",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      delta: "ubernetes",
+      part: {
+        id: "prt_r1",
+        type: "reasoning",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "",
+      },
+    },
+  });
+
+  const snap = reducer.snapshot();
+  assert.equal(snap.reasoning, "Kubernetes");
+});
+
+test("event reducer should interleave stream text blocks with tool blocks by event order", () => {
+  const startedAt = Date.now();
+  const reducer = createTransportEventReducer({
+    sessionId: "ses_1",
+    startedAt,
+  });
+
+  reducer.consume({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_a",
+        role: "assistant",
+        sessionID: "ses_1",
+        time: { created: startedAt + 5 },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "tool_1",
+        type: "tool",
+        callID: "tool_1",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        tool: "read",
+        state: { status: "completed", output: "ok" },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      delta: "第一段中间输出",
+      part: {
+        id: "text_1",
+        type: "text",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        text: "",
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: "tool_2",
+        type: "tool",
+        callID: "tool_2",
+        sessionID: "ses_1",
+        messageID: "msg_a",
+        tool: "write",
+        state: { status: "running" },
+      },
+    },
+  });
+
+  reducer.consume({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_1",
+      messageID: "msg_a",
+      partID: "text_1",
+      field: "text",
+      delta: "第二段中间输出",
+    },
+  });
+
+  const snap = reducer.snapshot();
+  const types = (Array.isArray(snap.blocks) ? snap.blocks : []).map((block) => String(block && block.type ? block.type : ""));
+  assert.deepEqual(types, ["tool", "stream-text", "tool", "stream-text"]);
+  assert.equal(String(snap.blocks[1].detail || ""), "第一段中间输出");
+  assert.equal(String(snap.blocks[3].detail || ""), "第二段中间输出");
+});
+
 test("event reducer should merge tool part updates by callID even when part id changes", () => {
   const startedAt = Date.now();
   const reducer = createTransportEventReducer({

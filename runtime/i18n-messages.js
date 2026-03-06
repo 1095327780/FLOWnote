@@ -63,7 +63,7 @@ const I18N_MESSAGES = {
         skillInjectModeOff: "关闭注入（只发送用户输入）",
         advancedHeading: "高级设置",
         skillsDirName: "内置 Skills 安装目录",
-        skillsDirDesc: "默认 .opencode/skills。插件会自动安装内置 skills，并忽略目录中的非内置 skills。通常无需修改。",
+        skillsDirDesc: "默认 .opencode/skills。插件会自动安装/更新内置 skills，你也可以在该目录新增或修改 skills；斜杠命令会直接读取此目录。",
         reinstallSkillsName: "重新安装内置 Skills 与模板",
         reinstallSkillsDesc: "按当前界面语言安装/更新内置 skills，并将 Meta/模板 同步到各 skill 资源目录。遇到同名冲突会询问替换或忽略。",
         reinstallSkillsNow: "立即重装",
@@ -190,6 +190,22 @@ const I18N_MESSAGES = {
         apiKeySavedNotice: "{providerName} API Key 已保存",
         noAuthMethods: "无可用鉴权方式",
       },
+    },
+    view: {
+      header: {
+        runtime: "聊天运行时",
+      },
+      welcome: {
+        greeting: "今天你想整理什么？",
+        empty: "发送一条消息，或输入 / 选择技能命令。",
+      },
+      session: {
+        current: "当前会话：{title}",
+      },
+      input: {
+        placeholder: "输入你的消息...",
+      },
+      settings: "设置",
     },
     mobile: {
       providers: {
@@ -345,7 +361,7 @@ const I18N_MESSAGES = {
         skillInjectModeOff: "Disable Injection (Send only user input)",
         advancedHeading: "Advanced Settings",
         skillsDirName: "Bundled Skills Install Directory",
-        skillsDirDesc: "Default is .opencode/skills. Plugin installs bundled skills automatically and ignores non-bundled skills in this dir. Usually no change needed.",
+        skillsDirDesc: "Default is .opencode/skills. Bundled skills are installed/updated automatically, and any skills you add or edit in this directory are available to slash commands.",
         reinstallSkillsName: "Reinstall Bundled Skills & Templates",
         reinstallSkillsDesc: "Install/update bundled skills for the current UI language and sync Meta/Templates into each skill resource folder. If conflicts exist, you can replace or skip.",
         reinstallSkillsNow: "Reinstall Now",
@@ -472,6 +488,22 @@ const I18N_MESSAGES = {
         apiKeySavedNotice: "{providerName} API Key saved",
         noAuthMethods: "No auth methods",
       },
+    },
+    view: {
+      header: {
+        runtime: "Chat Runtime",
+      },
+      welcome: {
+        greeting: "What would you like to organize today?",
+        empty: "Send a message, or type / to pick a skill command.",
+      },
+      session: {
+        current: "Current session: {title}",
+      },
+      input: {
+        placeholder: "Type your message...",
+      },
+      settings: "Settings",
     },
     mobile: {
       providers: {

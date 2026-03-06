@@ -117,6 +117,7 @@ class SessionStore {
           : [];
         return {
           id: String(row.id || `${role}-${Date.now()}-${index}`),
+          messageId: String(row.messageId || row.messageID || row.id || "").trim(),
           role,
           text: String(row.text || ""),
           linkedContextFiles,
@@ -231,6 +232,48 @@ class SessionStore {
     return incoming.length >= existing.length ? incoming : `${existing}\n\n${incoming}`;
   }
 
+  static mergeDraftText(existingText, incomingText) {
+    const existing = String(existingText || "");
+    const incoming = String(incomingText || "");
+    const existingTrimmed = existing.trim();
+    const incomingTrimmed = incoming.trim();
+
+    if (!incomingTrimmed) return existing;
+    if (!existingTrimmed) return incoming;
+    if (incoming === existing) return existing;
+    if (incoming.includes(existing)) return incoming;
+    if (existing.includes(incoming)) return existing;
+    if (incomingTrimmed.startsWith(existingTrimmed) || incomingTrimmed.endsWith(existingTrimmed)) return incoming;
+    if (existingTrimmed.startsWith(incomingTrimmed) || existingTrimmed.endsWith(incomingTrimmed)) return existing;
+
+    const overlapSuffixPrefix = (leftText, rightText) => {
+      const left = String(leftText || "");
+      const right = String(rightText || "");
+      const max = Math.min(left.length, right.length, 4096);
+      for (let len = max; len >= 8; len -= 1) {
+        if (left.slice(left.length - len) === right.slice(0, len)) return len;
+      }
+      return 0;
+    };
+
+    const overlap = overlapSuffixPrefix(existing, incoming);
+    if (overlap > 0) return `${existing}${incoming.slice(overlap)}`;
+    const reverseOverlap = overlapSuffixPrefix(incoming, existing);
+    if (reverseOverlap > 0) return `${incoming}${existing.slice(reverseOverlap)}`;
+
+    let sharedPrefixLen = 0;
+    const prefixMax = Math.min(existing.length, incoming.length, 512);
+    while (sharedPrefixLen < prefixMax && existing[sharedPrefixLen] === incoming[sharedPrefixLen]) {
+      sharedPrefixLen += 1;
+    }
+    if (sharedPrefixLen >= 24) {
+      return incoming.length >= existing.length ? incoming : existing;
+    }
+
+    const needsSpace = /[A-Za-z0-9]$/.test(existing) && /^[A-Za-z0-9]/.test(incoming);
+    return needsSpace ? `${existing} ${incoming}` : `${existing}${incoming}`;
+  }
+
   mergeBlocks(previousBlocks, nextBlocks) {
     const prev = Array.isArray(previousBlocks) ? previousBlocks : [];
     const next = Array.isArray(nextBlocks) ? nextBlocks : [];
@@ -270,7 +313,16 @@ class SessionStore {
     const list = this.state().messagesBySession[sessionId] || [];
     const t = list.find((x) => x.id === draftId);
     if (!t) return;
-    if (typeof text === "string") t.text = text;
+    if (typeof text === "string") {
+      const nextText = String(text || "");
+      const hasExistingText = String(t.text || "").trim().length > 0;
+      // Avoid replacing already visible streamed content with transient partial chunks.
+      if (nextText.trim().length > 0) {
+        t.text = SessionStore.mergeDraftText(t.text, nextText);
+      } else if (!hasExistingText) {
+        t.text = "";
+      }
+    }
     if (typeof reasoning === "string") {
       const nextReasoning = String(reasoning || "");
       const hasExistingReasoning = String(t.reasoning || "").trim().length > 0;
@@ -298,7 +350,20 @@ class SessionStore {
           blocks: [],
         };
     if (t) {
-      t.text = String(payload.text || "");
+      const messageId = String(payload.messageId || payload.messageID || "").trim();
+      if (messageId) {
+        t.messageId = messageId;
+      }
+      {
+        const nextText = String(payload.text || "");
+        const hasExistingText = String(t.text || "").trim().length > 0;
+        // Keep streamed interim text visible when final payload is partial or delayed.
+        if (nextText.trim().length > 0) {
+          t.text = SessionStore.mergeDraftText(t.text, nextText);
+        } else if (!hasExistingText) {
+          t.text = "";
+        }
+      }
       {
         const nextReasoning = String(payload.reasoning || "");
         const hasExistingReasoning = String(t.reasoning || "").trim().length > 0;

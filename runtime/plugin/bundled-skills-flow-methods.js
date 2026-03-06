@@ -49,7 +49,10 @@ async function syncBundledSkills(vaultPath, options = {}) {
   const signature = this.getBundledSkillsContentSignature(bundledRoot, bundledIds);
   const stamp = `${this.getBundledSkillsStamp(bundledIds, signature)}:locale=${skillLocale}`;
 
-  if (this.skillService) this.skillService.setAllowedSkillIds(bundledIds);
+  if (this.skillService && typeof this.skillService.setAllowedSkillIds === "function") {
+    // Keep skill loading fully directory-driven so user-added skills are available.
+    this.skillService.setAllowedSkillIds(null);
+  }
   if (!bundledIds.length) {
     return {
       synced: 0,

@@ -1085,24 +1085,37 @@ body.theme-dark .oc-surface {
 }
 
 .oc-inline-action {
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
+  all: unset;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--oc-border) 72%, transparent);
+  background: color-mix(in srgb, var(--background-primary) 86%, transparent);
+  color: var(--text-muted);
   cursor: pointer;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
 .oc-inline-action:hover {
   color: var(--oc-brand-strong);
+  border-color: var(--oc-border-hover);
+  background: var(--background-modifier-hover);
 }
 
 .oc-inline-action svg {
   width: 14px;
   height: 14px;
+  stroke: currentColor;
+  fill: none;
+}
+
+.oc-inline-action:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
 }
 
 /* Assistant Thinking / Tool Blocks -------------------------------------------------- */
@@ -1116,6 +1129,26 @@ body.theme-dark .oc-surface {
 
 .oc-part-list.is-empty {
   display: none;
+}
+
+.oc-stream-text-part {
+  border-left: 2px solid color-mix(in srgb, var(--oc-brand-strong) 52%, var(--background-modifier-border));
+  margin-inline-start: 7px;
+  padding-inline-start: 14px;
+  padding-block: 2px;
+}
+
+.oc-stream-text-part.is-completed {
+  border-left-color: color-mix(in srgb, var(--text-success) 52%, var(--background-modifier-border));
+}
+
+.oc-stream-text-part.is-error {
+  border-left-color: color-mix(in srgb, var(--text-error) 60%, var(--background-modifier-border));
+}
+
+.oc-stream-text-content {
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .oc-thinking-block {
@@ -1312,6 +1345,37 @@ body.theme-dark .oc-surface {
   border-inline-start-color: color-mix(in srgb, var(--oc-brand-strong) 48%, var(--background-modifier-border));
 }
 
+.oc-patch-expand-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  transition: transform 140ms ease;
+}
+
+.oc-patch-expand-indicator svg {
+  width: 14px;
+  height: 14px;
+}
+
+.oc-tool-call.oc-tool-patch[open] > .oc-tool-header .oc-patch-expand-indicator {
+  transform: rotate(90deg);
+}
+
+.oc-patch-summary-divider,
+.oc-patch-summary-more {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
+
+.oc-patch-summary-path {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 44%;
+}
+
 .oc-tool-patch-content {
   display: flex;
   flex-direction: column;
@@ -1325,13 +1389,157 @@ body.theme-dark .oc-surface {
 }
 
 .oc-tool-file-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--font-monospace);
   font-size: 12px;
   line-height: 1.35;
   color: var(--text-muted);
+  min-width: 0;
+}
+
+.oc-patch-load-status {
+  color: var(--text-faint);
+}
+
+.oc-patch-load-status.is-warning {
+  color: color-mix(in srgb, var(--text-warning) 76%, var(--text-muted));
+}
+
+.oc-patch-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.oc-patch-file-details {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background-secondary) 76%, var(--background-modifier-hover));
+}
+
+.oc-patch-file-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  cursor: default;
+  list-style: none;
+  min-width: 0;
+}
+
+.oc-patch-file-summary-path {
+  flex: 1;
+  min-width: 0;
+}
+
+.oc-patch-file-action {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.oc-patch-file-path {
+  display: inline-block;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.oc-patch-file-link:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.oc-patch-file-stats {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.oc-patch-file-body {
+  margin: 0 6px 6px 18px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--background-modifier-border) 70%, var(--oc-brand-faint));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.oc-patch-hunk {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.oc-patch-hunk-header {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+
+.oc-patch-hunk-separator {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+  margin: 2px 0;
+}
+
+.oc-patch-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.oc-patch-line-prefix {
+  width: 10px;
+  flex-shrink: 0;
+  user-select: none;
+  color: var(--text-faint);
+}
+
+.oc-patch-line-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.oc-patch-line.is-insert {
+  background: color-mix(in srgb, var(--color-green) 14%, transparent);
+}
+
+.oc-patch-line.is-insert .oc-patch-line-prefix {
+  color: var(--color-green);
+}
+
+.oc-patch-line.is-delete {
+  background: color-mix(in srgb, var(--color-red) 14%, transparent);
+}
+
+.oc-patch-line.is-delete .oc-patch-line-prefix {
+  color: var(--color-red);
+}
+
+.oc-patch-line.is-omitted {
+  background: color-mix(in srgb, var(--background-modifier-border) 36%, transparent);
+}
+
+.oc-patch-line.is-omitted .oc-patch-line-prefix,
+.oc-patch-line.is-omitted .oc-patch-line-text {
+  color: var(--text-faint);
+}
+
+.oc-patch-truncated-note {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .oc-tool-detail {
@@ -2772,46 +2980,79 @@ body.theme-dark .oc-surface {
 
 .oc-capture-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .oc-capture-btn {
-  padding: 7px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
+  line-height: 1;
   cursor: pointer;
   border: 1px solid var(--background-modifier-border);
-  background: var(--background-secondary);
+  background: var(--interactive-normal);
   color: var(--text-normal);
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 
 .oc-capture-btn:hover {
-  background: var(--background-modifier-hover);
+  background: var(--interactive-hover);
   border-color: var(--background-modifier-border-hover);
+  transform: translateY(-1px);
 }
 
 .oc-capture-btn:active {
-  transform: scale(0.97);
+  transform: translateY(0);
 }
 
+.oc-capture-btn:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--interactive-accent) 44%, var(--background-modifier-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+}
+
+.oc-capture-btn.mod-muted,
+.oc-capture-btn-cancel {
+  color: var(--text-muted);
+}
+
+.oc-capture-btn.mod-muted:hover,
+.oc-capture-btn-cancel:hover {
+  color: var(--text-normal);
+}
+
+.oc-capture-btn.mod-cta,
 .oc-capture-btn-submit {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
-  border-color: transparent;
-  padding: 7px 24px;
+  border-color: color-mix(in srgb, var(--interactive-accent) 72%, var(--background-modifier-border));
+  min-width: 92px;
+  padding: 0 18px;
 }
 
+.oc-capture-btn.mod-cta:hover,
 .oc-capture-btn-submit:hover {
   background: var(--interactive-accent-hover);
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--interactive-accent-hover) 78%, var(--background-modifier-border));
+  color: var(--text-on-accent);
+}
+
+.oc-capture-btn.mod-cta:focus-visible,
+.oc-capture-btn-submit:focus-visible {
+  border-color: color-mix(in srgb, var(--interactive-accent) 80%, var(--background-modifier-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 28%, transparent);
 }
 
 .oc-capture-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+  filter: saturate(0.82);
 }
 
 /* ── Capture modal — mobile (bottom sheet) ── */
@@ -2828,6 +3069,9 @@ body.theme-dark .oc-surface {
   left: 0 !important;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.24);
   transition: bottom 0.15s ease;
 }
 
@@ -2854,34 +3098,31 @@ body.theme-dark .oc-surface {
   color: var(--text-muted);
 }
 
-/* Input — borderless with subtle background */
+/* Input — Obsidian-like bordered input */
 .is-mobile .oc-capture-input {
   font-size: 16px; /* prevent iOS zoom on focus */
-  min-height: 90px;
-  border: none;
+  min-height: 96px;
+  border: 1px solid var(--background-modifier-border);
   border-radius: 12px;
-  background: var(--background-secondary);
+  background: var(--background-primary-alt, var(--background-secondary));
   padding: 12px 14px;
 }
 
 .is-mobile .oc-capture-input:focus {
-  border: none;
-  box-shadow: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
   outline: none;
-  background: var(--background-secondary);
-  border-bottom: 2px solid var(--interactive-accent);
-  border-radius: 12px 12px 4px 4px;
+  background: var(--background-primary);
 }
 
-/* Footer — compact horizontal layout */
 .is-mobile .oc-capture-footer {
-  flex-direction: row;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 10px;
   padding-top: 10px;
   margin-top: 10px;
-  border-top: none;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
 .is-mobile .oc-capture-hint {
@@ -2889,36 +3130,18 @@ body.theme-dark .oc-surface {
 }
 
 .is-mobile .oc-capture-actions {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  width: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
 }
 
-/* Cancel — text-only ghost button */
-.is-mobile .oc-capture-btn-cancel {
-  background: none;
-  border: none;
-  color: var(--text-muted);
+.is-mobile .oc-capture-btn {
+  width: 100%;
+  min-height: 40px;
   font-size: 14px;
-  padding: 8px 12px;
-  min-height: auto;
-  width: auto;
-}
-
-.is-mobile .oc-capture-btn-cancel:hover {
-  background: none;
-  border: none;
-  color: var(--text-normal);
-}
-
-/* Submit — compact capsule */
-.is-mobile .oc-capture-btn-submit {
-  font-size: 14px;
-  padding: 8px 22px;
-  border-radius: 20px;
-  min-height: auto;
-  width: auto;
+  border-radius: 10px;
+  justify-content: center;
 }
 
 /* iOS fallback: force top-anchored compact sheet when keyboard metrics are unreliable */

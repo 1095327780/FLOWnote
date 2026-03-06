@@ -61,6 +61,9 @@ class FLOWnoteClient {
   listSessionMessages(options = {}) {
     return this.withTransport("listSessionMessages", (t) => t.listSessionMessages(options));
   }
+  getSessionDiff(options = {}) {
+    return this.withTransport("getSessionDiff", (t) => t.getSessionDiff(options));
+  }
   createSession(title) {
     return this.withTransport("createSession", (t) => t.createSession(title));
   }

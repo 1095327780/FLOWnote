@@ -3,6 +3,10 @@ const INTERNAL_NOISY_TOOL_NAMES = new Set([
   "background_output",
   "background_cancel",
 ]);
+const PATCH_DEFAULT_CONTEXT_LINES = 3;
+const PATCH_DEFAULT_MAX_MATRIX_CELLS = 120000;
+const PATCH_DEFAULT_MAX_RENDERED_LINES = 320;
+const PATCH_DIFF_MAX_TEXT_CHARS_PER_SIDE = 60000;
 
 function ensureReasoningContainer(row, openByDefault) {
   let details = row.querySelector(".oc-message-reasoning");
@@ -109,12 +113,303 @@ function normalizePatchChangeType(value) {
 }
 
 function patchChangeLabel(changeType) {
-  void changeType;
+  const type = normalizePatchChangeType(changeType);
+  if (type === "added") return tFromContext(this, "view.block.patchAction.added", "Added");
+  if (type === "modified") return tFromContext(this, "view.block.patchAction.modified", "Modified");
+  if (type === "deleted") return tFromContext(this, "view.block.patchAction.deleted", "Deleted");
+  if (type === "renamed") return tFromContext(this, "view.block.patchAction.renamed", "Renamed");
+  if (type === "copied") return tFromContext(this, "view.block.patchAction.copied", "Copied");
   return tFromContext(this, "view.block.patchLabel", "File change");
 }
 
 function normalizePatchPath(pathLike) {
   return String(pathLike || "").trim();
+}
+
+function splitPatchTextLines(value) {
+  const text = String(value || "").replace(/\r/g, "");
+  if (!text) return [];
+  return text.split("\n");
+}
+
+function clampPatchSnapshotText(value, maxChars = PATCH_DIFF_MAX_TEXT_CHARS_PER_SIDE) {
+  const raw = String(value || "");
+  const limit = Number.isFinite(Number(maxChars)) && Number(maxChars) > 0
+    ? Math.max(2048, Math.floor(Number(maxChars)))
+    : PATCH_DIFF_MAX_TEXT_CHARS_PER_SIDE;
+  if (raw.length <= limit) return raw;
+  const head = Math.max(1024, Math.floor(limit * 0.55));
+  const tail = Math.max(1024, limit - head);
+  const hidden = Math.max(0, raw.length - head - tail);
+  return [
+    raw.slice(0, head),
+    "",
+    `... [truncated ${hidden} chars for memory safety] ...`,
+    "",
+    raw.slice(raw.length - tail),
+  ].join("\n");
+}
+
+function countPatchLineChanges(lines) {
+  let added = 0;
+  let removed = 0;
+  for (const line of Array.isArray(lines) ? lines : []) {
+    const type = line && typeof line === "object" ? String(line.type || "") : "";
+    if (type === "insert") added += 1;
+    if (type === "delete") removed += 1;
+  }
+  return { added, removed };
+}
+
+function clampPatchDiffLines(lines, maxRenderedLines) {
+  const source = Array.isArray(lines) ? lines : [];
+  const limitRaw = Number(maxRenderedLines);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0
+    ? Math.max(24, Math.floor(limitRaw))
+    : PATCH_DEFAULT_MAX_RENDERED_LINES;
+  if (source.length <= limit) {
+    return {
+      lines: source,
+      truncated: false,
+      hiddenLineCount: 0,
+    };
+  }
+
+  const head = Math.max(8, Math.floor(limit * 0.58));
+  const tail = Math.max(8, limit - head - 1);
+  const keptHead = source.slice(0, head);
+  const keptTail = source.slice(source.length - tail);
+  const hiddenLineCount = Math.max(0, source.length - keptHead.length - keptTail.length);
+  const markerLine = {
+    type: "omitted",
+    text: `... ${hiddenLineCount} lines omitted ...`,
+  };
+  return {
+    lines: [...keptHead, markerLine, ...keptTail],
+    truncated: true,
+    hiddenLineCount,
+  };
+}
+
+function buildFallbackPatchLines(beforeLines, afterLines) {
+  const lines = [];
+  for (const text of beforeLines) {
+    lines.push({ type: "delete", text: String(text || "") });
+  }
+  for (const text of afterLines) {
+    lines.push({ type: "insert", text: String(text || "") });
+  }
+  return lines;
+}
+
+function buildPatchLineDiff(beforeText, afterText, options = {}) {
+  const beforeLines = splitPatchTextLines(beforeText);
+  const afterLines = splitPatchTextLines(afterText);
+  const rows = beforeLines.length;
+  const cols = afterLines.length;
+  const maxMatrixCellsRaw = Number(options.maxMatrixCells);
+  const maxMatrixCells = Number.isFinite(maxMatrixCellsRaw) && maxMatrixCellsRaw > 0
+    ? Math.max(1024, Math.floor(maxMatrixCellsRaw))
+    : PATCH_DEFAULT_MAX_MATRIX_CELLS;
+  const maxRenderedLinesRaw = Number(options.maxRenderedLines);
+  const maxRenderedLines = Number.isFinite(maxRenderedLinesRaw) && maxRenderedLinesRaw > 0
+    ? Math.max(24, Math.floor(maxRenderedLinesRaw))
+    : PATCH_DEFAULT_MAX_RENDERED_LINES;
+
+  if (!rows && !cols) {
+    return {
+      lines: [],
+      truncated: false,
+      hiddenLineCount: 0,
+      matrixLimited: false,
+    };
+  }
+
+  const matrixCells = rows * cols;
+  if (matrixCells > maxMatrixCells) {
+    const fallbackLines = buildFallbackPatchLines(beforeLines, afterLines);
+    const limitedFallback = clampPatchDiffLines(fallbackLines, maxRenderedLines);
+    return {
+      lines: limitedFallback.lines,
+      truncated: limitedFallback.truncated,
+      hiddenLineCount: limitedFallback.hiddenLineCount,
+      matrixLimited: true,
+    };
+  }
+
+  const width = cols + 1;
+  const matrix = new Uint32Array((rows + 1) * width);
+
+  for (let row = rows - 1; row >= 0; row -= 1) {
+    for (let col = cols - 1; col >= 0; col -= 1) {
+      const idx = row * width + col;
+      if (beforeLines[row] === afterLines[col]) {
+        matrix[idx] = matrix[(row + 1) * width + (col + 1)] + 1;
+      } else {
+        const down = matrix[(row + 1) * width + col];
+        const right = matrix[row * width + (col + 1)];
+        matrix[idx] = down >= right ? down : right;
+      }
+    }
+  }
+
+  const lines = [];
+  let row = 0;
+  let col = 0;
+  while (row < rows && col < cols) {
+    const beforeLine = beforeLines[row];
+    const afterLine = afterLines[col];
+    if (beforeLine === afterLine) {
+      lines.push({ type: "equal", text: beforeLine });
+      row += 1;
+      col += 1;
+      continue;
+    }
+    const down = matrix[(row + 1) * width + col];
+    const right = matrix[row * width + (col + 1)];
+    if (down >= right) {
+      lines.push({ type: "delete", text: beforeLine });
+      row += 1;
+    } else {
+      lines.push({ type: "insert", text: afterLine });
+      col += 1;
+    }
+  }
+  while (row < rows) {
+    lines.push({ type: "delete", text: beforeLines[row] });
+    row += 1;
+  }
+  while (col < cols) {
+    lines.push({ type: "insert", text: afterLines[col] });
+    col += 1;
+  }
+
+  const limited = clampPatchDiffLines(lines, maxRenderedLines);
+  return {
+    lines: limited.lines,
+    truncated: limited.truncated,
+    hiddenLineCount: limited.hiddenLineCount,
+    matrixLimited: false,
+  };
+}
+
+function splitPatchDiffHunks(diffLines, options = {}) {
+  const lines = Array.isArray(diffLines) ? diffLines : [];
+  if (!lines.length) return [];
+
+  const contextLinesRaw = Number(options.contextLines);
+  const contextLines = Number.isFinite(contextLinesRaw) && contextLinesRaw >= 0
+    ? Math.min(24, Math.floor(contextLinesRaw))
+    : PATCH_DEFAULT_CONTEXT_LINES;
+
+  const changedIndices = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const type = line && typeof line === "object" ? String(line.type || "") : "";
+    if (type !== "equal") {
+      changedIndices.push(index);
+    }
+  }
+  if (!changedIndices.length) return [];
+
+  const ranges = [];
+  for (const changedIndex of changedIndices) {
+    const start = Math.max(0, changedIndex - contextLines);
+    const end = Math.min(lines.length - 1, changedIndex + contextLines);
+    const previous = ranges[ranges.length - 1];
+    if (previous && start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, end);
+    } else {
+      ranges.push({ start, end });
+    }
+  }
+
+  const hunks = [];
+  for (const range of ranges) {
+    let oldStart = 1;
+    let newStart = 1;
+    for (let i = 0; i < range.start; i += 1) {
+      const type = String((lines[i] && lines[i].type) || "");
+      if (type === "equal" || type === "delete") oldStart += 1;
+      if (type === "equal" || type === "insert") newStart += 1;
+    }
+    hunks.push({
+      lines: lines.slice(range.start, range.end + 1),
+      oldStart,
+      newStart,
+    });
+  }
+  return hunks;
+}
+
+function normalizePatchDiffEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const file = normalizePatchPath(
+    entry.file || entry.path || entry.filePath || entry.filename || entry.name || entry.to || entry.newPath || "",
+  );
+  const beforeRaw = typeof entry.before === "string"
+    ? entry.before
+    : typeof entry.old === "string"
+      ? entry.old
+      : typeof entry.previous === "string"
+        ? entry.previous
+        : "";
+  const afterRaw = typeof entry.after === "string"
+    ? entry.after
+    : typeof entry.new === "string"
+      ? entry.new
+      : typeof entry.current === "string"
+        ? entry.current
+        : "";
+  const before = clampPatchSnapshotText(beforeRaw);
+  const after = clampPatchSnapshotText(afterRaw);
+  if (!file && !before && !after) return null;
+
+  const parseCount = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return 0;
+    return Math.max(0, Math.floor(num));
+  };
+
+  return {
+    file,
+    before,
+    after,
+    additions: parseCount(entry.additions),
+    deletions: parseCount(entry.deletions),
+  };
+}
+
+function inferPatchActionFromDiff(diffEntry, fallbackEntry) {
+  const fallbackAction = normalizePatchChangeType(fallbackEntry && fallbackEntry.action);
+  if (fallbackAction !== "unknown") return fallbackAction;
+  const diff = diffEntry && typeof diffEntry === "object" ? diffEntry : {};
+  const before = String(diff.before || "");
+  const after = String(diff.after || "");
+  const beforeHasText = before.length > 0;
+  const afterHasText = after.length > 0;
+  if (beforeHasText && !afterHasText) return "deleted";
+  if (!beforeHasText && afterHasText) return "added";
+
+  const additions = Number(diff.additions || 0);
+  const deletions = Number(diff.deletions || 0);
+  if (deletions > 0 && additions <= 0) return "deleted";
+  if (additions > 0 && deletions <= 0) return "added";
+  return "modified";
+}
+
+function countPatchDiffStats(diffEntry, diffLines = []) {
+  const diff = diffEntry && typeof diffEntry === "object" ? diffEntry : {};
+  const additions = Number(diff.additions);
+  const deletions = Number(diff.deletions);
+  const hasExplicitCounts = Number.isFinite(additions) || Number.isFinite(deletions);
+  if (hasExplicitCounts) {
+    return {
+      added: Number.isFinite(additions) && additions > 0 ? Math.floor(additions) : 0,
+      removed: Number.isFinite(deletions) && deletions > 0 ? Math.floor(deletions) : 0,
+    };
+  }
+  return countPatchLineChanges(diffLines);
 }
 
 function fileNameOnly(pathLike) {
@@ -492,9 +787,15 @@ const blockUtilsMethods = {
 
 const blockUtilsInternal = {
   truncateSummaryText,
+  normalizePatchPath,
   normalizePatchChangeType,
   patchChangeLabel,
   normalizePatchFileEntry,
+  normalizePatchDiffEntry,
+  inferPatchActionFromDiff,
+  buildPatchLineDiff,
+  splitPatchDiffHunks,
+  countPatchDiffStats,
   patchFileDisplayPath,
   extractPatchFileEntries,
   summarizePatchChanges,

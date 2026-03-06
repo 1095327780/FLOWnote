@@ -20,9 +20,20 @@ function clampRenderText(value, maxLen = MAX_RENDER_MARKDOWN_CHARS) {
   return `${raw.slice(0, limit)}\n\n...(truncated ${raw.length - limit} chars)`;
 }
 
+function syncPatchDiffCacheSession(view) {
+  if (!view || !view.plugin || !view.plugin.sessionStore) return;
+  const activeSessionId = String(view.plugin.sessionStore.state().activeSessionId || "").trim();
+  const previousSessionId = String(view.patchDiffCacheSessionId || "").trim();
+  if (activeSessionId === previousSessionId) return;
+  view.patchDiffCacheSessionId = activeSessionId;
+  if (view.patchDiffCache instanceof Map) view.patchDiffCache.clear();
+  if (view.patchDiffInflight instanceof Map) view.patchDiffInflight.clear();
+}
+
 function renderMessages(options = {}) {
   const container = this.elements.messages;
   if (!container) return;
+  syncPatchDiffCacheSession(this);
   const cfg = options && typeof options === "object" ? options : {};
   const forceBottom = Boolean(cfg.forceBottom);
   if (forceBottom) this.autoScrollEnabled = true;
@@ -69,7 +80,9 @@ function renderUserActions(row, message) {
   const copyBtn = actions.createEl("button", { cls: "oc-inline-action" });
   copyBtn.setAttr("type", "button");
   safeSetIcon(copyBtn, "copy");
+  if (!copyBtn.querySelector("svg")) copyBtn.setText("C");
   copyBtn.setAttr("aria-label", tFromContext(this, "view.message.copy", "Copy message"));
+  copyBtn.setAttr("title", tFromContext(this, "view.message.copy", "Copy message"));
   copyBtn.addEventListener("click", async () => {
     await copyTextToClipboard(message.text || "");
     new Notice(tFromContext(this, "view.message.copied", "Message copied"));
@@ -78,7 +91,9 @@ function renderUserActions(row, message) {
   const retryBtn = actions.createEl("button", { cls: "oc-inline-action" });
   retryBtn.setAttr("type", "button");
   safeSetIcon(retryBtn, "rotate-ccw");
+  if (!retryBtn.querySelector("svg")) retryBtn.setText("↺");
   retryBtn.setAttr("aria-label", tFromContext(this, "view.message.retry", "Retry from this message"));
+  retryBtn.setAttr("title", tFromContext(this, "view.message.retry", "Retry from this message"));
   retryBtn.addEventListener("click", async () => {
     await this.sendPrompt(message.text || "");
   });
@@ -186,6 +201,9 @@ function renderMessageItem(parent, message) {
   if (message.pending) {
     let pendingText = typeof message.text === "string" ? message.text : "";
     const hasPendingText = Boolean(String(pendingText || "").trim());
+    const hasStreamTextBlocks = message.role === "assistant" && this
+      .visibleAssistantBlocks(message.blocks)
+      .some((block) => String((block && block.type) || "").trim().toLowerCase() === "stream-text");
     const runtimeText = String((this.runtimeStatusState && this.runtimeStatusState.text) || "").trim();
     const runtimeTone = String((this.runtimeStatusState && this.runtimeStatusState.tone) || "info");
     const canShowRuntimeStatus = message.role === "assistant" && !hasPendingText && Boolean(runtimeText);
@@ -197,7 +215,18 @@ function renderMessageItem(parent, message) {
       else if (runtimeTone === "working") body.addClass("is-working");
       else body.addClass("is-info");
     }
-    body.setText(pendingText);
+    if (message.role === "assistant" && hasPendingText && hasStreamTextBlocks) {
+      body.empty();
+    } else if (message.role === "assistant" && pendingText.trim()) {
+      const pendingMarkdown = normalizeMarkdownForDisplay(
+        clampRenderText(pendingText, MAX_RENDER_MARKDOWN_CHARS),
+      );
+      this.renderMarkdownSafely(body, pendingMarkdown, () => {
+        this.enhanceCodeBlocks(body);
+      });
+    } else {
+      body.setText(pendingText);
+    }
 
     const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
     if (message.role === "assistant" && message.reasoning && !hasReasoningBlocks) {

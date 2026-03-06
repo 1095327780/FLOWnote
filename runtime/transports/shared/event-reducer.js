@@ -80,10 +80,96 @@ function createTransportEventReducer(options) {
   let done = false;
   let completionSeen = false;
   let idleSeen = false;
+  let timelineTextSegment = 0;
+  let activeTimelineTextPartId = "";
 
   const call = (fn, ...args) => {
     if (typeof fn !== "function") return;
     fn(...args);
+  };
+
+  const overlapSuffixPrefix = (leftText, rightText, maxWindow = 2048) => {
+    const left = String(leftText || "");
+    const right = String(rightText || "");
+    const max = Math.min(left.length, right.length, Math.max(16, Number(maxWindow) || 2048));
+    for (let len = max; len >= 1; len -= 1) {
+      if (left.slice(left.length - len) === right.slice(0, len)) return len;
+    }
+    return 0;
+  };
+
+  // `message.part.delta` is append-oriented; prefer incremental concatenation while tolerating snapshot replay.
+  const mergeDeltaText = (existingText, deltaText) => {
+    const existing = String(existingText || "");
+    const incoming = String(deltaText || "");
+    if (!incoming) return existing;
+    if (!existing) return incoming;
+    if (existing === incoming) return existing;
+    if (incoming.startsWith(existing)) return incoming;
+    if (existing.endsWith(incoming)) return existing;
+    const overlap = overlapSuffixPrefix(existing, incoming, 2048);
+    if (overlap > 0) return `${existing}${incoming.slice(overlap)}`;
+    return `${existing}${incoming}`;
+  };
+
+  const resetTimelineTextState = () => {
+    timelineTextSegment = 0;
+    activeTimelineTextPartId = "";
+  };
+
+  const closeTimelineTextPart = () => {
+    activeTimelineTextPartId = "";
+  };
+
+  const ensureTimelineTextPartId = () => {
+    if (!messageId) return "";
+    if (activeTimelineTextPartId && blockPartById.has(activeTimelineTextPartId)) {
+      return activeTimelineTextPartId;
+    }
+    timelineTextSegment += 1;
+    const partId = `stream-text:${messageId}:${timelineTextSegment}`;
+    const now = Date.now();
+    blockPartById.set(partId, {
+      id: partId,
+      type: "stream-text",
+      sessionID: sessionId,
+      messageID: messageId,
+      text: "",
+      time: { start: now },
+    });
+    partKindById.set(partId, "stream-text");
+    activeTimelineTextPartId = partId;
+    return partId;
+  };
+
+  const updateTimelineTextPart = (delta = "", snapshotText = "") => {
+    const partId = ensureTimelineTextPartId();
+    if (!partId) return false;
+    const currentPart = blockPartById.get(partId) || {
+      id: partId,
+      type: "stream-text",
+      sessionID: sessionId,
+      messageID: messageId,
+      text: "",
+      time: { start: Date.now() },
+    };
+    const currentText = String(currentPart.text || "");
+    let nextText = currentText;
+    if (delta) nextText = mergeDeltaText(nextText, delta);
+    if (typeof snapshotText === "string" && snapshotText.length) {
+      nextText = mergeSnapshotText(nextText, snapshotText);
+    }
+    if (nextText === currentText) return false;
+    const nextPart = Object.assign({}, currentPart, {
+      messageID: messageId || currentPart.messageID || "",
+      text: nextText,
+      time: Object.assign({}, currentPart.time || {}, {
+        end: Date.now(),
+      }),
+    });
+    blockPartById.set(partId, nextPart);
+    partKindById.set(partId, "stream-text");
+    return true;
   };
 
   const joinPartText = (map) =>
@@ -136,6 +222,7 @@ function createTransportEventReducer(options) {
     blockPartById.clear();
     partKindById.clear();
     partAliasToCanonicalId.clear();
+    resetTimelineTextState();
     for (const [id, part] of stickyBlocks) {
       blockPartById.set(id, part);
       partKindById.set(id, String(part && part.type ? part.type : ""));
@@ -284,7 +371,7 @@ function createTransportEventReducer(options) {
     const partId = typeof part.id === "string" && part.id ? part.id : `user:${part.messageID}`;
     const current = userTextByPart.get(partId) || "";
     let next = current;
-    if (delta) next = mergeSnapshotText(next, delta);
+    if (delta) next = mergeDeltaText(next, delta);
     if (typeof part.text === "string") next = mergeSnapshotText(next, part.text);
     if (next !== current) userTextByPart.set(partId, next);
 
@@ -379,26 +466,32 @@ function createTransportEventReducer(options) {
 
     if (part.type === "text") {
       idleSeen = false;
+      const timelineChanged = updateTimelineTextPart(
+        delta,
+        typeof part.text === "string" ? part.text : "",
+      );
       if (part.ignored === true) {
         textByPart.delete(partId);
       } else {
         const current = textByPart.get(partId) || "";
         let next = current;
-        if (delta) next = mergeSnapshotText(next, delta);
+        if (delta) next = mergeDeltaText(next, delta);
         if (typeof part.text === "string") next = mergeSnapshotText(next, part.text);
         if (next !== current) {
           textByPart.set(partId, next);
         }
       }
       updateText();
+      if (timelineChanged) updateBlocks();
       return;
     }
 
     if (part.type === "reasoning") {
       idleSeen = false;
+      closeTimelineTextPart();
       const current = reasoningByPart.get(partId) || "";
       let next = current;
-      if (delta) next = mergeSnapshotText(next, delta);
+      if (delta) next = mergeDeltaText(next, delta);
       if (typeof part.text === "string") next = mergeSnapshotText(next, part.text);
       if (next !== current) {
         reasoningByPart.set(partId, next);
@@ -410,6 +503,7 @@ function createTransportEventReducer(options) {
     }
 
     idleSeen = false;
+    closeTimelineTextPart();
     blockPartById.set(partId, part);
     updateBlocks();
   };
@@ -438,8 +532,9 @@ function createTransportEventReducer(options) {
     const knownType = String(partKindById.get(partId) || "");
     if (knownType === "reasoning") {
       idleSeen = false;
+      closeTimelineTextPart();
       const current = reasoningByPart.get(partId) || "";
-      const next = mergeSnapshotText(current, delta);
+      const next = mergeDeltaText(current, delta);
       if (next !== current) {
         reasoningByPart.set(partId, next);
         const prevPart = blockPartById.get(partId);
@@ -453,12 +548,14 @@ function createTransportEventReducer(options) {
     }
 
     idleSeen = false;
+    const timelineChanged = updateTimelineTextPart(delta, "");
     const current = textByPart.get(partId) || "";
-    const next = mergeSnapshotText(current, delta);
+    const next = mergeDeltaText(current, delta);
     if (next !== current) {
       textByPart.set(partId, next);
       updateText();
     }
+    if (timelineChanged) updateBlocks();
   };
 
   const consumeMessagePartRemoved = (event) => {

@@ -71,3 +71,32 @@ test("resolveSkillFromPrompt should support /skills <id> alias", () => {
     fixture.restore();
   }
 });
+
+test("resolveSkillFromPrompt should refresh skills before matching slash command", () => {
+  const fixture = loadCommandRouterWithMockObsidian();
+  try {
+    const { resolveSkillFromPrompt } = fixture.commandRouterMethods;
+    const state = { refreshed: false };
+    const context = {
+      plugin: {
+        skillService: {
+          loadSkills() {
+            state.refreshed = true;
+          },
+          getSkills() {
+            if (!state.refreshed) return [];
+            return [{ id: "custom-skill", name: "custom-skill" }];
+          },
+        },
+      },
+    };
+
+    const resolved = resolveSkillFromPrompt.call(context, "/custom-skill 执行");
+    assert.ok(resolved && resolved.skill);
+    assert.equal(resolved.skill.id, "custom-skill");
+    assert.equal(resolved.command, "/custom-skill");
+    assert.equal(resolved.promptText, "执行");
+  } finally {
+    fixture.restore();
+  }
+});

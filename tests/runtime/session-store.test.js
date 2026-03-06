@@ -44,6 +44,22 @@ test("mergeReasoningText should prefer snapshot expansion over repeated concaten
   assert.equal(merged2, third);
 });
 
+test("mergeDraftText should preserve streamed text growth for snapshots and chunks", () => {
+  const first = "第一段内容。";
+  const secondChunk = "第二段内容。";
+  const secondSnapshot = "第一段内容。第二段内容。";
+  const thirdSnapshot = "第一段内容。第二段内容。第三段内容。";
+
+  const mergedChunk = SessionStore.mergeDraftText(first, secondChunk);
+  assert.equal(mergedChunk, "第一段内容。第二段内容。");
+
+  const mergedSnapshot = SessionStore.mergeDraftText(mergedChunk, secondSnapshot);
+  assert.equal(mergedSnapshot, secondSnapshot);
+
+  const mergedFinal = SessionStore.mergeDraftText(mergedSnapshot, thirdSnapshot);
+  assert.equal(mergedFinal, thirdSnapshot);
+});
+
 test("updateAssistantDraft should keep latest snapshot reasoning without duplicating prefix", () => {
   const { store, plugin } = createStoreFixture();
 
@@ -55,6 +71,72 @@ test("updateAssistantDraft should keep latest snapshot reasoning without duplica
   assert.ok(draft);
   assert.equal(draft.reasoning, "我需要执行 ah-index 技能");
   assert.equal((draft.reasoning.match(/我需要执行/g) || []).length, 1);
+});
+
+test("updateAssistantDraft should keep streamed text cumulative instead of replacing by chunk", () => {
+  const { store, plugin } = createStoreFixture();
+
+  store.updateAssistantDraft("s1", "draft-1", "第一段");
+  store.updateAssistantDraft("s1", "draft-1", "第二段");
+  store.updateAssistantDraft("s1", "draft-1", "第一段第二段第三段");
+
+  const draft = plugin.runtimeState.messagesBySession.s1.find((row) => row.id === "draft-1");
+  assert.ok(draft);
+  assert.equal(draft.text, "第一段第二段第三段");
+});
+
+test("finalizeAssistantDraft should persist server messageId for follow-up APIs", () => {
+  const { store, plugin } = createStoreFixture();
+
+  store.finalizeAssistantDraft("s1", "draft-1", {
+    messageId: "assistant-msg-123",
+    text: "done",
+    reasoning: "",
+    meta: "",
+    blocks: [],
+  });
+
+  const draft = plugin.runtimeState.messagesBySession.s1.find((row) => row.id === "draft-1");
+  assert.ok(draft);
+  assert.equal(draft.messageId, "assistant-msg-123");
+});
+
+test("finalizeAssistantDraft should keep streamed interim text when final payload is shorter", () => {
+  const { store, plugin } = createStoreFixture();
+
+  store.updateAssistantDraft("s1", "draft-1", "首先定位今日笔记并读取结构：");
+  store.updateAssistantDraft("s1", "draft-1", "首先定位今日笔记并读取结构：\n我来帮你捕获这个链接到今日日记。");
+  store.finalizeAssistantDraft("s1", "draft-1", {
+    messageId: "assistant-msg-456",
+    text: "我来帮你捕获这个链接到今日日记。",
+    reasoning: "",
+    meta: "",
+    blocks: [],
+  });
+
+  const draft = plugin.runtimeState.messagesBySession.s1.find((row) => row.id === "draft-1");
+  assert.ok(draft);
+  assert.equal(
+    draft.text,
+    "首先定位今日笔记并读取结构：\n我来帮你捕获这个链接到今日日记。",
+  );
+});
+
+test("finalizeAssistantDraft should not wipe streamed interim text when final payload text is empty", () => {
+  const { store, plugin } = createStoreFixture();
+
+  store.updateAssistantDraft("s1", "draft-1", "处理中...");
+  store.finalizeAssistantDraft("s1", "draft-1", {
+    messageId: "assistant-msg-789",
+    text: "",
+    reasoning: "",
+    meta: "",
+    blocks: [],
+  });
+
+  const draft = plugin.runtimeState.messagesBySession.s1.find((row) => row.id === "draft-1");
+  assert.ok(draft);
+  assert.equal(draft.text, "处理中...");
 });
 
 test("isPlaceholderTitle should treat timestamped default titles as placeholder", () => {

@@ -142,7 +142,17 @@ function resolveSkillFromPrompt(userText) {
     return { skill: null, promptText: input };
   }
 
-  const skills = this.plugin.skillService.getSkills();
+  const skillService = this.plugin && this.plugin.skillService;
+  if (skillService && typeof skillService.loadSkills === "function") {
+    try {
+      skillService.loadSkills();
+    } catch {
+      // Keep slash command routing usable even if a single refresh fails.
+    }
+  }
+  const skills = skillService && typeof skillService.getSkills === "function"
+    ? skillService.getSkills()
+    : [];
   const findSkillByToken = (token) => skills.find((item) => {
     const needle = String(token || "").toLowerCase();
     if (!needle) return false;
@@ -189,7 +199,17 @@ function resolveSkillFromPrompt(userText) {
 }
 
 function openSkillSelector() {
-  const skills = this.plugin.skillService.getSkills();
+  const skillService = this.plugin && this.plugin.skillService;
+  if (skillService && typeof skillService.loadSkills === "function") {
+    try {
+      skillService.loadSkills();
+    } catch {
+      // ignore refresh error and fallback to existing cache
+    }
+  }
+  const skills = skillService && typeof skillService.getSkills === "function"
+    ? skillService.getSkills()
+    : [];
   if (!skills.length) {
     new Notice(tr(this, "view.skill.noneFound", "No available skills found. Check Skills directory settings."));
     return;
