@@ -86,6 +86,8 @@ FLOWnote 的路线不同：
 
 ## 安装
 
+完整的中文安装与模型配置教程见 `[[FLOWnote 安装与模型配置指南]]`。
+
 ### 社区插件安装
 
 审核通过后，在 Community Plugins 搜索 `FLOWnote` 安装。
@@ -107,10 +109,10 @@ FLOWnote 的路线不同：
 
 ### 桌面端
 
-1. 在电脑安装 OpenCode，并确认 `opencode` 命令可用
+1. 先在电脑安装 Node.js，再执行 `npm install -g opencode-ai` 安装 OpenCode，并确认 `opencode` 命令可用
 2. 打开 FLOWnote 设置
 3. CLI 路径建议先留空自动探测，必要时再填绝对路径
-4. 按环境选择启动方式（`auto` / Windows 本机 / WSL）
+4. 选择启动方式（`auto` / 本机安装）；Windows 不再支持 WSL 安装
 
 ### 移动端
 

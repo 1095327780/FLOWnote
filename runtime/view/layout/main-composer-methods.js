@@ -1,6 +1,8 @@
 const { Notice, setIcon } = require("obsidian");
 const { tr } = require("./shared-utils");
 
+const OPENCODE_DOCS_URL = "https://opencode.ai/docs";
+
 function normalizeDiagnosticsResult(result) {
   const raw = result && typeof result === "object" ? result : {};
   const connection = raw.connection && typeof raw.connection === "object" ? raw.connection : {};
@@ -26,6 +28,16 @@ function connectionCheckCommands() {
   return ["opencode --version", "which opencode"];
 }
 
+function windowsInstallGuideCommands() {
+  return [
+    "node -v",
+    "npm -v",
+    "npm install -g opencode-ai",
+    "opencode --version",
+    "where opencode",
+  ];
+}
+
 function isLikelyMissingOpenCode(result) {
   const normalized = normalizeDiagnosticsResult(result);
   if (!normalized.executable.ok) return true;
@@ -37,10 +49,22 @@ function isLikelyMissingOpenCode(result) {
 function isLikelyWindowsWslInstallIssue(result) {
   const isWindows = typeof process !== "undefined" && process && process.platform === "win32";
   if (!isWindows) return false;
-  if (isLikelyMissingOpenCode(result)) return false;
   const normalized = normalizeDiagnosticsResult(result);
   const err = normalized.connection.error.toLowerCase();
-  return /wsl|failed to fetch|econnrefused|err_connection_refused|127\.0\.0\.1|connection/i.test(err);
+  return /wsl(?:\.exe|\(|:|\/)|windows\s*\+\s*wsl/.test(err);
+}
+
+async function copyText(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+  }
+  return false;
 }
 
 function renderConnectionStatusPopoverContent(view, result) {
@@ -63,9 +87,45 @@ function renderConnectionStatusPopoverContent(view, result) {
     const line = body.createDiv({ cls: "oc-connection-popover-line" });
     line.createEl("code", { text: String(cmd) });
   };
+  const appendLink = (label, url) => {
+    if (!label || !url) return;
+    const line = body.createDiv({ cls: "oc-connection-popover-line" });
+    const anchor = line.createEl("a", { cls: "oc-copyable-link", text: String(label), href: String(url) });
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+  };
+  const appendCopyableDetails = (text) => {
+    const value = String(text || "").trim();
+    if (!value) return;
+    const panel = body.createDiv({ cls: "oc-copyable-panel oc-copyable-panel--compact" });
+    const actions = panel.createDiv({ cls: "oc-copyable-actions" });
+    const copyBtn = actions.createEl("button", { text: "复制详情" });
+    copyBtn.type = "button";
+    copyBtn.addEventListener("click", async () => {
+      const copied = await copyText(value);
+      new Notice(copied ? "详情已复制" : "复制失败，请手动选择文本复制");
+    });
+    const area = panel.createEl("textarea", {
+      cls: "oc-copyable-textarea",
+      attr: {
+        readonly: "true",
+        spellcheck: "false",
+        "aria-label": "连接诊断详情",
+      },
+    });
+    area.value = value;
+    area.rows = Math.min(12, Math.max(4, value.split(/\r?\n/).length));
+    area.addEventListener("focus", () => area.select());
+    area.addEventListener("click", () => area.select());
+  };
 
   const appendCheckCommands = () => {
     connectionCheckCommands().forEach((cmd) => appendCommand(cmd));
+  };
+  const appendWindowsInstallGuide = () => {
+    appendLine("请在 Windows 本机用 Node.js 安装 OpenCode，不要使用 WSL：");
+    windowsInstallGuideCommands().forEach((cmd) => appendCommand(cmd));
+    appendLink("官方安装文档", OPENCODE_DOCS_URL);
   };
 
   if (!hasResult) {
@@ -85,30 +145,33 @@ function renderConnectionStatusPopoverContent(view, result) {
 
   if (isLikelyMissingOpenCode(normalized)) {
     title.setText("OpenCode连接失败：未检测到可用安装");
-    appendLine("请先在终端检查 OpenCode 是否安装正常：");
-    appendCheckCommands();
-    if (normalized.executable.hint) appendLine(`提示：${normalized.executable.hint}`);
-    if (normalized.connection.error) appendLine(`错误：${normalized.connection.error}`);
+    if (typeof process !== "undefined" && process && process.platform === "win32") {
+      appendWindowsInstallGuide();
+      appendLine("安装后重启 Obsidian，再点击状态点刷新连接。");
+    } else {
+      appendLine("请先在终端检查 OpenCode 是否安装正常：");
+      appendCheckCommands();
+    }
+    appendCopyableDetails([
+      normalized.executable.hint ? `提示：${normalized.executable.hint}` : "",
+      normalized.connection.error ? `错误：${normalized.connection.error}` : "",
+    ].filter(Boolean).join("\n\n"));
     return;
   }
 
   if (isLikelyWindowsWslInstallIssue(normalized)) {
-    title.setText("OpenCode连接失败：可能是 Windows + WSL 安装导致");
-    appendLine("请改为在 Windows 本机用 Node.js 安装 OpenCode：");
-    appendCommand("node -v");
-    appendCommand("npm -v");
-    appendCommand("npm install -g @opencode-ai/opencode");
-    appendCommand("opencode --version");
-    appendCommand("where opencode");
+    title.setText("OpenCode连接失败：检测到 WSL 安装");
+    appendLine("请使用达.js进行安装。");
+    appendWindowsInstallGuide();
     appendLine("安装后重启 Obsidian，再点击状态点刷新连接。");
-    if (normalized.connection.error) appendLine(`错误：${normalized.connection.error}`);
+    appendCopyableDetails(normalized.connection.error ? `错误：${normalized.connection.error}` : "");
     return;
   }
 
   title.setText("OpenCode连接失败");
   appendLine("可先执行以下命令检查连接：");
   appendCheckCommands();
-  if (normalized.connection.error) appendLine(`错误：${normalized.connection.error}`);
+  appendCopyableDetails(normalized.connection.error ? `错误：${normalized.connection.error}` : "");
 }
 
 function closeConnectionStatusPopover(view) {

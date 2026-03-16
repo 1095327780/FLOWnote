@@ -70,35 +70,20 @@ function createLaunchAttemptMethods(deps = {}) {
       || compact === "windowsnative"
       || compact === "macnative"
       || compact === "local"
-    ) {
-      if (isWindowsPlatform() && String(process.arch || "").toLowerCase() === "arm64") {
-        const cliPath = String(this.settings && this.settings.cliPath ? this.settings.cliPath : "").trim().toLowerCase();
-        const wslDistro = String(this.settings && this.settings.wslDistro ? this.settings.wslDistro : "").trim();
-        const hasWslHint = Boolean(wslDistro) || /^wsl(?::|:\/\/|$|\.exe$)/.test(cliPath);
-        if (hasWslHint) return "wsl";
-        if (!cliPath) return "auto";
-      }
-      return "native";
-    }
-    if (
-      mode === "wsl"
-      || compact === "windowswsl"
-      || compact === "wslinstall"
-      || compact === "onlywsl"
-    ) return "wsl";
+    ) return "native";
     return "auto";
   }
 
   normalizeLaunchProfile(profile) {
     if (!profile || typeof profile !== "object") return null;
-    const mode = String(profile.mode || "").trim().toLowerCase() === "wsl" ? "wsl" : "native";
+    const mode = String(profile.mode || "").trim().toLowerCase() === "native" ? "native" : "";
     const command = String(profile.command || "").trim();
     const args = Array.isArray(profile.args)
       ? profile.args.map((item) => String(item || ""))
       : [];
     const shell = Boolean(profile.shell);
     const distro = String(profile.distro || "").trim();
-    if (mode === "native" && !command) return null;
+    if (mode !== "native" || !command) return null;
     return { mode, command, args, shell, distro };
   }
 
@@ -115,9 +100,7 @@ function createLaunchAttemptMethods(deps = {}) {
     const item = attempt && typeof attempt === "object" ? attempt : null;
     if (!item) return null;
     if (item.remember === false) return null;
-    if (item.mode === "wsl") {
-      return { mode: "wsl", command: "wsl.exe", shell: false, distro: String(item.distro || "").trim() };
-    }
+    if (item.mode !== "native") return null;
     const command = String(item.command || "").trim();
     if (!command) return null;
     return {
@@ -142,11 +125,6 @@ function createLaunchAttemptMethods(deps = {}) {
   pushPreferredLaunchAttempt(list, seen, preferred, runtimeHome) {
     const profile = this.normalizeLaunchProfile(preferred);
     if (!profile) return;
-    if (profile.mode === "wsl") {
-      this.pushWslAttempts(list, seen, runtimeHome, profile.distro);
-      return;
-    }
-
     this.pushLaunchAttempt(list, seen, {
       label: `${profile.command} (remembered)`,
       command: profile.command,
@@ -198,7 +176,6 @@ function createLaunchAttemptMethods(deps = {}) {
     const attempts = [];
     const seen = new Set();
     const strategy = this.normalizeLaunchStrategy(this.settings && this.settings.launchStrategy);
-    const isWindowsArm64 = isWindowsPlatform() && String(process.arch || "").toLowerCase() === "arm64";
     const preferred = strategy === "auto" ? this.resolvePreferredLaunchProfile() : null;
     const baseEnv = { ...process.env, OPENCODE_HOME: runtimeHome };
     const baseOptions = {
@@ -209,62 +186,41 @@ function createLaunchAttemptMethods(deps = {}) {
     const resolvedKind = String(resolved && resolved.kind ? resolved.kind : "").trim();
     const resolvedNodePath = String(resolved && resolved.nodePath ? resolved.nodePath : "").trim();
     const resolvedSourcePath = String(resolved && resolved.sourcePath ? resolved.sourcePath : "").trim();
-    const forcedWsl = this.parseWslCliPath(resolvedPath);
-    const configuredWslDistro = String(this.settings && this.settings.wslDistro ? this.settings.wslDistro : "").trim();
-    const preferWslFirst = isWindowsPlatform()
-      && strategy !== "native"
-      && (Boolean(configuredWslDistro) || forcedWsl.useWsl || isWindowsArm64);
-    const deferPreferredNative = Boolean(
-      preferWslFirst
-      && preferred
-      && preferred.mode === "native",
-    );
 
-    if (preferred && !deferPreferredNative) {
+    if (preferred) {
       this.pushPreferredLaunchAttempt(attempts, seen, preferred, runtimeHome);
     }
 
-    if (preferWslFirst) {
-      this.pushWslAttempts(attempts, seen, runtimeHome, forcedWsl.distro || configuredWslDistro);
-    }
+    if (resolvedPath) {
+      const wrapperScript = isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath)
+        ? resolveWindowsWrapperNodeScript(resolvedPath)
+        : "";
+      const nodeScriptPath = this.isNodeScriptLaunchPath(resolvedPath, resolvedKind)
+        ? resolvedPath
+        : wrapperScript;
 
-    if (forcedWsl.useWsl) {
-      if (strategy !== "native") {
-        this.pushWslAttempts(attempts, seen, runtimeHome, forcedWsl.distro || configuredWslDistro);
-      }
-    } else if (resolvedPath) {
-      if (strategy !== "wsl") {
-        const wrapperScript = isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath)
-          ? resolveWindowsWrapperNodeScript(resolvedPath)
-          : "";
-        const nodeScriptPath = this.isNodeScriptLaunchPath(resolvedPath, resolvedKind)
-          ? resolvedPath
-          : wrapperScript;
-
-        if (nodeScriptPath) {
-          this.pushNodeScriptAttempts(
-            attempts,
-            seen,
-            nodeScriptPath,
-            baseOptions,
-            resolvedNodePath,
-            resolvedSourcePath || (wrapperScript ? resolvedPath : ""),
-          );
-        } else if (!(isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath))) {
-          this.pushLaunchAttempt(attempts, seen, {
-            label: resolvedPath,
-            command: resolvedPath,
-            args: OPENCODE_SERVE_ARGS,
-            options: { ...baseOptions, shell: false },
-            mode: "native",
-            directory: this.vaultPath,
-          });
-        }
+      if (nodeScriptPath) {
+        this.pushNodeScriptAttempts(
+          attempts,
+          seen,
+          nodeScriptPath,
+          baseOptions,
+          resolvedNodePath,
+          resolvedSourcePath || (wrapperScript ? resolvedPath : ""),
+        );
+      } else if (!(isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath))) {
+        this.pushLaunchAttempt(attempts, seen, {
+          label: resolvedPath,
+          command: resolvedPath,
+          args: OPENCODE_SERVE_ARGS,
+          options: { ...baseOptions, shell: false },
+          mode: "native",
+          directory: this.vaultPath,
+        });
       }
     }
 
-    const allowAutoFallback = strategy !== "wsl"
-      && Boolean(this.settings.autoDetectCli || !String(this.settings.cliPath || "").trim());
+    const allowAutoFallback = Boolean(this.settings.autoDetectCli || !String(this.settings.cliPath || "").trim());
     if (allowAutoFallback) {
       if (isWindowsPlatform()) {
         this.pushLaunchAttempt(attempts, seen, {
@@ -293,14 +249,6 @@ function createLaunchAttemptMethods(deps = {}) {
           directory: this.vaultPath,
         });
       }
-    }
-
-    if (deferPreferredNative && preferred) {
-      this.pushPreferredLaunchAttempt(attempts, seen, preferred, runtimeHome);
-    }
-
-    if (isWindowsPlatform() && (strategy !== "native" || isWindowsArm64) && !preferWslFirst) {
-      this.pushWslAttempts(attempts, seen, runtimeHome, configuredWslDistro);
     }
 
     return attempts;

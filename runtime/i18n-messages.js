@@ -46,9 +46,9 @@ const I18N_MESSAGES = {
       basic: {
         intro: "常用情况下只需要确认连接状态和 Provider 登录。其余高级项一般保持默认即可。",
         cliPathName: "FLOWnote CLI 路径（可选）",
-        cliPathDesc: "通常留空。插件会自动探测。Windows 本机请优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd）；Windows + WSL 可填 wsl、wsl.exe 或 wsl:发行版名（例如 wsl:Ubuntu）。",
+        cliPathDesc: "通常留空。插件会自动探测。Windows 请先在本机安装 Node.js，再执行 npm install -g opencode-ai。必要时优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd，也不要使用 WSL）。",
         launchStrategyName: "连接启动方式",
-        launchStrategyDescWindows: "自动（推荐）：按系统自动检测并记忆成功方式。手动模式下按你选择的安装方式连接。",
+        launchStrategyDescWindows: "自动（推荐）：自动检测并记忆成功的本机连接方式。手动模式仅使用 Windows 本机安装；不再支持 WSL。",
         launchStrategyDesc: "自动（推荐）：优先使用上次成功方式；失败时自动回退到其他方式。",
         launchAuto: "自动（推荐）",
         launchNativeWindows: "Windows 本机安装",
@@ -344,9 +344,9 @@ const I18N_MESSAGES = {
       basic: {
         intro: "In most cases, you only need to verify connection status and Provider auth. Keep other advanced options at default.",
         cliPathName: "FLOWnote CLI Path (Optional)",
-        cliPathDesc: "Usually leave empty. The plugin auto-detects it. On native Windows, prefer opencode.exe or cli.js (do not use opencode.cmd). On Windows + WSL, you can set wsl, wsl.exe, or wsl:distro (e.g. wsl:Ubuntu).",
+        cliPathDesc: "Usually leave empty. The plugin auto-detects it. On Windows, install Node.js first, then run npm install -g opencode-ai. If needed, prefer opencode.exe or cli.js (do not use opencode.cmd or WSL).",
         launchStrategyName: "Connection Launch Strategy",
-        launchStrategyDescWindows: "Auto (Recommended): detect by system and remember successful method. In manual mode, connect with your selected install type.",
+        launchStrategyDescWindows: "Auto (Recommended): detect and remember the working native launch path. Manual mode only uses native Windows installs; WSL is no longer supported.",
         launchStrategyDesc: "Auto (Recommended): try last successful method first and fallback automatically on failure.",
         launchAuto: "Auto (Recommended)",
         launchNativeWindows: "Native Windows Install",

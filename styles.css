@@ -671,6 +671,8 @@ body.theme-dark .oc-surface {
   background: color-mix(in srgb, var(--background-primary) 96%, black 4%);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
   padding: 10px 12px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .oc-connection-popover.is-open {
@@ -695,6 +697,8 @@ body.theme-dark .oc-surface {
   line-height: 1.42;
   color: var(--text-muted);
   word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .oc-connection-popover-line code {
@@ -706,6 +710,79 @@ body.theme-dark .oc-surface {
   background: color-mix(in srgb, var(--background-secondary) 84%, transparent);
   color: var(--text-normal);
   padding: 3px 6px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.oc-copyable-panel {
+  margin-top: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.oc-copyable-panel--compact {
+  margin-top: 6px;
+  padding: 8px;
+}
+
+.oc-copyable-help {
+  margin-top: -2px;
+}
+
+.oc-copyable-command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.oc-copyable-command-item code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  border: 1px solid var(--oc-border);
+  background: color-mix(in srgb, var(--background-primary) 84%, transparent);
+  color: var(--text-normal);
+  padding: 4px 8px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.oc-copyable-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.oc-copyable-link {
+  color: var(--text-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.oc-copyable-textarea {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  padding: 10px;
+  line-height: 1.45;
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
+  white-space: pre-wrap;
 }
 
 .oc-select,

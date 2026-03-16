@@ -695,7 +695,7 @@ function extractErrorText(error) {
       return `${msg}（可输入 /models 或通过模型下拉选择官方模型；如需第三方模型请在设置的 Provider 登录管理里完成连接）`;
     }
     if (/(status\s*=\s*401|code['"]?\s*[:=]\s*401|unauthorized|user not found)/i.test(msg)) {
-      return `${msg}（鉴权失败：请在设置 → Provider 登录管理里重新登录当前 Provider。若在 Windows WSL 运行，请确认在同一 WSL 发行版下完成登录后再刷新 Provider 状态）`;
+      return `${msg}（鉴权失败：请在设置 → Provider 登录管理里重新登录当前 Provider。Windows 请确认你使用的是本机 Node.js 安装的 OpenCode，而不是 WSL 安装）`;
     }
     return msg;
   };

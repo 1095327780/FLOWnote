@@ -146,7 +146,7 @@ test("extractAssistantPayloadFromEnvelope should append auth hint for 401 model 
 
   assert.match(payload.text, /模型返回错误：APIError/);
   assert.match(payload.text, /鉴权失败/);
-  assert.match(payload.text, /WSL/);
+  assert.match(payload.text, /Node\.js/);
 });
 
 test("extractAssistantPayloadFromEnvelope should compact large raw tool payloads", () => {
@@ -316,6 +316,7 @@ test("extractAssistantPayloadFromEnvelope should surface info.error even when ro
   assert.match(payload.text, /模型返回错误/);
   assert.match(payload.text, /401/);
   assert.match(payload.text, /鉴权失败/);
+  assert.match(payload.text, /Node\.js/);
   assert.equal(payload.reasoning, "");
   assert.equal(Array.isArray(payload.blocks), true);
 });

@@ -164,9 +164,9 @@ var require_i18n_messages = __commonJS({
           basic: {
             intro: "\u5E38\u7528\u60C5\u51B5\u4E0B\u53EA\u9700\u8981\u786E\u8BA4\u8FDE\u63A5\u72B6\u6001\u548C Provider \u767B\u5F55\u3002\u5176\u4F59\u9AD8\u7EA7\u9879\u4E00\u822C\u4FDD\u6301\u9ED8\u8BA4\u5373\u53EF\u3002",
             cliPathName: "FLOWnote CLI \u8DEF\u5F84\uFF08\u53EF\u9009\uFF09",
-            cliPathDesc: "\u901A\u5E38\u7559\u7A7A\u3002\u63D2\u4EF6\u4F1A\u81EA\u52A8\u63A2\u6D4B\u3002Windows \u672C\u673A\u8BF7\u4F18\u5148\u586B\u5199 opencode.exe \u6216 cli.js\uFF08\u4E0D\u8981\u586B opencode.cmd\uFF09\uFF1BWindows + WSL \u53EF\u586B wsl\u3001wsl.exe \u6216 wsl:\u53D1\u884C\u7248\u540D\uFF08\u4F8B\u5982 wsl:Ubuntu\uFF09\u3002",
+            cliPathDesc: "\u901A\u5E38\u7559\u7A7A\u3002\u63D2\u4EF6\u4F1A\u81EA\u52A8\u63A2\u6D4B\u3002Windows \u8BF7\u5148\u5728\u672C\u673A\u5B89\u88C5 Node.js\uFF0C\u518D\u6267\u884C npm install -g opencode-ai\u3002\u5FC5\u8981\u65F6\u4F18\u5148\u586B\u5199 opencode.exe \u6216 cli.js\uFF08\u4E0D\u8981\u586B opencode.cmd\uFF0C\u4E5F\u4E0D\u8981\u4F7F\u7528 WSL\uFF09\u3002",
             launchStrategyName: "\u8FDE\u63A5\u542F\u52A8\u65B9\u5F0F",
-            launchStrategyDescWindows: "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09\uFF1A\u6309\u7CFB\u7EDF\u81EA\u52A8\u68C0\u6D4B\u5E76\u8BB0\u5FC6\u6210\u529F\u65B9\u5F0F\u3002\u624B\u52A8\u6A21\u5F0F\u4E0B\u6309\u4F60\u9009\u62E9\u7684\u5B89\u88C5\u65B9\u5F0F\u8FDE\u63A5\u3002",
+            launchStrategyDescWindows: "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09\uFF1A\u81EA\u52A8\u68C0\u6D4B\u5E76\u8BB0\u5FC6\u6210\u529F\u7684\u672C\u673A\u8FDE\u63A5\u65B9\u5F0F\u3002\u624B\u52A8\u6A21\u5F0F\u4EC5\u4F7F\u7528 Windows \u672C\u673A\u5B89\u88C5\uFF1B\u4E0D\u518D\u652F\u6301 WSL\u3002",
             launchStrategyDesc: "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09\uFF1A\u4F18\u5148\u4F7F\u7528\u4E0A\u6B21\u6210\u529F\u65B9\u5F0F\uFF1B\u5931\u8D25\u65F6\u81EA\u52A8\u56DE\u9000\u5230\u5176\u4ED6\u65B9\u5F0F\u3002",
             launchAuto: "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09",
             launchNativeWindows: "Windows \u672C\u673A\u5B89\u88C5",
@@ -462,9 +462,9 @@ var require_i18n_messages = __commonJS({
           basic: {
             intro: "In most cases, you only need to verify connection status and Provider auth. Keep other advanced options at default.",
             cliPathName: "FLOWnote CLI Path (Optional)",
-            cliPathDesc: "Usually leave empty. The plugin auto-detects it. On native Windows, prefer opencode.exe or cli.js (do not use opencode.cmd). On Windows + WSL, you can set wsl, wsl.exe, or wsl:distro (e.g. wsl:Ubuntu).",
+            cliPathDesc: "Usually leave empty. The plugin auto-detects it. On Windows, install Node.js first, then run npm install -g opencode-ai. If needed, prefer opencode.exe or cli.js (do not use opencode.cmd or WSL).",
             launchStrategyName: "Connection Launch Strategy",
-            launchStrategyDescWindows: "Auto (Recommended): detect by system and remember successful method. In manual mode, connect with your selected install type.",
+            launchStrategyDescWindows: "Auto (Recommended): detect and remember the working native launch path. Manual mode only uses native Windows installs; WSL is no longer supported.",
             launchStrategyDesc: "Auto (Recommended): try last successful method first and fallback automatically on failure.",
             launchAuto: "Auto (Recommended)",
             launchNativeWindows: "Native Windows Install",
@@ -1615,7 +1615,7 @@ tokens: in=${inputTokens}, out=${outputTokens}, reasoning=${reasoningTokens}`;
           return `${msg}\uFF08\u53EF\u8F93\u5165 /models \u6216\u901A\u8FC7\u6A21\u578B\u4E0B\u62C9\u9009\u62E9\u5B98\u65B9\u6A21\u578B\uFF1B\u5982\u9700\u7B2C\u4E09\u65B9\u6A21\u578B\u8BF7\u5728\u8BBE\u7F6E\u7684 Provider \u767B\u5F55\u7BA1\u7406\u91CC\u5B8C\u6210\u8FDE\u63A5\uFF09`;
         }
         if (/(status\s*=\s*401|code['"]?\s*[:=]\s*401|unauthorized|user not found)/i.test(msg)) {
-          return `${msg}\uFF08\u9274\u6743\u5931\u8D25\uFF1A\u8BF7\u5728\u8BBE\u7F6E \u2192 Provider \u767B\u5F55\u7BA1\u7406\u91CC\u91CD\u65B0\u767B\u5F55\u5F53\u524D Provider\u3002\u82E5\u5728 Windows WSL \u8FD0\u884C\uFF0C\u8BF7\u786E\u8BA4\u5728\u540C\u4E00 WSL \u53D1\u884C\u7248\u4E0B\u5B8C\u6210\u767B\u5F55\u540E\u518D\u5237\u65B0 Provider \u72B6\u6001\uFF09`;
+          return `${msg}\uFF08\u9274\u6743\u5931\u8D25\uFF1A\u8BF7\u5728\u8BBE\u7F6E \u2192 Provider \u767B\u5F55\u7BA1\u7406\u91CC\u91CD\u65B0\u767B\u5F55\u5F53\u524D Provider\u3002Windows \u8BF7\u786E\u8BA4\u4F60\u4F7F\u7528\u7684\u662F\u672C\u673A Node.js \u5B89\u88C5\u7684 OpenCode\uFF0C\u800C\u4E0D\u662F WSL \u5B89\u88C5\uFF09`;
         }
         return msg;
       };
@@ -4575,6 +4575,7 @@ var require_main_composer_methods = __commonJS({
   "runtime/view/layout/main-composer-methods.js"(exports2, module2) {
     var { Notice: Notice2, setIcon } = require("obsidian");
     var { tr } = require_shared_utils();
+    var OPENCODE_DOCS_URL = "https://opencode.ai/docs";
     function normalizeDiagnosticsResult(result) {
       const raw = result && typeof result === "object" ? result : {};
       const connection = raw.connection && typeof raw.connection === "object" ? raw.connection : {};
@@ -4598,6 +4599,15 @@ var require_main_composer_methods = __commonJS({
       }
       return ["opencode --version", "which opencode"];
     }
+    function windowsInstallGuideCommands() {
+      return [
+        "node -v",
+        "npm -v",
+        "npm install -g opencode-ai",
+        "opencode --version",
+        "where opencode"
+      ];
+    }
     function isLikelyMissingOpenCode(result) {
       const normalized = normalizeDiagnosticsResult(result);
       if (!normalized.executable.ok) return true;
@@ -4608,10 +4618,21 @@ var require_main_composer_methods = __commonJS({
     function isLikelyWindowsWslInstallIssue(result) {
       const isWindows = typeof process !== "undefined" && process && process.platform === "win32";
       if (!isWindows) return false;
-      if (isLikelyMissingOpenCode(result)) return false;
       const normalized = normalizeDiagnosticsResult(result);
       const err = normalized.connection.error.toLowerCase();
-      return /wsl|failed to fetch|econnrefused|err_connection_refused|127\.0\.0\.1|connection/i.test(err);
+      return /wsl(?:\.exe|\(|:|\/)|windows\s*\+\s*wsl/.test(err);
+    }
+    async function copyText(text) {
+      const value = String(text || "");
+      if (!value) return false;
+      try {
+        if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          await navigator.clipboard.writeText(value);
+          return true;
+        }
+      } catch {
+      }
+      return false;
     }
     function renderConnectionStatusPopoverContent(view, result) {
       const popover = view.elements && view.elements.statusPopover;
@@ -4630,8 +4651,44 @@ var require_main_composer_methods = __commonJS({
         const line = body.createDiv({ cls: "oc-connection-popover-line" });
         line.createEl("code", { text: String(cmd) });
       };
+      const appendLink = (label, url) => {
+        if (!label || !url) return;
+        const line = body.createDiv({ cls: "oc-connection-popover-line" });
+        const anchor = line.createEl("a", { cls: "oc-copyable-link", text: String(label), href: String(url) });
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+      };
+      const appendCopyableDetails = (text) => {
+        const value = String(text || "").trim();
+        if (!value) return;
+        const panel = body.createDiv({ cls: "oc-copyable-panel oc-copyable-panel--compact" });
+        const actions = panel.createDiv({ cls: "oc-copyable-actions" });
+        const copyBtn = actions.createEl("button", { text: "\u590D\u5236\u8BE6\u60C5" });
+        copyBtn.type = "button";
+        copyBtn.addEventListener("click", async () => {
+          const copied = await copyText(value);
+          new Notice2(copied ? "\u8BE6\u60C5\u5DF2\u590D\u5236" : "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u6587\u672C\u590D\u5236");
+        });
+        const area = panel.createEl("textarea", {
+          cls: "oc-copyable-textarea",
+          attr: {
+            readonly: "true",
+            spellcheck: "false",
+            "aria-label": "\u8FDE\u63A5\u8BCA\u65AD\u8BE6\u60C5"
+          }
+        });
+        area.value = value;
+        area.rows = Math.min(12, Math.max(4, value.split(/\r?\n/).length));
+        area.addEventListener("focus", () => area.select());
+        area.addEventListener("click", () => area.select());
+      };
       const appendCheckCommands = () => {
         connectionCheckCommands().forEach((cmd) => appendCommand(cmd));
+      };
+      const appendWindowsInstallGuide = () => {
+        appendLine("\u8BF7\u5728 Windows \u672C\u673A\u7528 Node.js \u5B89\u88C5 OpenCode\uFF0C\u4E0D\u8981\u4F7F\u7528 WSL\uFF1A");
+        windowsInstallGuideCommands().forEach((cmd) => appendCommand(cmd));
+        appendLink("\u5B98\u65B9\u5B89\u88C5\u6587\u6863", OPENCODE_DOCS_URL);
       };
       if (!hasResult) {
         title.setText("\u6B63\u5728\u68C0\u6D4B OpenCode \u8FDE\u63A5\u72B6\u6001");
@@ -4648,28 +4705,31 @@ var require_main_composer_methods = __commonJS({
       }
       if (isLikelyMissingOpenCode(normalized)) {
         title.setText("OpenCode\u8FDE\u63A5\u5931\u8D25\uFF1A\u672A\u68C0\u6D4B\u5230\u53EF\u7528\u5B89\u88C5");
-        appendLine("\u8BF7\u5148\u5728\u7EC8\u7AEF\u68C0\u67E5 OpenCode \u662F\u5426\u5B89\u88C5\u6B63\u5E38\uFF1A");
-        appendCheckCommands();
-        if (normalized.executable.hint) appendLine(`\u63D0\u793A\uFF1A${normalized.executable.hint}`);
-        if (normalized.connection.error) appendLine(`\u9519\u8BEF\uFF1A${normalized.connection.error}`);
+        if (typeof process !== "undefined" && process && process.platform === "win32") {
+          appendWindowsInstallGuide();
+          appendLine("\u5B89\u88C5\u540E\u91CD\u542F Obsidian\uFF0C\u518D\u70B9\u51FB\u72B6\u6001\u70B9\u5237\u65B0\u8FDE\u63A5\u3002");
+        } else {
+          appendLine("\u8BF7\u5148\u5728\u7EC8\u7AEF\u68C0\u67E5 OpenCode \u662F\u5426\u5B89\u88C5\u6B63\u5E38\uFF1A");
+          appendCheckCommands();
+        }
+        appendCopyableDetails([
+          normalized.executable.hint ? `\u63D0\u793A\uFF1A${normalized.executable.hint}` : "",
+          normalized.connection.error ? `\u9519\u8BEF\uFF1A${normalized.connection.error}` : ""
+        ].filter(Boolean).join("\n\n"));
         return;
       }
       if (isLikelyWindowsWslInstallIssue(normalized)) {
-        title.setText("OpenCode\u8FDE\u63A5\u5931\u8D25\uFF1A\u53EF\u80FD\u662F Windows + WSL \u5B89\u88C5\u5BFC\u81F4");
-        appendLine("\u8BF7\u6539\u4E3A\u5728 Windows \u672C\u673A\u7528 Node.js \u5B89\u88C5 OpenCode\uFF1A");
-        appendCommand("node -v");
-        appendCommand("npm -v");
-        appendCommand("npm install -g @opencode-ai/opencode");
-        appendCommand("opencode --version");
-        appendCommand("where opencode");
+        title.setText("OpenCode\u8FDE\u63A5\u5931\u8D25\uFF1A\u68C0\u6D4B\u5230 WSL \u5B89\u88C5");
+        appendLine("\u8BF7\u4F7F\u7528\u8FBE.js\u8FDB\u884C\u5B89\u88C5\u3002");
+        appendWindowsInstallGuide();
         appendLine("\u5B89\u88C5\u540E\u91CD\u542F Obsidian\uFF0C\u518D\u70B9\u51FB\u72B6\u6001\u70B9\u5237\u65B0\u8FDE\u63A5\u3002");
-        if (normalized.connection.error) appendLine(`\u9519\u8BEF\uFF1A${normalized.connection.error}`);
+        appendCopyableDetails(normalized.connection.error ? `\u9519\u8BEF\uFF1A${normalized.connection.error}` : "");
         return;
       }
       title.setText("OpenCode\u8FDE\u63A5\u5931\u8D25");
       appendLine("\u53EF\u5148\u6267\u884C\u4EE5\u4E0B\u547D\u4EE4\u68C0\u67E5\u8FDE\u63A5\uFF1A");
       appendCheckCommands();
-      if (normalized.connection.error) appendLine(`\u9519\u8BEF\uFF1A${normalized.connection.error}`);
+      appendCopyableDetails(normalized.connection.error ? `\u9519\u8BEF\uFF1A${normalized.connection.error}` : "");
     }
     function closeConnectionStatusPopover(view) {
       const popover = view.elements && view.elements.statusPopover;
@@ -14188,11 +14248,48 @@ var require_executable_resolver = __commonJS({
     function isNodeScriptPath(filePath) {
       return /\.(mjs|cjs|js)$/i.test(String(filePath || "").trim());
     }
+    function isRegularFile(filePath) {
+      try {
+        return fs.statSync(filePath).isFile();
+      } catch {
+        return false;
+      }
+    }
+    function isLikelyNodeScriptFile(filePath) {
+      const target = String(filePath || "").trim();
+      if (!target || !isRegularFile(target)) return false;
+      if (isNodeScriptPath(target)) return true;
+      if (isWindowsCommandWrapperPath(target)) return false;
+      try {
+        const fd = fs.openSync(target, "r");
+        try {
+          const chunk = Buffer.alloc(160);
+          const size = fs.readSync(fd, chunk, 0, chunk.length, 0);
+          if (size <= 0) return false;
+          const head = chunk.toString("utf8", 0, size);
+          return /^\s*#!.*\bnode(?:\.exe)?\b/i.test(head);
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch {
+        return false;
+      }
+    }
+    function resolvesToWindowsExecutableAlias(filePath) {
+      try {
+        const resolved = fs.realpathSync(filePath);
+        const ext = path.extname(String(resolved || "")).toLowerCase();
+        return [".exe", ".com", ".cmd", ".bat", ".ps1"].includes(ext);
+      } catch {
+        return false;
+      }
+    }
     function isExecutable(filePath) {
       if (process.platform === "win32") {
+        if (!isRegularFile(filePath)) return false;
         const ext = path.extname(String(filePath || "")).toLowerCase();
-        if (!ext) return fs.existsSync(filePath);
-        if (isNodeScriptPath(filePath)) return fs.existsSync(filePath);
+        if (!ext) return isLikelyNodeScriptFile(filePath) || resolvesToWindowsExecutableAlias(filePath);
+        if (isNodeScriptPath(filePath)) return true;
         return [".exe", ".cmd", ".bat", ".com", ".ps1"].includes(ext);
       }
       try {
@@ -14225,17 +14322,17 @@ var require_executable_resolver = __commonJS({
       }
       if (!content) return "";
       const patterns = [
-        /node(?:\.exe)?\s+"([^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
-        /"%~dp0\\node\.exe"\s+"([^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
-        /"%~dp0([^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
-        /%~dp0([^\s\r\n]+?\.(?:mjs|cjs|js))/gi,
-        /"([^"\r\n]*node_modules[^"\r\n]+?\.(?:mjs|cjs|js))"/gi
+        /node(?:\.exe)?\s+"([^"\r\n]+?)"/gi,
+        /"%~dp0\\node\.exe"\s+"([^"\r\n]+?)"/gi,
+        /"%~dp0([^"\r\n]+?)"/gi,
+        /%~dp0([^\s\r\n]+)/gi,
+        /"([^"\r\n]*node_modules[^"\r\n]+?)"/gi
       ];
       for (const pattern of patterns) {
         let match = null;
         while ((match = pattern.exec(content)) !== null) {
           const candidate = normalizeWindowsWrapperScriptPath(match[1], wrapper);
-          if (candidate && fs.existsSync(candidate)) return candidate;
+          if (candidate && isLikelyNodeScriptFile(candidate)) return candidate;
         }
       }
       return "";
@@ -14303,6 +14400,12 @@ var require_executable_resolver = __commonJS({
       if (existing) return existing;
       return process.platform === "win32" ? "node.exe" : "node";
     }
+    function isWindowsWslPath(filePath) {
+      const target = String(filePath || "").trim();
+      if (!target) return false;
+      const base = path.basename(target).toLowerCase();
+      return base === "wsl" || base === "wsl.exe";
+    }
     function windowsCandidatePriority(candidate) {
       const normalized = String(candidate || "").trim();
       const ext = path.extname(normalized).toLowerCase();
@@ -14331,6 +14434,7 @@ var require_executable_resolver = __commonJS({
           path.join(npmNodeModules, "@opencode-ai", "opencode", "dist", "cli.js"),
           path.join(npmNodeModules, "@opencode-ai", "opencode", "cli.js"),
           path.join(npmNodeModules, "@opencode-ai", "opencode", "bin", "opencode.js"),
+          path.join(npmNodeModules, "opencode-ai", "bin", "opencode"),
           path.join(npmNodeModules, "opencode", "dist", "cli.js"),
           path.join(npmNodeModules, "opencode", "cli.js"),
           path.join(npmNodeModules, "opencode", "bin", "opencode.js"),
@@ -14346,18 +14450,18 @@ var require_executable_resolver = __commonJS({
           return [
             rt("\u672A\u627E\u5230\u53EF\u6267\u884C\u6587\u4EF6\u3002", "Executable not found."),
             rt(
-              "\u8BF7\u5728\u8BBE\u7F6E\u91CC\u586B\u5199 FLOWnote CLI \u7684\u7EDD\u5BF9\u8DEF\u5F84\uFF08\u4F18\u5148 .exe\uFF0C\u5176\u6B21 cli.js\uFF09\uFF0C\u4F8B\u5982\uFF1A",
-              "Set the absolute FLOWnote CLI path in settings (prefer .exe, then cli.js), for example:"
+              "\u8BF7\u5148\u5728 Windows \u672C\u673A\u5B89\u88C5 Node.js\uFF0C\u7136\u540E\u6267\u884C npm install -g opencode-ai\u3002\u5FC5\u8981\u65F6\u53EF\u5728\u8BBE\u7F6E\u91CC\u586B\u5199 FLOWnote CLI \u7684\u7EDD\u5BF9\u8DEF\u5F84\uFF08\u4F18\u5148 .exe\uFF0C\u5176\u6B21 cli.js \u6216 bin/opencode\uFF09\uFF0C\u4F8B\u5982\uFF1A",
+              "Install Node.js on native Windows first, then run npm install -g opencode-ai. If needed, set the absolute FLOWnote CLI path in settings (prefer .exe, then cli.js or bin/opencode), for example:"
             ),
             `${path.join(home, ".opencode", "bin", "opencode.exe")}`,
-            `${path.join(home, "AppData", "Roaming", "npm", "node_modules", "@opencode-ai", "opencode", "dist", "cli.js")}`,
+            `${path.join(home, "AppData", "Roaming", "npm", "node_modules", "opencode-ai", "bin", "opencode")}`,
             rt(
               "Windows \u4E0B\u8BF7\u907F\u514D\u586B\u5199 opencode.cmd \u5305\u88C5\u811A\u672C\u3002",
               "On Windows, avoid using the opencode.cmd wrapper script."
             ),
             rt(
-              "\u5982\u679C\u4F60\u53EA\u5728 WSL \u91CC\u5B89\u88C5\u4E86 opencode\uFF0C\u4E5F\u53EF\u4EE5\u4FDD\u6301\u81EA\u52A8\u63A2\u6D4B\uFF0C\u63D2\u4EF6\u4F1A\u5C1D\u8BD5\u901A\u8FC7 wsl.exe \u542F\u52A8\u3002",
-              "If opencode is only installed in WSL, keep auto-detect enabled and the plugin will try wsl.exe launch."
+              "\u4E0D\u8981\u4F7F\u7528 WSL \u5B89\u88C5 OpenCode\uFF1B\u8BF7\u6539\u4E3A\u5728 Windows \u672C\u673A\u7528 Node.js \u5B89\u88C5\u3002",
+              "Do not install OpenCode via WSL; install it on native Windows with Node.js instead."
             )
           ].join(" ");
         }
@@ -14388,6 +14492,7 @@ var require_executable_resolver = __commonJS({
         }).map((item) => item.item) : unique;
         for (const c of ordered) {
           attempted.push(c);
+          if (process.platform === "win32" && isWindowsWslPath(c)) continue;
           if (!fs.existsSync(c)) continue;
           if (!isExecutable(c)) continue;
           if (process.platform === "win32" && isWindowsCommandWrapperPath(c)) {
@@ -14400,22 +14505,31 @@ var require_executable_resolver = __commonJS({
               kind: "node-script",
               sourcePath: c,
               nodePath: resolveNodeExecutablePath(scriptPath)
-            };
-          }
-          if (process.platform === "win32" && isNodeScriptPath(c)) {
-            return {
-              ok: true,
+        };
+      }
+      if (process.platform === "win32" && isNodeScriptPath(c)) {
+        return {
+          ok: true,
               path: c,
               attempted,
-              kind: "node-script",
-              nodePath: resolveNodeExecutablePath(c)
-            };
-          }
-          return { ok: true, path: c, attempted, kind: "native" };
-        }
+          kind: "node-script",
+          nodePath: resolveNodeExecutablePath(c)
+        };
+      }
+      if (process.platform === "win32" && isLikelyNodeScriptFile(c)) {
         return {
-          ok: false,
-          path: "",
+          ok: true,
+          path: c,
+          attempted,
+          kind: "node-script",
+          nodePath: resolveNodeExecutablePath(c)
+        };
+      }
+      return { ok: true, path: c, attempted, kind: "native" };
+    }
+    return {
+      ok: false,
+      path: "",
           attempted,
           hint: this.buildMissingHint()
         };
@@ -14424,6 +14538,7 @@ var require_executable_resolver = __commonJS({
     module2.exports = {
       ExecutableResolver,
       isNodeScriptPath,
+      isLikelyNodeScriptFile,
       isWindowsCommandWrapperPath,
       resolveWindowsWrapperNodeScript,
       resolveNodeExecutablePath
@@ -14948,27 +15063,17 @@ var require_launch_attempt_methods = __commonJS({
         normalizeLaunchStrategy(value) {
           const mode = String(value || "").trim().toLowerCase();
           const compact = mode.replace(/[\s_-]+/g, "");
-          if (mode === "native" || compact === "windowsnative" || compact === "macnative" || compact === "local") {
-            if (isWindowsPlatform() && String(process2.arch || "").toLowerCase() === "arm64") {
-              const cliPath = String(this.settings && this.settings.cliPath ? this.settings.cliPath : "").trim().toLowerCase();
-              const wslDistro = String(this.settings && this.settings.wslDistro ? this.settings.wslDistro : "").trim();
-              const hasWslHint = Boolean(wslDistro) || /^wsl(?::|:\/\/|$|\.exe$)/.test(cliPath);
-              if (hasWslHint) return "wsl";
-              if (!cliPath) return "auto";
-            }
-            return "native";
-          }
-          if (mode === "wsl" || compact === "windowswsl" || compact === "wslinstall" || compact === "onlywsl") return "wsl";
+          if (mode === "native" || compact === "windowsnative" || compact === "macnative" || compact === "local") return "native";
           return "auto";
         }
         normalizeLaunchProfile(profile) {
           if (!profile || typeof profile !== "object") return null;
-          const mode = String(profile.mode || "").trim().toLowerCase() === "wsl" ? "wsl" : "native";
+          const mode = String(profile.mode || "").trim().toLowerCase() === "native" ? "native" : "";
           const command = String(profile.command || "").trim();
           const args = Array.isArray(profile.args) ? profile.args.map((item) => String(item || "")) : [];
           const shell = Boolean(profile.shell);
           const distro = String(profile.distro || "").trim();
-          if (mode === "native" && !command) return null;
+          if (mode !== "native" || !command) return null;
           return { mode, command, args, shell, distro };
         }
         resolvePreferredLaunchProfile() {
@@ -14983,9 +15088,7 @@ var require_launch_attempt_methods = __commonJS({
           const item = attempt && typeof attempt === "object" ? attempt : null;
           if (!item) return null;
           if (item.remember === false) return null;
-          if (item.mode === "wsl") {
-            return { mode: "wsl", command: "wsl.exe", shell: false, distro: String(item.distro || "").trim() };
-          }
+          if (item.mode !== "native") return null;
           const command = String(item.command || "").trim();
           if (!command) return null;
           return {
@@ -15008,10 +15111,6 @@ var require_launch_attempt_methods = __commonJS({
         pushPreferredLaunchAttempt(list, seen, preferred, runtimeHome) {
           const profile = this.normalizeLaunchProfile(preferred);
           if (!profile) return;
-          if (profile.mode === "wsl") {
-            this.pushWslAttempts(list, seen, runtimeHome, profile.distro);
-            return;
-          }
           this.pushLaunchAttempt(list, seen, {
             label: `${profile.command} (remembered)`,
             command: profile.command,
@@ -15056,7 +15155,6 @@ var require_launch_attempt_methods = __commonJS({
           const attempts = [];
           const seen = /* @__PURE__ */ new Set();
           const strategy = this.normalizeLaunchStrategy(this.settings && this.settings.launchStrategy);
-          const isWindowsArm64 = isWindowsPlatform() && String(process2.arch || "").toLowerCase() === "arm64";
           const preferred = strategy === "auto" ? this.resolvePreferredLaunchProfile() : null;
           const baseEnv = { ...process2.env, OPENCODE_HOME: runtimeHome };
           const baseOptions = {
@@ -15067,48 +15165,33 @@ var require_launch_attempt_methods = __commonJS({
           const resolvedKind = String(resolved && resolved.kind ? resolved.kind : "").trim();
           const resolvedNodePath = String(resolved && resolved.nodePath ? resolved.nodePath : "").trim();
           const resolvedSourcePath = String(resolved && resolved.sourcePath ? resolved.sourcePath : "").trim();
-          const forcedWsl = this.parseWslCliPath(resolvedPath);
-          const configuredWslDistro = String(this.settings && this.settings.wslDistro ? this.settings.wslDistro : "").trim();
-          const preferWslFirst = isWindowsPlatform() && strategy !== "native" && (Boolean(configuredWslDistro) || forcedWsl.useWsl || isWindowsArm64);
-          const deferPreferredNative = Boolean(
-            preferWslFirst && preferred && preferred.mode === "native"
-          );
-          if (preferred && !deferPreferredNative) {
+          if (preferred) {
             this.pushPreferredLaunchAttempt(attempts, seen, preferred, runtimeHome);
           }
-          if (preferWslFirst) {
-            this.pushWslAttempts(attempts, seen, runtimeHome, forcedWsl.distro || configuredWslDistro);
-          }
-          if (forcedWsl.useWsl) {
-            if (strategy !== "native") {
-              this.pushWslAttempts(attempts, seen, runtimeHome, forcedWsl.distro || configuredWslDistro);
-            }
-          } else if (resolvedPath) {
-            if (strategy !== "wsl") {
-              const wrapperScript = isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath) ? resolveWindowsWrapperNodeScript(resolvedPath) : "";
-              const nodeScriptPath = this.isNodeScriptLaunchPath(resolvedPath, resolvedKind) ? resolvedPath : wrapperScript;
-              if (nodeScriptPath) {
-                this.pushNodeScriptAttempts(
-                  attempts,
-                  seen,
-                  nodeScriptPath,
-                  baseOptions,
-                  resolvedNodePath,
-                  resolvedSourcePath || (wrapperScript ? resolvedPath : "")
-                );
-              } else if (!(isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath))) {
-                this.pushLaunchAttempt(attempts, seen, {
-                  label: resolvedPath,
-                  command: resolvedPath,
-                  args: OPENCODE_SERVE_ARGS,
-                  options: { ...baseOptions, shell: false },
-                  mode: "native",
-                  directory: this.vaultPath
-                });
-              }
+          if (resolvedPath) {
+            const wrapperScript = isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath) ? resolveWindowsWrapperNodeScript(resolvedPath) : "";
+            const nodeScriptPath = this.isNodeScriptLaunchPath(resolvedPath, resolvedKind) ? resolvedPath : wrapperScript;
+            if (nodeScriptPath) {
+              this.pushNodeScriptAttempts(
+                attempts,
+                seen,
+                nodeScriptPath,
+                baseOptions,
+                resolvedNodePath,
+                resolvedSourcePath || (wrapperScript ? resolvedPath : "")
+              );
+            } else if (!(isWindowsPlatform() && isWindowsCommandWrapper(resolvedPath))) {
+              this.pushLaunchAttempt(attempts, seen, {
+                label: resolvedPath,
+                command: resolvedPath,
+                args: OPENCODE_SERVE_ARGS,
+                options: { ...baseOptions, shell: false },
+                mode: "native",
+                directory: this.vaultPath
+              });
             }
           }
-          const allowAutoFallback = strategy !== "wsl" && Boolean(this.settings.autoDetectCli || !String(this.settings.cliPath || "").trim());
+          const allowAutoFallback = Boolean(this.settings.autoDetectCli || !String(this.settings.cliPath || "").trim());
           if (allowAutoFallback) {
             if (isWindowsPlatform()) {
               this.pushLaunchAttempt(attempts, seen, {
@@ -15137,12 +15220,6 @@ var require_launch_attempt_methods = __commonJS({
                 directory: this.vaultPath
               });
             }
-          }
-          if (deferPreferredNative && preferred) {
-            this.pushPreferredLaunchAttempt(attempts, seen, preferred, runtimeHome);
-          }
-          if (isWindowsPlatform() && (strategy !== "native" || isWindowsArm64) && !preferWslFirst) {
-            this.pushWslAttempts(attempts, seen, runtimeHome, configuredWslDistro);
           }
           return attempts;
         }
@@ -19487,15 +19564,17 @@ var require_settings_utils = __commonJS({
         else merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
       }
       if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
-      if (!["auto", "native", "wsl"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
+      if (!["auto", "native"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
         merged.launchStrategy = "auto";
       }
       merged.requestTimeoutMs = Math.max(1e4, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
       merged.cliPath = String(merged.cliPath || "").trim();
+      if (/^wsl(?::|:\/\/|$|\.exe$)/i.test(merged.cliPath)) merged.cliPath = "";
       merged.skillsDir = String(merged.skillsDir || DEFAULT_SETTINGS.skillsDir).trim();
       merged.defaultModel = String(merged.defaultModel || "").trim();
       merged.launchStrategy = String(merged.launchStrategy || "auto").trim().toLowerCase();
-      merged.wslDistro = String(merged.wslDistro || "").trim();
+      if (merged.launchStrategy === "wsl") merged.launchStrategy = "auto";
+      merged.wslDistro = "";
       const mcDefaults = DEFAULT_SETTINGS.mobileCapture;
       if (!merged.mobileCapture || typeof merged.mobileCapture !== "object") {
         merged.mobileCapture = { ...mcDefaults };
@@ -19858,10 +19937,10 @@ var require_basic_settings_section_methods = __commonJS({
         });
         const isWindows = isWindowsUiPlatform();
         const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
-        const launchStrategyForUi = !isWindows && launchStrategyValue === "wsl" ? "auto" : launchStrategyValue;
+        const launchStrategyForUi = launchStrategyValue === "native" ? "native" : "auto";
         new Setting2(containerEl).setName(t("settings.basic.cliPathName", "FLOWnote CLI \u8DEF\u5F84\uFF08\u53EF\u9009\uFF09")).setDesc(t(
           "settings.basic.cliPathDesc",
-          "\u901A\u5E38\u7559\u7A7A\u3002\u63D2\u4EF6\u4F1A\u81EA\u52A8\u63A2\u6D4B\u3002Windows \u672C\u673A\u8BF7\u4F18\u5148\u586B\u5199 opencode.exe \u6216 cli.js\uFF08\u4E0D\u8981\u586B opencode.cmd\uFF09\uFF1BWindows + WSL \u53EF\u586B wsl\u3001wsl.exe \u6216 wsl:\u53D1\u884C\u7248\u540D\uFF08\u4F8B\u5982 wsl:Ubuntu\uFF09\u3002"
+          "\u901A\u5E38\u7559\u7A7A\u3002\u63D2\u4EF6\u4F1A\u81EA\u52A8\u63A2\u6D4B\u3002Windows \u8BF7\u5148\u5728\u672C\u673A\u5B89\u88C5 Node.js\uFF0C\u518D\u6267\u884C npm install -g opencode-ai\u3002\u5FC5\u8981\u65F6\u4F18\u5148\u586B\u5199 opencode.exe \u6216 cli.js\uFF08\u4E0D\u8981\u586B opencode.cmd\uFF0C\u4E5F\u4E0D\u8981\u4F7F\u7528 WSL\uFF09\u3002"
         )).addText((text) => {
           text.setPlaceholder("/Users/xxx/.opencode/bin/opencode").setValue(this.plugin.settings.cliPath).onChange(async (v) => {
             this.plugin.settings.cliPath = v.trim();
@@ -19871,7 +19950,7 @@ var require_basic_settings_section_methods = __commonJS({
         new Setting2(containerEl).setName(t("settings.basic.launchStrategyName", "\u8FDE\u63A5\u542F\u52A8\u65B9\u5F0F")).setDesc(
           isWindows ? t(
             "settings.basic.launchStrategyDescWindows",
-            "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09\uFF1A\u6309\u7CFB\u7EDF\u81EA\u52A8\u68C0\u6D4B\u5E76\u8BB0\u5FC6\u6210\u529F\u65B9\u5F0F\u3002\u624B\u52A8\u6A21\u5F0F\u4E0B\u6309\u4F60\u9009\u62E9\u7684\u5B89\u88C5\u65B9\u5F0F\u8FDE\u63A5\u3002"
+            "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09\uFF1A\u81EA\u52A8\u68C0\u6D4B\u5E76\u8BB0\u5FC6\u6210\u529F\u7684\u672C\u673A\u8FDE\u63A5\u65B9\u5F0F\u3002\u624B\u52A8\u6A21\u5F0F\u4EC5\u4F7F\u7528 Windows \u672C\u673A\u5B89\u88C5\uFF1B\u4E0D\u518D\u652F\u6301 WSL\u3002"
           ) : t(
             "settings.basic.launchStrategyDesc",
             "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09\uFF1A\u4F18\u5148\u4F7F\u7528\u4E0A\u6B21\u6210\u529F\u65B9\u5F0F\uFF1B\u5931\u8D25\u65F6\u81EA\u52A8\u56DE\u9000\u5230\u5176\u4ED6\u65B9\u5F0F\u3002"
@@ -19879,7 +19958,7 @@ var require_basic_settings_section_methods = __commonJS({
         ).addDropdown((d) => {
           d.addOption("auto", t("settings.basic.launchAuto", "\u81EA\u52A8\uFF08\u63A8\u8350\uFF09"));
           if (isWindows) {
-            d.addOption("native", t("settings.basic.launchNativeWindows", "Windows \u672C\u673A\u5B89\u88C5")).addOption("wsl", t("settings.basic.launchWsl", "Windows WSL \u5B89\u88C5"));
+            d.addOption("native", t("settings.basic.launchNativeWindows", "Windows \u672C\u673A\u5B89\u88C5"));
           } else {
             d.addOption("native", t("settings.basic.launchNativeMac", "Mac \u672C\u673A\u5B89\u88C5"));
           }
@@ -19889,17 +19968,6 @@ var require_basic_settings_section_methods = __commonJS({
             this.display();
           });
         });
-        if (isWindows && this.plugin.settings.launchStrategy !== "native") {
-          new Setting2(containerEl).setName(t("settings.basic.wslDistroName", "WSL \u53D1\u884C\u7248\uFF08\u53EF\u9009\uFF09")).setDesc(t(
-            "settings.basic.wslDistroDesc",
-            "\u7559\u7A7A\u8868\u793A WSL \u9ED8\u8BA4\u53D1\u884C\u7248\u3002\u53EF\u586B Ubuntu / Debian \u7B49\u3002\u586B\u5199\u540E\u81EA\u52A8\u6A21\u5F0F\u4F1A\u4F18\u5148\u5C1D\u8BD5 WSL\u3002"
-          )).addText((text) => {
-            text.setPlaceholder("Ubuntu").setValue(String(this.plugin.settings.wslDistro || "")).onChange(async (v) => {
-              this.plugin.settings.wslDistro = v.trim();
-              await this.plugin.saveSettings();
-            });
-          });
-        }
         new Setting2(containerEl).setName(t("settings.basic.skillInjectModeName", "\u6280\u80FD\u6CE8\u5165\u65B9\u5F0F")).setDesc(t("settings.basic.skillInjectModeDesc", "\u5F53\u4F60\u4F7F\u7528 /skill \u6307\u4EE4\u65F6\uFF0C\u63D2\u4EF6\u5982\u4F55\u628A\u6280\u80FD\u5185\u5BB9\u4F20\u7ED9\u6A21\u578B\u3002")).addDropdown((d) => {
           d.addOption("summary", t("settings.basic.skillInjectModeSummary", "\u6458\u8981\u6CE8\u5165\uFF08\u63A8\u8350\uFF09")).addOption("full", t("settings.basic.skillInjectModeFull", "\u5168\u6587\u6CE8\u5165\uFF08\u66F4\u5B8C\u6574\u4F46\u66F4\u91CD\uFF09")).addOption("off", t("settings.basic.skillInjectModeOff", "\u5173\u95ED\u6CE8\u5165\uFF08\u53EA\u53D1\u9001\u7528\u6237\u8F93\u5165\uFF09")).setValue(this.plugin.settings.skillInjectMode).onChange(async (v) => {
             this.plugin.settings.skillInjectMode = v;
@@ -19987,9 +20055,7 @@ var require_basic_settings_section_methods = __commonJS({
         });
         if (this.plugin.settings.launchStrategy === "auto") {
           const remembered = typeof this.plugin.getPreferredLaunchProfile === "function" ? this.plugin.getPreferredLaunchProfile() : null;
-          const rememberedText = remembered ? remembered.mode === "wsl" ? t("settings.basic.autoMemoryRememberedWsl", "\u5DF2\u8BB0\u5FC6\uFF1AWSL{distro}", {
-            distro: remembered.distro ? ` (${remembered.distro})` : ""
-          }) : t("settings.basic.autoMemoryRememberedNative", "\u5DF2\u8BB0\u5FC6\uFF1A\u672C\u673A {command}", {
+          const rememberedText = remembered ? t("settings.basic.autoMemoryRememberedNative", "\u5DF2\u8BB0\u5FC6\uFF1A\u672C\u673A {command}", {
             command: remembered.command || "opencode"
           }) : t("settings.basic.autoMemoryNone", "\u5F53\u524D\u672A\u8BB0\u5FC6\u6210\u529F\u8FDE\u63A5\u65B9\u5F0F\u3002");
           new Setting2(containerEl).setName(t("settings.basic.autoMemoryName", "\u81EA\u52A8\u8FDE\u63A5\u8BB0\u5FC6")).setDesc(t("settings.basic.autoMemoryDesc", "{rememberedText} \u6210\u529F\u8FDE\u63A5\u540E\u4F1A\u81EA\u52A8\u66F4\u65B0\u3002", { rememberedText })).addButton((b) => {
@@ -20696,7 +20762,143 @@ var require_provider_auth_section_methods = __commonJS({
   "runtime/settings/provider-auth-section-methods.js"(exports2, module2) {
     var { Notice: Notice2 } = require("obsidian");
     var { tFromContext } = require_i18n_runtime();
+    var OPENCODE_DOCS_URL = "https://opencode.ai/docs";
+    function isWindowsUiPlatform2() {
+      if (typeof process !== "undefined" && process && process.platform === "win32") return true;
+      if (typeof navigator !== "undefined" && typeof navigator.userAgent === "string") {
+        return /windows/i.test(navigator.userAgent);
+      }
+      return false;
+    }
     var ProviderAuthSectionMethods = class {
+      classifyProviderAuthError(message) {
+        if (!isWindowsUiPlatform2()) return "generic";
+        const text = String(message || "").toLowerCase();
+        if (!text) return "generic";
+        if (/wsl(?:\.exe|\(|:|\/)|windows\s*\+\s*wsl/.test(text)) return "wsl";
+        if (/not found|command not found|enoent|executable not found|未找到|找不到|spawn opencode|spawn .*opencode/.test(text)) {
+          return "missing";
+        }
+        return "generic";
+      }
+      buildProviderAuthErrorSpec(message) {
+        const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
+        const detail = String(message || "").trim();
+        const kind = this.classifyProviderAuthError(detail);
+        const commands = isWindowsUiPlatform2() ? ["node -v", "npm -v", "npm install -g opencode-ai", "opencode --version", "where opencode"] : [];
+        const links = [];
+        if (kind === "missing" || kind === "wsl") {
+          links.push({
+            label: t("settings.providerAuth.installDocs", "\u5B98\u65B9\u5B89\u88C5\u6587\u6863"),
+            url: OPENCODE_DOCS_URL
+          });
+        }
+        if (kind === "wsl") {
+          return {
+            kind,
+            summary: t("settings.providerAuth.readFailedWsl", "\u68C0\u6D4B\u5230 WSL \u5B89\u88C5\uFF0C\u8BF7\u6539\u4E3A Windows \u672C\u673A\u5B89\u88C5\u3002"),
+            intro: "\u8BF7\u4F7F\u7528\u8FBE.js\u8FDB\u884C\u5B89\u88C5\u3002",
+            commands,
+            links,
+            copyText: [
+              "\u68C0\u6D4B\u5230 WSL \u5B89\u88C5\uFF0C\u8BF7\u6539\u4E3A Windows \u672C\u673A\u5B89\u88C5\u3002",
+              "\u8BF7\u4F7F\u7528\u8FBE.js\u8FDB\u884C\u5B89\u88C5\u3002",
+              "",
+              ...commands,
+              "",
+              `\u5B98\u65B9\u5B89\u88C5\u6587\u6863: ${OPENCODE_DOCS_URL}`,
+              "",
+              `\u539F\u59CB\u62A5\u9519: ${detail}`
+            ].join("\n")
+          };
+        }
+        if (kind === "missing") {
+          return {
+            kind,
+            summary: t("settings.providerAuth.readFailedMissing", "\u672A\u68C0\u6D4B\u5230 OpenCode \u5B89\u88C5\uFF0C\u8BF7\u5148\u5B8C\u6210\u5B89\u88C5\u3002"),
+            intro: t(
+              "settings.providerAuth.readFailedMissingIntro",
+              "\u8BF7\u5148\u5728 Windows \u672C\u673A\u5B89\u88C5 OpenCode\uFF0C\u518D\u56DE\u5230\u63D2\u4EF6\u91CC\u5237\u65B0 Provider \u72B6\u6001\u3002"
+            ),
+            commands,
+            links,
+            copyText: [
+              "\u672A\u68C0\u6D4B\u5230 OpenCode \u5B89\u88C5\uFF0C\u8BF7\u5148\u5B8C\u6210\u5B89\u88C5\u3002",
+              "\u8BF7\u5148\u5728 Windows \u672C\u673A\u5B89\u88C5 OpenCode\uFF0C\u518D\u56DE\u5230\u63D2\u4EF6\u91CC\u5237\u65B0 Provider \u72B6\u6001\u3002",
+              "",
+              ...commands,
+              "",
+              `\u5B98\u65B9\u5B89\u88C5\u6587\u6863: ${OPENCODE_DOCS_URL}`,
+              "",
+              `\u539F\u59CB\u62A5\u9519: ${detail}`
+            ].join("\n")
+          };
+        }
+        return {
+          kind,
+          summary: t("settings.providerAuth.readFailed", "\u8BFB\u53D6\u5931\u8D25\uFF1A{message}", { message: detail }),
+          intro: t("settings.providerAuth.readFailedDetail", "\u8BFB\u53D6 Provider \u4FE1\u606F\u5931\u8D25\uFF1A{message}", { message: detail }),
+          commands: [],
+          links: [],
+          copyText: detail
+        };
+      }
+      renderProviderAuthErrorPanel(listEl, message) {
+        const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
+        const spec = this.buildProviderAuthErrorSpec(message);
+        const panel = listEl.createDiv({ cls: "oc-copyable-panel" });
+        panel.createEl("strong", { text: spec.summary });
+        if (spec.intro) {
+          panel.createDiv({
+            cls: "setting-item-description oc-copyable-help",
+            text: spec.intro
+          });
+        }
+        if (Array.isArray(spec.commands) && spec.commands.length) {
+          const commandWrap = panel.createDiv({ cls: "oc-copyable-command-list" });
+          spec.commands.forEach((cmd) => {
+            const line = commandWrap.createDiv({ cls: "oc-copyable-command-item" });
+            line.createEl("code", { text: cmd });
+          });
+        }
+        const actionRow = panel.createDiv({ cls: "oc-copyable-actions" });
+        if (Array.isArray(spec.links) && spec.links.length) {
+          spec.links.forEach((item) => {
+            const link = actionRow.createEl("a", {
+              cls: "oc-copyable-link",
+              text: String(item.label || item.url || ""),
+              href: String(item.url || "")
+            });
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+          });
+        }
+        const copyBtn = actionRow.createEl("button", {
+          text: t("settings.providerAuth.copyError", "\u590D\u5236\u62A5\u9519\u4FE1\u606F")
+        });
+        copyBtn.type = "button";
+        copyBtn.addEventListener("click", async () => {
+          const copied = typeof this.copyToClipboard === "function" ? await this.copyToClipboard(spec.copyText) : false;
+          if (copied) {
+            new Notice2(t("settings.providerAuth.copyErrorDone", "\u62A5\u9519\u4FE1\u606F\u5DF2\u590D\u5236"));
+          } else {
+            new Notice2(t("settings.providerAuth.copyErrorManual", "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u4E0B\u65B9\u6587\u672C\u590D\u5236\u3002"));
+          }
+        });
+        const detailArea = panel.createEl("textarea", {
+          cls: "oc-copyable-textarea",
+          attr: {
+            readonly: "true",
+            spellcheck: "false",
+            "aria-label": t("settings.providerAuth.errorDetails", "\u9519\u8BEF\u8BE6\u60C5")
+          }
+        });
+        detailArea.value = spec.copyText;
+        detailArea.rows = Math.min(14, Math.max(5, spec.copyText.split(/\r?\n/).length));
+        detailArea.addEventListener("focus", () => detailArea.select());
+        detailArea.addEventListener("click", () => detailArea.select());
+        return spec;
+      }
       renderProviderAuthSection(containerEl) {
         const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
         containerEl.createEl("h3", { text: t("settings.providerAuth.heading", "Provider \u767B\u5F55\u7BA1\u7406\uFF08OAuth / API Key\uFF09") });
@@ -20874,11 +21076,8 @@ var require_provider_auth_section_methods = __commonJS({
             if (this.plugin && typeof this.plugin.log === "function") {
               this.plugin.log(`provider refresh: failed ${msg}`);
             }
-            statusEl.setText(t("settings.providerAuth.readFailed", "\u8BFB\u53D6\u5931\u8D25\uFF1A{message}", { message: msg }));
-            listEl.createDiv({
-              text: t("settings.providerAuth.readFailedDetail", "\u8BFB\u53D6 Provider \u4FE1\u606F\u5931\u8D25\uFF1A{message}", { message: msg }),
-              cls: "setting-item-description"
-            });
+            const spec = this.renderProviderAuthErrorPanel(listEl, msg);
+            statusEl.setText(spec.summary);
           } finally {
             if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: done");
             refreshBtn.disabled = false;
@@ -21953,18 +22152,17 @@ var require_runtime_state_methods = __commonJS({
       },
       normalizeLaunchProfile(profile) {
         if (!profile || typeof profile !== "object") return null;
-        const mode = String(profile.mode || "").trim().toLowerCase() === "wsl" ? "wsl" : "native";
+        const mode = String(profile.mode || "").trim().toLowerCase() === "native" ? "native" : "";
         const command = String(profile.command || "").trim();
         const shell = Boolean(profile.shell);
-        const distro = String(profile.distro || "").trim();
         const args = Array.isArray(profile.args) ? profile.args.map((item) => String(item || "")) : [];
-        if (mode === "native" && !command) return null;
+        if (mode !== "native" || !command) return null;
         return {
           mode,
           command,
           args,
           shell,
-          distro,
+          distro: "",
           at: Number(profile.at || Date.now())
         };
       },

@@ -109,10 +109,10 @@ Then reload plugins in Obsidian.
 
 ### Desktop setup
 
-1. Install OpenCode on your desktop and verify `opencode` is available.
+1. Install Node.js on your desktop first, then run `npm install -g opencode-ai` to install OpenCode and verify `opencode` is available.
 2. Open FLOWnote settings.
 3. Keep CLI path empty first (auto-detect), or set explicit path if needed.
-4. Choose launch strategy (`auto` / native Windows / WSL) when applicable.
+4. Choose launch strategy (`auto` / native install). WSL is no longer supported on Windows.
 
 ### Mobile setup
 

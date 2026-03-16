@@ -46,3 +46,14 @@ test("normalizeSettings should fallback invalid uiLanguage to auto", () => {
   const out = normalizeSettings({ uiLanguage: "fr-FR" });
   assert.equal(out.uiLanguage, "auto");
 });
+
+test("normalizeSettings should drop deprecated wsl launch settings", () => {
+  const out = normalizeSettings({
+    launchStrategy: "wsl",
+    wslDistro: "Ubuntu",
+    cliPath: "wsl:Ubuntu",
+  });
+  assert.equal(out.launchStrategy, "auto");
+  assert.equal(out.wslDistro, "");
+  assert.equal(out.cliPath, "");
+});

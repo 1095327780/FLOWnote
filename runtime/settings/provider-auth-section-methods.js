@@ -1,7 +1,162 @@
 const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 
+const OPENCODE_DOCS_URL = "https://opencode.ai/docs";
+
+function isWindowsUiPlatform() {
+  if (typeof process !== "undefined" && process && process.platform === "win32") return true;
+  if (typeof navigator !== "undefined" && typeof navigator.userAgent === "string") {
+    return /windows/i.test(navigator.userAgent);
+  }
+  return false;
+}
+
 class ProviderAuthSectionMethods {
+  classifyProviderAuthError(message) {
+    if (!isWindowsUiPlatform()) return "generic";
+    const text = String(message || "").toLowerCase();
+    if (!text) return "generic";
+    if (/wsl(?:\.exe|\(|:|\/)|windows\s*\+\s*wsl/.test(text)) return "wsl";
+    if (/not found|command not found|enoent|executable not found|未找到|找不到|spawn opencode|spawn .*opencode/.test(text)) {
+      return "missing";
+    }
+    return "generic";
+  }
+
+  buildProviderAuthErrorSpec(message) {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
+    const detail = String(message || "").trim();
+    const kind = this.classifyProviderAuthError(detail);
+    const commands = isWindowsUiPlatform()
+      ? ["node -v", "npm -v", "npm install -g opencode-ai", "opencode --version", "where opencode"]
+      : [];
+    const links = [];
+
+    if (kind === "missing" || kind === "wsl") {
+      links.push({
+        label: t("settings.providerAuth.installDocs", "官方安装文档"),
+        url: OPENCODE_DOCS_URL,
+      });
+    }
+
+    if (kind === "wsl") {
+      return {
+        kind,
+        summary: t("settings.providerAuth.readFailedWsl", "检测到 WSL 安装，请改为 Windows 本机安装。"),
+        intro: "请使用达.js进行安装。",
+        commands,
+        links,
+        copyText: [
+          "检测到 WSL 安装，请改为 Windows 本机安装。",
+          "请使用达.js进行安装。",
+          "",
+          ...commands,
+          "",
+          `官方安装文档: ${OPENCODE_DOCS_URL}`,
+          "",
+          `原始报错: ${detail}`,
+        ].join("\n"),
+      };
+    }
+
+    if (kind === "missing") {
+      return {
+        kind,
+        summary: t("settings.providerAuth.readFailedMissing", "未检测到 OpenCode 安装，请先完成安装。"),
+        intro: t(
+          "settings.providerAuth.readFailedMissingIntro",
+          "请先在 Windows 本机安装 OpenCode，再回到插件里刷新 Provider 状态。",
+        ),
+        commands,
+        links,
+        copyText: [
+          "未检测到 OpenCode 安装，请先完成安装。",
+          "请先在 Windows 本机安装 OpenCode，再回到插件里刷新 Provider 状态。",
+          "",
+          ...commands,
+          "",
+          `官方安装文档: ${OPENCODE_DOCS_URL}`,
+          "",
+          `原始报错: ${detail}`,
+        ].join("\n"),
+      };
+    }
+
+    return {
+      kind,
+      summary: t("settings.providerAuth.readFailed", "读取失败：{message}", { message: detail }),
+      intro: t("settings.providerAuth.readFailedDetail", "读取 Provider 信息失败：{message}", { message: detail }),
+      commands: [],
+      links: [],
+      copyText: detail,
+    };
+  }
+
+  renderProviderAuthErrorPanel(listEl, message) {
+    const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
+    const spec = this.buildProviderAuthErrorSpec(message);
+    const panel = listEl.createDiv({ cls: "oc-copyable-panel" });
+    panel.createEl("strong", { text: spec.summary });
+
+    if (spec.intro) {
+      panel.createDiv({
+        cls: "setting-item-description oc-copyable-help",
+        text: spec.intro,
+      });
+    }
+
+    if (Array.isArray(spec.commands) && spec.commands.length) {
+      const commandWrap = panel.createDiv({ cls: "oc-copyable-command-list" });
+      spec.commands.forEach((cmd) => {
+        const line = commandWrap.createDiv({ cls: "oc-copyable-command-item" });
+        line.createEl("code", { text: cmd });
+      });
+    }
+
+    const actionRow = panel.createDiv({ cls: "oc-copyable-actions" });
+    if (Array.isArray(spec.links) && spec.links.length) {
+      spec.links.forEach((item) => {
+        const link = actionRow.createEl("a", {
+          cls: "oc-copyable-link",
+          text: String(item.label || item.url || ""),
+          href: String(item.url || ""),
+        });
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+      });
+    }
+
+    const copyBtn = actionRow.createEl("button", {
+      text: t("settings.providerAuth.copyError", "复制报错信息"),
+    });
+    copyBtn.type = "button";
+    copyBtn.addEventListener("click", async () => {
+      const copied = typeof this.copyToClipboard === "function"
+        ? await this.copyToClipboard(spec.copyText)
+        : false;
+      if (copied) {
+        new Notice(t("settings.providerAuth.copyErrorDone", "报错信息已复制"));
+      } else {
+        new Notice(t("settings.providerAuth.copyErrorManual", "复制失败，请手动选择下方文本复制。"));
+      }
+    });
+
+    const detailArea = panel.createEl("textarea", {
+      cls: "oc-copyable-textarea",
+      attr: {
+        readonly: "true",
+        spellcheck: "false",
+        "aria-label": t("settings.providerAuth.errorDetails", "错误详情"),
+      },
+    });
+    detailArea.value = spec.copyText;
+    detailArea.rows = Math.min(14, Math.max(5, spec.copyText.split(/\r?\n/).length));
+    detailArea.addEventListener("focus", () => detailArea.select());
+    detailArea.addEventListener("click", () => detailArea.select());
+
+    return spec;
+  }
+
   renderProviderAuthSection(containerEl) {
     const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     containerEl.createEl("h3", { text: t("settings.providerAuth.heading", "Provider 登录管理（OAuth / API Key）") });
@@ -215,11 +370,10 @@ class ProviderAuthSectionMethods {
         if (this.plugin && typeof this.plugin.log === "function") {
           this.plugin.log(`provider refresh: failed ${msg}`);
         }
-        statusEl.setText(t("settings.providerAuth.readFailed", "读取失败：{message}", { message: msg }));
-        listEl.createDiv({
-          text: t("settings.providerAuth.readFailedDetail", "读取 Provider 信息失败：{message}", { message: msg }),
-          cls: "setting-item-description",
-        });
+        const spec = this.renderProviderAuthErrorPanel(listEl, msg);
+        statusEl.setText(spec && spec.summary
+          ? String(spec.summary)
+          : t("settings.providerAuth.readFailed", "读取失败：{message}", { message: msg }));
       } finally {
         if (this.plugin && typeof this.plugin.log === "function") this.plugin.log("provider refresh: done");
         refreshBtn.disabled = false;

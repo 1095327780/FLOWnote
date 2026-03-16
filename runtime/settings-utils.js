@@ -113,16 +113,18 @@ function normalizeSettings(raw) {
   }
 
   if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
-  if (!["auto", "native", "wsl"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
+  if (!["auto", "native"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
     merged.launchStrategy = "auto";
   }
 
   merged.requestTimeoutMs = Math.max(10000, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
   merged.cliPath = String(merged.cliPath || "").trim();
+  if (/^wsl(?::|:\/\/|$|\.exe$)/i.test(merged.cliPath)) merged.cliPath = "";
   merged.skillsDir = String(merged.skillsDir || DEFAULT_SETTINGS.skillsDir).trim();
   merged.defaultModel = String(merged.defaultModel || "").trim();
   merged.launchStrategy = String(merged.launchStrategy || "auto").trim().toLowerCase();
-  merged.wslDistro = String(merged.wslDistro || "").trim();
+  if (merged.launchStrategy === "wsl") merged.launchStrategy = "auto";
+  merged.wslDistro = "";
 
   // --- mobileCapture normalization ---
   const mcDefaults = DEFAULT_SETTINGS.mobileCapture;

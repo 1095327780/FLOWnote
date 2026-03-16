@@ -20,20 +20,19 @@ const runtimeStateMethods = {
 
   normalizeLaunchProfile(profile) {
     if (!profile || typeof profile !== "object") return null;
-    const mode = String(profile.mode || "").trim().toLowerCase() === "wsl" ? "wsl" : "native";
+    const mode = String(profile.mode || "").trim().toLowerCase() === "native" ? "native" : "";
     const command = String(profile.command || "").trim();
     const shell = Boolean(profile.shell);
-    const distro = String(profile.distro || "").trim();
     const args = Array.isArray(profile.args)
       ? profile.args.map((item) => String(item || ""))
       : [];
-    if (mode === "native" && !command) return null;
+    if (mode !== "native" || !command) return null;
     return {
       mode,
       command,
       args,
       shell,
-      distro,
+      distro: "",
       at: Number(profile.at || Date.now()),
     };
   },

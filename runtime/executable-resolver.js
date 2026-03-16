@@ -40,11 +40,52 @@ function isNodeScriptPath(filePath) {
   return /\.(mjs|cjs|js)$/i.test(String(filePath || "").trim());
 }
 
+function isRegularFile(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyNodeScriptFile(filePath) {
+  const target = String(filePath || "").trim();
+  if (!target || !isRegularFile(target)) return false;
+  if (isNodeScriptPath(target)) return true;
+  if (isWindowsCommandWrapperPath(target)) return false;
+
+  try {
+    const fd = fs.openSync(target, "r");
+    try {
+      const chunk = Buffer.alloc(160);
+      const size = fs.readSync(fd, chunk, 0, chunk.length, 0);
+      if (size <= 0) return false;
+      const head = chunk.toString("utf8", 0, size);
+      return /^\s*#!.*\bnode(?:\.exe)?\b/i.test(head);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+function resolvesToWindowsExecutableAlias(filePath) {
+  try {
+    const resolved = fs.realpathSync(filePath);
+    const ext = path.extname(String(resolved || "")).toLowerCase();
+    return [".exe", ".com", ".cmd", ".bat", ".ps1"].includes(ext);
+  } catch {
+    return false;
+  }
+}
+
 function isExecutable(filePath) {
   if (process.platform === "win32") {
+    if (!isRegularFile(filePath)) return false;
     const ext = path.extname(String(filePath || "")).toLowerCase();
-    if (!ext) return fs.existsSync(filePath);
-    if (isNodeScriptPath(filePath)) return fs.existsSync(filePath);
+    if (!ext) return isLikelyNodeScriptFile(filePath) || resolvesToWindowsExecutableAlias(filePath);
+    if (isNodeScriptPath(filePath)) return true;
     return [".exe", ".cmd", ".bat", ".com", ".ps1"].includes(ext);
   }
 
@@ -83,18 +124,18 @@ function resolveWindowsWrapperNodeScript(wrapperPath) {
   if (!content) return "";
 
   const patterns = [
-    /node(?:\.exe)?\s+"([^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
-    /"%~dp0\\node\.exe"\s+"([^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
-    /"%~dp0([^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
-    /%~dp0([^\s\r\n]+?\.(?:mjs|cjs|js))/gi,
-    /"([^"\r\n]*node_modules[^"\r\n]+?\.(?:mjs|cjs|js))"/gi,
+    /node(?:\.exe)?\s+"([^"\r\n]+?)"/gi,
+    /"%~dp0\\node\.exe"\s+"([^"\r\n]+?)"/gi,
+    /"%~dp0([^"\r\n]+?)"/gi,
+    /%~dp0([^\s\r\n]+)/gi,
+    /"([^"\r\n]*node_modules[^"\r\n]+?)"/gi,
   ];
 
   for (const pattern of patterns) {
     let match = null;
     while ((match = pattern.exec(content)) !== null) {
       const candidate = normalizeWindowsWrapperScriptPath(match[1], wrapper);
-      if (candidate && fs.existsSync(candidate)) return candidate;
+      if (candidate && isLikelyNodeScriptFile(candidate)) return candidate;
     }
   }
 
@@ -181,6 +222,13 @@ function resolveNodeExecutablePath(scriptPath = "") {
   return process.platform === "win32" ? "node.exe" : "node";
 }
 
+function isWindowsWslPath(filePath) {
+  const target = String(filePath || "").trim();
+  if (!target) return false;
+  const base = path.basename(target).toLowerCase();
+  return base === "wsl" || base === "wsl.exe";
+}
+
 function windowsCandidatePriority(candidate) {
   const normalized = String(candidate || "").trim();
   const ext = path.extname(normalized).toLowerCase();
@@ -212,6 +260,7 @@ class ExecutableResolver {
       path.join(npmNodeModules, "@opencode-ai", "opencode", "dist", "cli.js"),
       path.join(npmNodeModules, "@opencode-ai", "opencode", "cli.js"),
       path.join(npmNodeModules, "@opencode-ai", "opencode", "bin", "opencode.js"),
+      path.join(npmNodeModules, "opencode-ai", "bin", "opencode"),
       path.join(npmNodeModules, "opencode", "dist", "cli.js"),
       path.join(npmNodeModules, "opencode", "cli.js"),
       path.join(npmNodeModules, "opencode", "bin", "opencode.js"),
@@ -228,18 +277,18 @@ class ExecutableResolver {
       return [
         rt("未找到可执行文件。", "Executable not found."),
         rt(
-          "请在设置里填写 FLOWnote CLI 的绝对路径（优先 .exe，其次 cli.js），例如：",
-          "Set the absolute FLOWnote CLI path in settings (prefer .exe, then cli.js), for example:",
+          "请先在 Windows 本机安装 Node.js，然后执行 npm install -g opencode-ai。必要时可在设置里填写 FLOWnote CLI 的绝对路径（优先 .exe，其次 cli.js 或 bin/opencode），例如：",
+          "Install Node.js on native Windows first, then run npm install -g opencode-ai. If needed, set the absolute FLOWnote CLI path in settings (prefer .exe, then cli.js or bin/opencode), for example:",
         ),
         `${path.join(home, ".opencode", "bin", "opencode.exe")}`,
-        `${path.join(home, "AppData", "Roaming", "npm", "node_modules", "@opencode-ai", "opencode", "dist", "cli.js")}`,
+        `${path.join(home, "AppData", "Roaming", "npm", "node_modules", "opencode-ai", "bin", "opencode")}`,
         rt(
           "Windows 下请避免填写 opencode.cmd 包装脚本。",
           "On Windows, avoid using the opencode.cmd wrapper script.",
         ),
         rt(
-          "如果你只在 WSL 里安装了 opencode，也可以保持自动探测，插件会尝试通过 wsl.exe 启动。",
-          "If opencode is only installed in WSL, keep auto-detect enabled and the plugin will try wsl.exe launch.",
+          "不要使用 WSL 安装 OpenCode；请改为在 Windows 本机用 Node.js 安装。",
+          "Do not install OpenCode via WSL; install it on native Windows with Node.js instead.",
         ),
       ].join(" ");
     }
@@ -279,6 +328,7 @@ class ExecutableResolver {
 
     for (const c of ordered) {
       attempted.push(c);
+      if (process.platform === "win32" && isWindowsWslPath(c)) continue;
       if (!fs.existsSync(c)) continue;
       if (!isExecutable(c)) continue;
 
@@ -305,6 +355,16 @@ class ExecutableResolver {
         };
       }
 
+      if (process.platform === "win32" && isLikelyNodeScriptFile(c)) {
+        return {
+          ok: true,
+          path: c,
+          attempted,
+          kind: "node-script",
+          nodePath: resolveNodeExecutablePath(c),
+        };
+      }
+
       return { ok: true, path: c, attempted, kind: "native" };
     }
 
@@ -320,6 +380,7 @@ class ExecutableResolver {
 module.exports = {
   ExecutableResolver,
   isNodeScriptPath,
+  isLikelyNodeScriptFile,
   isWindowsCommandWrapperPath,
   resolveWindowsWrapperNodeScript,
   resolveNodeExecutablePath,

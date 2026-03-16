@@ -144,12 +144,12 @@ class BasicSettingsSectionMethods {
 
     const isWindows = isWindowsUiPlatform();
     const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
-    const launchStrategyForUi = !isWindows && launchStrategyValue === "wsl" ? "auto" : launchStrategyValue;
+    const launchStrategyForUi = launchStrategyValue === "native" ? "native" : "auto";
     new Setting(containerEl)
       .setName(t("settings.basic.cliPathName", "FLOWnote CLI 路径（可选）"))
       .setDesc(t(
         "settings.basic.cliPathDesc",
-        "通常留空。插件会自动探测。Windows 本机请优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd）；Windows + WSL 可填 wsl、wsl.exe 或 wsl:发行版名（例如 wsl:Ubuntu）。",
+        "通常留空。插件会自动探测。Windows 请先在本机安装 Node.js，再执行 npm install -g opencode-ai。必要时优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd，也不要使用 WSL）。",
       ))
       .addText((text) => {
         text
@@ -167,7 +167,7 @@ class BasicSettingsSectionMethods {
         isWindows
           ? t(
             "settings.basic.launchStrategyDescWindows",
-            "自动（推荐）：按系统自动检测并记忆成功方式。手动模式下按你选择的安装方式连接。",
+            "自动（推荐）：自动检测并记忆成功的本机连接方式。手动模式仅使用 Windows 本机安装；不再支持 WSL。",
           )
           : t(
             "settings.basic.launchStrategyDesc",
@@ -177,8 +177,7 @@ class BasicSettingsSectionMethods {
       .addDropdown((d) => {
         d.addOption("auto", t("settings.basic.launchAuto", "自动（推荐）"));
         if (isWindows) {
-          d.addOption("native", t("settings.basic.launchNativeWindows", "Windows 本机安装"))
-            .addOption("wsl", t("settings.basic.launchWsl", "Windows WSL 安装"));
+          d.addOption("native", t("settings.basic.launchNativeWindows", "Windows 本机安装"));
         } else {
           d.addOption("native", t("settings.basic.launchNativeMac", "Mac 本机安装"));
         }
@@ -188,24 +187,6 @@ class BasicSettingsSectionMethods {
           this.display();
         });
       });
-
-    if (isWindows && this.plugin.settings.launchStrategy !== "native") {
-      new Setting(containerEl)
-        .setName(t("settings.basic.wslDistroName", "WSL 发行版（可选）"))
-        .setDesc(t(
-          "settings.basic.wslDistroDesc",
-          "留空表示 WSL 默认发行版。可填 Ubuntu / Debian 等。填写后自动模式会优先尝试 WSL。",
-        ))
-        .addText((text) => {
-          text
-            .setPlaceholder("Ubuntu")
-            .setValue(String(this.plugin.settings.wslDistro || ""))
-            .onChange(async (v) => {
-              this.plugin.settings.wslDistro = v.trim();
-              await this.plugin.saveSettings();
-            });
-        });
-    }
 
     new Setting(containerEl)
       .setName(t("settings.basic.skillInjectModeName", "技能注入方式"))
@@ -325,13 +306,9 @@ class BasicSettingsSectionMethods {
         ? this.plugin.getPreferredLaunchProfile()
         : null;
       const rememberedText = remembered
-        ? remembered.mode === "wsl"
-          ? t("settings.basic.autoMemoryRememberedWsl", "已记忆：WSL{distro}", {
-            distro: remembered.distro ? ` (${remembered.distro})` : "",
-          })
-          : t("settings.basic.autoMemoryRememberedNative", "已记忆：本机 {command}", {
-            command: remembered.command || "opencode",
-          })
+        ? t("settings.basic.autoMemoryRememberedNative", "已记忆：本机 {command}", {
+          command: remembered.command || "opencode",
+        })
         : t("settings.basic.autoMemoryNone", "当前未记忆成功连接方式。");
 
       new Setting(containerEl)

@@ -190,7 +190,7 @@ test("buildEventStreamUrlCandidates should include legacy and global endpoints",
   ]);
 });
 
-test("buildLaunchAttempts should include WSL fallback on windows arm64 even in native mode", () => {
+test("buildLaunchAttempts should stay native on windows arm64 in native mode", () => {
   const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
   const archDesc = Object.getOwnPropertyDescriptor(process, "arch");
   if (!platformDesc || !archDesc) return;
@@ -204,14 +204,15 @@ test("buildLaunchAttempts should include WSL fallback on windows arm64 even in n
       { path: "C:\\Users\\shanghao\\.opencode\\bin\\opencode.exe", kind: "native" },
       "C:\\vault\\.opencode-runtime",
     );
-    assert.equal(attempts.some((item) => item.mode === "wsl"), true);
+    assert.equal(attempts.length > 0, true);
+    assert.equal(attempts.every((item) => item.mode === "native"), true);
   } finally {
     Object.defineProperty(process, "platform", platformDesc);
     Object.defineProperty(process, "arch", archDesc);
   }
 });
 
-test("buildLaunchAttempts should self-heal native strategy on windows arm64 when cliPath is empty", () => {
+test("buildLaunchAttempts should stay native on windows arm64 when cliPath is empty", () => {
   const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
   const archDesc = Object.getOwnPropertyDescriptor(process, "arch");
   if (!platformDesc || !archDesc) return;
@@ -228,14 +229,14 @@ test("buildLaunchAttempts should self-heal native strategy on windows arm64 when
       "C:\\vault\\.opencode-runtime",
     );
     assert.equal(attempts.length > 0, true);
-    assert.equal(attempts[0].mode, "wsl");
+    assert.equal(attempts.every((item) => item.mode === "native"), true);
   } finally {
     Object.defineProperty(process, "platform", platformDesc);
     Object.defineProperty(process, "arch", archDesc);
   }
 });
 
-test("buildLaunchAttempts should force wsl strategy on windows arm64 when wsl hint exists", () => {
+test("buildLaunchAttempts should ignore deprecated wsl hints on windows arm64", () => {
   const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
   const archDesc = Object.getOwnPropertyDescriptor(process, "arch");
   if (!platformDesc || !archDesc) return;
@@ -251,14 +252,14 @@ test("buildLaunchAttempts should force wsl strategy on windows arm64 when wsl hi
       "C:\\vault\\.opencode-runtime",
     );
     assert.equal(attempts.length > 0, true);
-    assert.equal(attempts.every((item) => item.mode === "wsl"), true);
+    assert.equal(attempts.every((item) => item.mode === "native"), true);
   } finally {
     Object.defineProperty(process, "platform", platformDesc);
     Object.defineProperty(process, "arch", archDesc);
   }
 });
 
-test("buildLaunchAttempts should understand windows-wsl legacy strategy value", () => {
+test("buildLaunchAttempts should ignore legacy windows-wsl strategy value", () => {
   const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
   if (!platformDesc) return;
 
@@ -272,14 +273,13 @@ test("buildLaunchAttempts should understand windows-wsl legacy strategy value", 
       "C:\\vault\\.opencode-runtime",
     );
     assert.equal(attempts.length > 0, true);
-    assert.equal(attempts[0].mode, "wsl");
-    assert.equal(attempts.some((item) => item.mode === "native"), false);
+    assert.equal(attempts.every((item) => item.mode === "native"), true);
   } finally {
     Object.defineProperty(process, "platform", platformDesc);
   }
 });
 
-test("buildLaunchAttempts should prefer WSL first on windows arm64 auto mode", () => {
+test("buildLaunchAttempts should not enqueue WSL on windows arm64 auto mode", () => {
   const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
   const archDesc = Object.getOwnPropertyDescriptor(process, "arch");
   if (!platformDesc || !archDesc) return;
@@ -294,7 +294,7 @@ test("buildLaunchAttempts should prefer WSL first on windows arm64 auto mode", (
       "C:\\vault\\.opencode-runtime",
     );
     assert.equal(attempts.length > 0, true);
-    assert.equal(attempts[0].mode, "wsl");
+    assert.equal(attempts.every((item) => item.mode === "native"), true);
   } finally {
     Object.defineProperty(process, "platform", platformDesc);
     Object.defineProperty(process, "arch", archDesc);
