@@ -309,10 +309,13 @@ function finalizeAssistantDraft(view, sessionId, draftId, response) {
 
 async function handlePromptFailure(view, sessionId, draftId, error) {
   const msg = error instanceof Error ? error.message : String(error);
-  const isSilentAbort = view.silentAbortBudget > 0 && view.isAbortLikeError(msg);
+  const isUserAbort = view.isAbortLikeError(msg);
+  const isSilentAbort = view.silentAbortBudget > 0 && isUserAbort;
 
-  if (isSilentAbort) {
-    view.silentAbortBudget = Math.max(0, Number(view.silentAbortBudget || 0) - 1);
+  if (isSilentAbort || isUserAbort) {
+    if (isSilentAbort) {
+      view.silentAbortBudget = Math.max(0, Number(view.silentAbortBudget || 0) - 1);
+    }
     const existing = (view.plugin.sessionStore.state().messagesBySession[sessionId] || []).find((x) => x && x.id === draftId);
     view.plugin.sessionStore.finalizeAssistantDraft(
       sessionId,
@@ -325,7 +328,9 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
       },
       "",
     );
-    view.setRuntimeStatus(tr(view, "view.question.waiting", "Waiting for question answers..."), "info");
+    if (isSilentAbort) {
+      view.setRuntimeStatus(tr(view, "view.question.waiting", "Waiting for question answers..."), "info");
+    }
     return { shouldRerenderModelPicker: false };
   }
 
@@ -358,7 +363,10 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
   return { shouldRerenderModelPicker };
 }
 
-async function finalizePromptCycle(view, shouldRerenderModelPicker) {
+async function finalizePromptCycle(view, shouldRerenderModelPicker, requestAbort) {
+  if (requestAbort && view.currentAbort !== requestAbort) {
+    return;
+  }
   view.currentAbort = null;
   view.setBusy(false);
   await view.plugin.persistState();
@@ -430,7 +438,8 @@ async function runSendPrompt(view, userText, options = {}) {
     }
   }
 
-  view.currentAbort = new AbortController();
+  const requestAbort = new AbortController();
+  view.currentAbort = requestAbort;
   view.setBusy(true);
   view.setRuntimeStatus(tr(view, "view.runtime.waitingResponse", "Waiting for FLOWnote response..."), "working");
   let shouldRerenderModelPicker = false;
@@ -461,7 +470,7 @@ async function runSendPrompt(view, userText, options = {}) {
     const response = await view.plugin.opencodeClient.sendMessage({
       sessionId,
       prompt,
-      signal: view.currentAbort.signal,
+      signal: requestAbort.signal,
       ...createTransportHandlers(view, sessionId, draftId),
     });
 
@@ -470,7 +479,7 @@ async function runSendPrompt(view, userText, options = {}) {
     const out = await handlePromptFailure(view, sessionId, draftId, error);
     shouldRerenderModelPicker = Boolean(out && out.shouldRerenderModelPicker);
   } finally {
-    await finalizePromptCycle(view, shouldRerenderModelPicker);
+    await finalizePromptCycle(view, shouldRerenderModelPicker, requestAbort);
   }
 }
 

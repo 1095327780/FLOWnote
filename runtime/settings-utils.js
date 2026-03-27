@@ -66,6 +66,7 @@ const DEFAULT_SETTINGS = {
   skillInjectMode: "summary",
   defaultModel: "",
   requestTimeoutMs: 120000,
+  sendWithEnter: false,
   enableStreaming: true,
   debugLogs: true,
   opencodeHomeDir: ".opencode-runtime",
@@ -112,6 +113,7 @@ function normalizeSettings(raw) {
     else merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
   }
 
+  merged.sendWithEnter = typeof merged.sendWithEnter === "boolean" ? merged.sendWithEnter : DEFAULT_SETTINGS.sendWithEnter;
   if (!["summary", "full", "off"].includes(merged.skillInjectMode)) merged.skillInjectMode = "summary";
   if (!["auto", "native"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
     merged.launchStrategy = "auto";

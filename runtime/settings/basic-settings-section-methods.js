@@ -189,6 +189,16 @@ class BasicSettingsSectionMethods {
       });
 
     new Setting(containerEl)
+      .setName(t("settings.basic.sendWithEnterName", "Enter 发送消息"))
+      .setDesc(t("settings.basic.sendWithEnterDesc", "开启后按 Enter 直接发送，Shift+Enter 换行。关闭时使用 Ctrl/Cmd+Enter 发送。"))
+      .addToggle((toggle) => {
+        toggle.setValue(Boolean(this.plugin.settings.sendWithEnter)).onChange(async (v) => {
+          this.plugin.settings.sendWithEnter = v;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
       .setName(t("settings.basic.skillInjectModeName", "技能注入方式"))
       .setDesc(t("settings.basic.skillInjectModeDesc", "当你使用 /skill 指令时，插件如何把技能内容传给模型。"))
       .addDropdown((d) => {

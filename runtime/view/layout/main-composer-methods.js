@@ -325,9 +325,26 @@ function renderMain(main) {
     if (typeof this.handleLinkedContextInputKeydown === "function" && this.handleLinkedContextInputKeydown(ev)) {
       return;
     }
-    if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
+    if (ev.key === "Escape" && !ev.isComposing && this.currentAbort) {
       ev.preventDefault();
-      this.handleSend();
+      ev.stopPropagation();
+      this.cancelSending();
+      return;
+    }
+    const isEnter = ev.key === "Enter" || ev.code === "Enter" || ev.keyCode === 13;
+    if (!isEnter) return;
+    const sendWithEnter = Boolean(this.plugin && this.plugin.settings && this.plugin.settings.sendWithEnter);
+    if (sendWithEnter) {
+      if (ev.shiftKey) return;
+      if (!ev.isComposing) {
+        ev.preventDefault();
+        this.handleSend();
+      }
+    } else {
+      if ((ev.metaKey || ev.ctrlKey) && !ev.isComposing) {
+        ev.preventDefault();
+        this.handleSend();
+      }
     }
   });
   this.elements.input.addEventListener("input", () => {
@@ -408,7 +425,10 @@ function renderMain(main) {
   this.elements.sendBtn = inputToolbarRight.createEl("button", { cls: "mod-cta oc-send-btn" });
   this.elements.sendBtn.setAttr("type", "button");
   this.elements.sendBtn.setAttr("aria-label", tr(this, "view.action.send", "Send"));
-  this.elements.sendBtn.setAttr("title", tr(this, "view.action.sendShortcut", "Send (Ctrl/Cmd + Enter)"));
+  const sendShortcutTip = Boolean(this.plugin && this.plugin.settings && this.plugin.settings.sendWithEnter)
+    ? tr(this, "view.action.sendShortcutEnter", "Send (Enter)")
+    : tr(this, "view.action.sendShortcut", "Send (Ctrl/Cmd + Enter)");
+  this.elements.sendBtn.setAttr("title", sendShortcutTip);
   try {
     setIcon(this.elements.sendBtn, "arrow-up");
   } catch {

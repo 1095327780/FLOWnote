@@ -97,8 +97,13 @@ async function main() {
 
   try {
     const releaseMain = await fs.readFile(path.join(RELEASE_DIR, "main.js"), "utf8");
+    const hasUnbundledRequire = releaseMain.split("\n").some((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return false;
+      return /require\((['"`])\.\/runtime\//.test(trimmed);
+    });
     assert(
-      !/require\((['"`])\.\/runtime\//.test(releaseMain),
+      !hasUnbundledRequire,
       "release/main.js 仍包含 ./runtime/* 依赖",
       errors,
     );

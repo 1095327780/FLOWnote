@@ -158,7 +158,12 @@ async function main() {
   await assertExists("styles.css");
 
   const bundledMain = await fs.readFile(path.join(RELEASE_DIR, "main.js"), "utf8");
-  if (/require\((['"`])\.\/runtime\//.test(bundledMain)) {
+  const hasUnbundledRequire = bundledMain.split("\n").some((line) => {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return false;
+    return /require\((['"`])\.\/runtime\//.test(trimmed);
+  });
+  if (hasUnbundledRequire) {
     throw new Error("release/main.js 仍依赖 ./runtime/*，请检查 bundling");
   }
 
