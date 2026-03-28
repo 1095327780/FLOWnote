@@ -340,6 +340,7 @@ class SessionStore {
   finalizeAssistantDraft(sessionId, draftId, text, error) {
     const list = this.state().messagesBySession[sessionId] || [];
     const t = list.find((x) => x.id === draftId);
+    if (t && !t.pending) return;
     const payload =
       text && typeof text === "object"
         ? text

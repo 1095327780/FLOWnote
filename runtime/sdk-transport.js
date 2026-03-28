@@ -836,6 +836,7 @@ class SdkTransport {
       }
 
       let finalized = streamed || directResponse;
+      let polledWithCallbacks = false;
       const waitingForQuestionBeforeFinalize = await questionTracker.isQuestionPending(options.signal);
       if (
         !finalized ||
@@ -844,15 +845,17 @@ class SdkTransport {
         (usedRealStreaming && (!hasTerminalPayload(finalized) || !Boolean(finalized && finalized.completed)))
       ) {
         const preferredMessageId = finalized && typeof finalized.messageId === "string" ? finalized.messageId : "";
+        const pollOptions = usedRealStreaming
+          ? (shouldEmitPollingUpdates ? options : null)
+          : options;
+        polledWithCallbacks = Boolean(pollOptions);
         const polled = await this.pollAssistantResult(
           client,
           options.sessionId,
           startedAt,
           options.signal,
           preferredMessageId,
-          usedRealStreaming
-            ? (shouldEmitPollingUpdates ? options : null)
-            : options,
+          pollOptions,
           (requestSignal) => questionTracker.isQuestionPending(requestSignal),
         ).catch((e) => {
           this.log(`sdk poll fallback failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -874,7 +877,7 @@ class SdkTransport {
         blocks: Array.isArray(ensuredPayload.blocks) ? ensuredPayload.blocks : [],
       };
 
-      if (!usedRealStreaming && this.settings.enableStreaming) {
+      if (!usedRealStreaming && this.settings.enableStreaming && !polledWithCallbacks) {
         if (finalized.reasoning && options.onReasoning) options.onReasoning(finalized.reasoning);
         if (options.onToken) options.onToken(finalized.text || "");
         if (Array.isArray(finalized.blocks) && finalized.blocks.length && options.onBlocks) {
