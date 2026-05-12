@@ -241,8 +241,23 @@ function windowsCandidatePriority(candidate) {
 
 class ExecutableResolver {
   buildPlatformCandidates() {
+    if (process.platform === "darwin") {
+      return [
+        expandHome("~/.opencode/bin/opencode"),
+        "/opt/homebrew/bin/opencode",
+        "/opt/homebrew/opt/opencode/bin/opencode",
+        "/usr/local/bin/opencode",
+        "/usr/local/opt/opencode/bin/opencode",
+      ];
+    }
     if (process.platform !== "win32") {
-      return [expandHome("~/.opencode/bin/opencode")];
+      return [
+        expandHome("~/.opencode/bin/opencode"),
+        expandHome("~/.local/bin/opencode"),
+        "/home/linuxbrew/.linuxbrew/bin/opencode",
+        "/usr/local/bin/opencode",
+        "/usr/bin/opencode",
+      ];
     }
 
     const home = os.homedir();
@@ -292,10 +307,13 @@ class ExecutableResolver {
         ),
       ].join(" ");
     }
+    const example = process.platform === "darwin"
+      ? "/opt/homebrew/bin/opencode"
+      : expandHome("~/.opencode/bin/opencode");
     return rt(
       "未找到可执行文件。请在设置里填写绝对路径，例如 {example}",
       "Executable not found. Set the absolute path in settings, e.g. {example}",
-      { example: expandHome("~/.opencode/bin/opencode") },
+      { example },
     );
   }
 
