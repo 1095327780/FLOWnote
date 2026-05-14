@@ -72,13 +72,13 @@ function ensureEmbeddedBundledSkillsRoot(pluginRootDir) {
     fs.mkdirSync(embeddedRoot, { recursive: true });
 
     const entries = Object.entries(EMBEDDED_BUNDLED_SKILLS_FILES);
-    for (const [rawRelativePath, rawBase64] of entries) {
+    for (const [rawRelativePath, rawText] of entries) {
       const safeRelativePath = normalizeSafeRelativePath(rawRelativePath);
       if (!safeRelativePath) continue;
 
       const targetPath = path.join(embeddedRoot, safeRelativePath);
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.writeFileSync(targetPath, Buffer.from(String(rawBase64 || ""), "base64"));
+      fs.writeFileSync(targetPath, String(rawText || ""), "utf8");
     }
 
     fs.writeFileSync(stampPath, `${version}\n`, "utf8");

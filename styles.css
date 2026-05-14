@@ -183,10 +183,10 @@ body.theme-dark .oc-surface {
   color: var(--text-normal);
 }
 
-.oc-header-btn.oc-icon-btn svg,
-.oc-header-btn.oc-icon-btn .svg-icon {
-  width: 18px !important;
-  height: 18px !important;
+.oc-header-btn.oc-icon-btn.oc-icon-btn svg,
+.oc-header-btn.oc-icon-btn.oc-icon-btn .svg-icon {
+  width: 18px;
+  height: 18px;
   stroke-width: 2.2;
 }
 
@@ -290,7 +290,13 @@ body.theme-dark .oc-surface {
 
 .oc-side-toggle,
 .oc-side-add {
-  all: unset;
+  appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    margin: 0;
+    padding: 0;
   box-sizing: border-box;
   width: 24px;
   height: 24px;
@@ -457,7 +463,13 @@ body.theme-dark .oc-surface {
 }
 
 .oc-session-item-action {
-  all: unset;
+  appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    margin: 0;
+    padding: 0;
   box-sizing: border-box;
   width: 22px;
   height: 22px;
@@ -980,7 +992,7 @@ body.theme-dark .oc-surface {
 }
 
 .oc-message-content p {
-  margin: 0 0 8px 0;
+  margin: 0 0 8px;
 }
 
 .oc-message-content p:last-child {
@@ -1025,7 +1037,13 @@ body.theme-dark .oc-surface {
 }
 
 .oc-text-copy-btn {
-  all: unset;
+  appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    margin: 0;
+    padding: 0;
   box-sizing: border-box;
   position: absolute;
   top: 4px;
@@ -1162,7 +1180,13 @@ body.theme-dark .oc-surface {
 }
 
 .oc-inline-action {
-  all: unset;
+  appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    margin: 0;
+    padding: 0;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--oc-border) 72%, transparent);
   background: color-mix(in srgb, var(--background-primary) 86%, transparent);
@@ -1289,7 +1313,7 @@ body.theme-dark .oc-surface {
 }
 
 .oc-thinking-content p {
-  margin: 0 0 8px 0;
+  margin: 0 0 8px;
 }
 
 .oc-thinking-content p:last-child {
@@ -1853,10 +1877,7 @@ body.theme-dark .oc-surface {
   z-index: 2;
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-}
-
-.oc-code-copy-btn {
-  padding: 3px 7px;
+padding: 3px 7px;
   opacity: 0;
   display: inline-flex;
   align-items: center;
@@ -1883,8 +1904,8 @@ body.theme-dark .oc-surface {
   font-family: var(--font-monospace);
 }
 
-.oc-code-wrapper .copy-code-button {
-  display: none !important;
+.oc-code-wrapper.oc-code-wrapper .copy-code-button {
+  display: none;
 }
 
 /* Navigation / Footer -------------------------------------------------- */
@@ -1912,7 +1933,13 @@ body.theme-dark .oc-surface {
 }
 
 .oc-nav-btn {
-  all: unset;
+  appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    margin: 0;
+    padding: 0;
   box-sizing: border-box;
   width: 30px;
   height: 30px;
@@ -2136,26 +2163,26 @@ body.theme-dark .oc-surface {
   flex-shrink: 0;
 }
 
-.oc-input {
+.oc-input.oc-input {
   width: 100%;
   flex: 1 1 0;
   min-height: 94px;
   resize: none;
-  border: none !important;
-  box-shadow: none !important;
+  border: none;
+  box-shadow: none;
   padding: 10px 6px 8px;
-  background: transparent !important;
+  background: transparent;
   line-height: 1.4;
   font-size: 16px;
   overflow-y: auto;
   unicode-bidi: plaintext;
 }
 
-.oc-input:hover,
-.oc-input:focus {
-  outline: none !important;
-  border: none !important;
-  box-shadow: none !important;
+.oc-input.oc-input:hover,
+.oc-input.oc-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
 }
 
 .oc-input::placeholder {
@@ -2187,12 +2214,12 @@ body.theme-dark .oc-surface {
   margin-inline-start: auto;
 }
 
-.oc-context-link-btn {
+.oc-context-link-btn.oc-context-link-btn {
   width: 34px;
   height: 34px;
   min-width: 34px;
   border-radius: 999px;
-  padding: 0 !important;
+  padding: 0;
   border: 1px solid var(--oc-border);
   background: color-mix(in srgb, var(--background-primary) 88%, black 12%);
   color: var(--text-muted);
@@ -2203,10 +2230,10 @@ body.theme-dark .oc-surface {
   box-sizing: border-box;
 }
 
-.oc-context-link-btn svg,
-.oc-context-link-btn .svg-icon {
-  width: 18px !important;
-  height: 18px !important;
+.oc-context-link-btn.oc-context-link-btn svg,
+.oc-context-link-btn.oc-context-link-btn .svg-icon {
+  width: 18px;
+  height: 18px;
   display: block;
 }
 
@@ -2248,15 +2275,15 @@ body.theme-dark .oc-surface {
   flex: 0 0 auto;
 }
 
-.oc-model-select-inline {
+.oc-model-select-inline.oc-model-select-inline {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   opacity: 0;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -2264,11 +2291,11 @@ body.theme-dark .oc-surface {
   z-index: 2;
 }
 
-.oc-model-select-inline:hover,
-.oc-model-select-inline:focus {
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
+.oc-model-select-inline.oc-model-select-inline:hover,
+.oc-model-select-inline.oc-model-select-inline:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 
 .oc-send-btn {
@@ -2970,12 +2997,12 @@ body.theme-dark .oc-surface {
 
 /* Override Obsidian modal container for capture modal */
 /* ── Capture modal — desktop (centered dialog) ── */
-.modal:has(.oc-capture-modal) {
+.modal.oc-modal-capture {
   max-width: 520px;
   width: 92vw;
 }
 
-.modal:has(.oc-capture-modal) .modal-close-button {
+.modal.oc-modal-capture .modal-close-button {
   display: none;
 }
 
@@ -3133,17 +3160,17 @@ body.theme-dark .oc-surface {
 }
 
 /* ── Capture modal — mobile (bottom sheet) ── */
-.is-mobile .modal:has(.oc-capture-modal) {
-  max-width: 100vw !important;
-  width: 100vw !important;
+.is-mobile .modal.oc-modal-capture.oc-modal-capture {
+  max-width: 100vw;
+  width: 100vw;
   max-height: 100vh;
-  height: auto !important;
+  height: auto;
   border-radius: 0;
-  margin: 0 !important;
-  position: fixed !important;
-  bottom: 0 !important;
-  top: auto !important;
-  left: 0 !important;
+  margin: 0;
+  position: fixed;
+  bottom: 0;
+  top: auto;
+  left: 0;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
   border: 1px solid var(--background-modifier-border);
@@ -3222,12 +3249,12 @@ body.theme-dark .oc-surface {
 }
 
 /* iOS fallback: force top-anchored compact sheet when keyboard metrics are unreliable */
-.is-mobile .modal.oc-capture-top-mode {
-  top: max(8px, env(safe-area-inset-top, 0px)) !important;
-  bottom: auto !important;
-  max-height: min(62vh, 460px) !important;
-  height: auto !important;
-  border-radius: 16px !important;
+.is-mobile .modal.oc-capture-top-mode.oc-capture-top-mode {
+  top: max(8px, env(safe-area-inset-top, 0px));
+  bottom: auto;
+  max-height: min(62vh, 460px);
+  height: auto;
+  border-radius: 16px;
 }
 
 .is-mobile .modal.oc-capture-top-mode .oc-capture-modal {

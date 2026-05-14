@@ -21,6 +21,7 @@ class CaptureModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass("oc-capture-modal");
+    this.modalEl?.addClass?.("oc-modal-capture");
     const locale = typeof this.plugin.getEffectiveLocale === "function"
       ? this.plugin.getEffectiveLocale()
       : resolveEffectiveLocaleFromSettings(this.plugin.settings);
@@ -247,6 +248,7 @@ class CaptureModal extends Modal {
       this._vpCleanup();
       this._vpCleanup = null;
     }
+    this.modalEl?.removeClass?.("oc-modal-capture");
     this.contentEl.empty();
   }
 }

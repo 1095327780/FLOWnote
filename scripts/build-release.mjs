@@ -96,7 +96,7 @@ async function buildEmbeddedBundledSkillsModule() {
   for (const relativePath of relativeFiles) {
     const absPath = path.join(BUNDLED_SKILLS_DIR, relativePath.split("/").join(path.sep));
     const content = await fs.readFile(absPath);
-    fileMap[relativePath] = content.toString("base64");
+    fileMap[relativePath] = content.toString("utf8");
     totalBytes += content.byteLength;
     hash.update(`${relativePath}\n`);
     hash.update(content);

@@ -134,6 +134,25 @@ Even when mainly using mobile capture, FLOWnote still requires OpenCode installe
 - Plugin state is stored in plugin `data.json` (Obsidian standard behavior).
 - Capture output is written to user notes (for example, daily notes).
 
+### Vault and clipboard access
+
+FLOWnote requires the following Obsidian APIs to deliver its skill-driven workflows. Each call site can be reviewed in the source code under `runtime/`:
+
+- **Vault enumeration** (`vault.getFiles`, `vault.getMarkdownFiles`) — to populate the file-mention picker and let skills locate notes by name.
+- **Vault read** (`vault.read`, `vault.cachedRead`) — to feed selected notes into chat context and skill prompts.
+- **Vault write** (`vault.create`, `vault.modify`) — to append captured ideas, save chat outputs, and persist skill results into your notes.
+- **Clipboard access** — used by message/code copy buttons inside the chat view. FLOWnote never reads the clipboard on its own; copy operations are user-initiated.
+
+### Local system access
+
+FLOWnote runs as a desktop-aware plugin and needs to locate the OpenCode CLI on disk. It reads the following standard environment values **solely for path resolution**, not for telemetry or fingerprinting:
+
+- `os.homedir()` and `process.env.USERPROFILE` — locate the user home directory to resolve `~`-relative paths.
+- `process.env.APPDATA`, `process.env.LOCALAPPDATA` — Windows-only, used to look up the conventional install location of OpenCode and Node.
+- `process.env.PATH`, `process.env.PATHEXT` — used to search for the `opencode` executable.
+
+FLOWnote does not call `os.hostname`, `os.userInfo`, or `os.networkInterfaces`, and does not transmit any of the values above off your device.
+
 ### Telemetry
 
 - No standalone telemetry/analytics pipeline is implemented by FLOWnote.
@@ -142,17 +161,18 @@ Even when mainly using mobile capture, FLOWnote still requires OpenCode installe
 ### External network destinations (when features are enabled by user)
 
 - AI endpoints (examples):
-  - `api.deepseek.com`
-  - `dashscope.aliyuncs.com`
-  - `api.moonshot.cn`
+  - `api.deepseek.com`, `platform.deepseek.com`
+  - `dashscope.aliyuncs.com`, `dashscope.console.aliyun.com`
+  - `api.moonshot.cn`, `platform.moonshot.cn`
   - `open.bigmodel.cn`
-  - `api.siliconflow.cn`
+  - `api.siliconflow.cn`, `cloud.siliconflow.cn`
   - user-defined custom endpoint
 - URL resolver endpoints:
-  - `apis.tianapi.com`
-  - `route.showapi.com`
-  - `api.gugudata.com`
-- Local runtime communication to OpenCode service on local machine
+  - `apis.tianapi.com`, `www.tianapi.com`
+  - `route.showapi.com`, `www.showapi.com`
+  - `api.gugudata.com`, `www.gugudata.com`
+- Local runtime communication to OpenCode service on local machine via `127.0.0.1` / `localhost`
+- OpenCode documentation/install links resolve under `opencode.ai`
 
 ### Paid services
 

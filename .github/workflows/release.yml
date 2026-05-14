@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify tag matches manifest.json version
+        run: |
+          tag_version="${GITHUB_REF_NAME}"
+          manifest_version=$(node -e "console.log(require('./manifest.json').version)")
+          if [ "$tag_version" != "$manifest_version" ]; then
+            echo "::error::tag ($tag_version) does not match manifest.json version ($manifest_version)"
+            exit 1
+          fi
+
+      - name: Install dependencies (locked)
+        run: npm ci --no-fund --no-audit
+
+      - name: Run release checks (build + lint + tests)
+        run: npm run release:check
+
+      - name: Stage release assets
+        run: |
+          mkdir -p artifacts
+          cp release/main.js release/manifest.json release/styles.css artifacts/
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/main.js
+            artifacts/styles.css
+            artifacts/manifest.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/main.js
+            artifacts/manifest.json
+            artifacts/styles.css
