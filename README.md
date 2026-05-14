@@ -2,27 +2,42 @@
 
 Language: **English** | [简体中文](README.zh-CN.md)
 
-FLOWnote is an OpenCode-powered plugin for AI-assisted note management.
+**FLOWnote is an Obsidian plugin that makes your notes flow — from raw capture to finished work — powered by an OpenCode-backed AI workspace and a skill pack purpose-built for knowledge management.**
 
-**OpenCode is required**: install OpenCode on your desktop before using FLOWnote chat, sessions, and skill workflows.
+> **OpenCode is required.** Install OpenCode on your desktop before using FLOWnote's chat, sessions, and skill workflows.
 
-It is designed as an end-to-end workflow for:
+## Why FLOWnote
 
-- Capture -> Cultivate -> Connect -> Create
-- Daily execution + weekly/monthly review
-- Skill-driven structured writing, not generic chat only
+Most note-taking systems collapse for the same reason: ideas pile up faster than you can process them, and after a few weeks 70% of your notes never get opened again. FLOWnote is built around a simple bet — if the friction of moving an idea forward is low enough, you'll actually do it, day after day. That bet has a name: **the FLOW method.**
 
-## What Makes FLOWnote Different
+```
+Feed → Lift → Organize → Work
+ ↓      ↓        ↓         ↓
+daily  perm    domain    project
+notes  notes    pages     output
+```
 
-FLOWnote is inspired by [Claudian](https://github.com/YishenTu/claudian) and built around the OpenCode runtime + SDK.
+- **F · Feed** — single-tap capture into today's daily note. No folder picking, no tag debate.
+- **L · Lift** — turn captured ideas into permanent notes with assertive titles, atomic claims, and recommended links.
+- **O · Organize** — domain pages act as your "workbench," surfacing the notes you actually need for the project in front of you.
+- **W · Work** — projects scaffold themselves with their supporting notes, and review skills (`week`, `month`, `year`) keep the loop honest.
 
-FLOWnote takes a different path:
+The skills in `bundled-skills/` automate the boring parts (numbering, folder layout, link maintenance, index refresh) so you can stay focused on what to write, think about, and do next.
 
-- Integrates **OpenCode** runtime and **OpenCode SDK** into Obsidian
-- Ships a **domain-specific skill pack** for knowledge workflows
-- Focuses on **note management loops**, not just agent access
+## Video walkthrough (Chinese, on Bilibili)
 
-In short: this is not only "OpenCode inside Obsidian", but "OpenCode + a complete note-management skill system".
+The author publishes a six-episode tutorial series on **FLOW 笔记法** at:
+
+📺 **[Bilibili — FLOW 笔记法系列](https://space.bilibili.com/24543451/lists/7386412?type=season)**
+
+| # | Topic |
+|---|---|
+| 01 | Intro — system overview and the daily 15-minute loop |
+| 02 | Reading — turning highlights into literature notes |
+| 03 | Permanent notes — atomic claims, assertive titles, AI-assisted crafting |
+| 04 | Knowledge connection — topic pages vs. domain pages |
+| 05 | Projects & review — weekly / monthly / yearly cadence |
+| 06 | AI overview — full setup walkthrough (in production) |
 
 ## Requirements
 
@@ -35,69 +50,64 @@ In short: this is not only "OpenCode inside Obsidian", but "OpenCode + a complet
 ### Desktop AI workspace
 
 - Session sidebar with persistent history
-- Streaming chat responses and retry/cancel flows
-- Model/provider switching and provider auth handling
-- Powered by OpenCode SDK for session and tool orchestration
+- Streaming chat responses with retry / cancel
+- Model and provider switching, with provider-side auth handling
+- Driven by the OpenCode SDK for session and tool orchestration
 - Connection diagnostics for executable path, runtime mode, and startup failures
 
 ### Built-in skills (bundled and auto-synced)
 
-- Built-in skills are packaged in `bundled-skills/`
+- Skills are packaged in `bundled-skills/`
 - On startup, FLOWnote syncs bundled skills into your vault skills directory (default: `.opencode/skills`)
 - Only bundled skill IDs are enabled for execution in FLOWnote's skill menu
 - Skill injection modes: `summary` (recommended), `full`, `off`
 
 ### Mobile quick capture
 
-- One-tap capture modal to write into daily note
-- Optional AI cleanup for spoken/raw text
-- URL enrichment pipeline with fallback:
-  - Resolver provider (choose one): `TianAPI` / `ShowAPI` / `Gugudata`
-  - If resolver unavailable and AI configured: AI fallback
-  - If no resolver and no AI key: keep plain text
-- Original URL is preserved in output
-- iOS keyboard avoidance fallback is included for focus visibility
+- One-tap capture modal that writes into today's daily note
+- Optional AI cleanup for spoken / raw text
+- URL enrichment with graceful fallback:
+  - Pick one resolver: `TianAPI` / `ShowAPI` / `Gugudata`
+  - If the resolver is unavailable and an AI provider is configured: AI fallback
+  - If neither is configured: keep plain text
+- The original URL is preserved in the output
+- iOS keyboard avoidance fallback for focus visibility
 
 ## Built-in Skill Pack
-
-FLOWnote currently bundles these skills:
 
 | Skill | Purpose |
 |---|---|
 | `ah` | Router/entrypoint: menu + intent-based dispatch |
 | `ah-note` | Create today's daily note with planning context |
-| `ah-capture` | Low-friction idea capture into daily note |
-| `ah-inbox` | Batch process captured ideas into actions/cards |
+| `ah-capture` | Low-friction idea capture into the daily note |
+| `ah-inbox` | Batch-process captured ideas into actions/cards |
 | `ah-read` | Reading-note processing and highlight consolidation |
 | `ah-card` | Turn insights into permanent notes with link recommendations |
-| `ah-think` | Thinking models toolkit (Feynman, first principles, inversion, etc.) |
+| `ah-think` | Thinking-models toolkit (Feynman, first principles, inversion, …) |
 | `ah-review` | Daily review and reflection flow |
 | `ah-week` | Weekly review with metrics + residual idea handling |
 | `ah-month` | Monthly review and strategy-level reflection |
-| `ah-project` | Create structured project scaffold and templates |
+| `ah-project` | Create a structured project scaffold and templates |
 | `ah-archive` | Archive completed projects with lessons extracted |
-| `ah-index` | Build/update AI-readable vault index |
-| `ah-memory` | Cross-skill memory/progress state conventions |
+| `ah-index` | Build / update AI-readable vault index |
+| `ah-memory` | Cross-skill memory / progress state conventions |
 
 ## Commands
 
-- `打开`
-- `发送选中文本`
-- `新建会话`
-- `快速捕获想法` (mobile)
+- `打开` — Open the FLOWnote chat view
+- `发送选中文本` — Send the current selection
+- `新建会话` — Start a new session
+- `快速捕获想法` — Quick-capture (mobile)
 
 ## Installation
 
 ### Community plugin directory
 
-After approval, install from Community Plugins by searching `FLOWnote`.
-Before enabling FLOWnote, make sure OpenCode is installed and available on your desktop.
+After approval, install from Community Plugins by searching `FLOWnote`. Before enabling FLOWnote, make sure OpenCode is installed and available on your desktop.
 
 ### Manual installation
 
-Put these files into:
-
-`<Vault>/.obsidian/plugins/flownote/`
+Drop these files into `<Vault>/.obsidian/plugins/flownote/`:
 
 - `main.js`
 - `manifest.json`
@@ -107,20 +117,20 @@ Then reload plugins in Obsidian.
 
 ## Setup
 
-### Desktop setup
+### Desktop
 
-1. Install Node.js on your desktop first, then run `npm install -g opencode-ai` to install OpenCode and verify `opencode` is available.
+1. Install Node.js first, then run `npm install -g opencode-ai` to install OpenCode and verify the `opencode` command is available.
 2. Open FLOWnote settings.
-3. Keep CLI path empty first (auto-detect), or set explicit path if needed.
-4. Choose launch strategy (`auto` / native install). WSL is no longer supported on Windows.
+3. Keep CLI path empty for auto-detection, or set an explicit path if needed.
+4. Choose a launch strategy (`auto` / native install). WSL on Windows is no longer supported.
 
-### Mobile setup
+### Mobile
 
-Even when mainly using mobile capture, FLOWnote still requires OpenCode installed on desktop.
+Even when you're primarily on mobile, FLOWnote still needs OpenCode installed on your desktop.
 
-1. Configure AI provider (or custom OpenAI-compatible endpoint).
-2. Configure URL resolver provider and key if link parsing is needed.
-3. Set daily note path and idea section header.
+1. Configure an AI provider (or a custom OpenAI-compatible endpoint).
+2. Configure a URL resolver provider and key if you want link parsing.
+3. Set your daily note path and idea section header.
 
 ## Privacy, Data, and Network Disclosure
 
@@ -196,6 +206,7 @@ Release assets are generated in `release/`:
 ## Acknowledgments
 
 - Thanks [OpenCode](https://github.com/anomalyco/opencode) for the runtime and SDK foundation.
+- Thanks [Claudian](https://github.com/YishenTu/claudian) for the original inspiration.
 - Thanks [Obsidian](https://obsidian.md) for the plugin API.
 
 ## License
