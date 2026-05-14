@@ -7,3 +7,9 @@ build/
 .cache/
 release/
 *.log
+.claude/
+.cursor/
+.idea/
+.vscode/
+*.bak
+*.tmp
