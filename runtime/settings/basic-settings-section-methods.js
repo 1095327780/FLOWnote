@@ -142,6 +142,14 @@ class BasicSettingsSectionMethods {
           });
       });
 
+    // New agent provider section (Direct mode + OpenCode-legacy toggle).
+    // Sits between language and the OpenCode-specific settings so users
+    // see the direct-API path first; OpenCode CLI / Provider auth fall
+    // below it for users who pick the legacy mode.
+    if (typeof this.renderAgentProviderSection === "function") {
+      this.renderAgentProviderSection(containerEl);
+    }
+
     const isWindows = isWindowsUiPlatform();
     const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
     const launchStrategyForUi = launchStrategyValue === "native" ? "native" : "auto";

@@ -148,6 +148,16 @@ function normalizeSettings(raw) {
   mc.enableUrlSummary = typeof mc.enableUrlSummary === "boolean" ? mc.enableUrlSummary : mcDefaults.enableUrlSummary;
   mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
 
+  // --- agentProvider normalization + migration ---
+  // Wraps migrateAgentSettings; idempotent and safe to call on every load.
+  try {
+    // eslint-disable-next-line global-require
+    const { migrateAgentSettings } = require("./agent/agent-settings");
+    migrateAgentSettings(merged);
+  } catch (_e) {
+    // module missing in unusual contexts (tests of unrelated code); fall through.
+  }
+
   return merged;
 }
 
