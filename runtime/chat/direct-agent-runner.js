@@ -17,6 +17,29 @@ const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
 
+const DEFAULT_SYSTEM_PROMPT = [
+  "You are FLOWnote, an AI assistant running inside Obsidian. The user's notes live in an Obsidian vault.",
+  "",
+  "You have these tools available:",
+  "  • vault_read  — read a markdown note. Pass the vault-relative path (e.g. \"daily/2026-05-15.md\").",
+  "                  Supports optional offset/limit to slice long files.",
+  "  • vault_write — create / overwrite / append text in the vault. Pass `path`, `content`, and `mode`:",
+  "                    mode=\"create\"    → fails if the file already exists",
+  "                    mode=\"overwrite\" → replace existing content (use this to edit a file)",
+  "                    mode=\"append\"   → add to the end",
+  "",
+  "Core rules:",
+  "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call vault_write.",
+  "  2. When the user attaches files, they appear in the conversation wrapped like this:",
+  "       <<<FLOWNOTE_FILE path=\"some/path.md\">>>",
+  "       ...file contents...",
+  "       <<<END_FLOWNOTE_FILE>>>",
+  "     The `path` attribute is the REAL vault path. Use it directly when calling vault_read or vault_write.",
+  "  3. To edit a file: call vault_read first if you don't already have the latest content; then call vault_write with mode=\"overwrite\" passing the FULL new content (no partial edits in this version).",
+  "  4. Reply in the same language the user used. Be concise.",
+  "  5. If you finish without needing tools, respond naturally with text only.",
+].join("\n");
+
 /**
  * Convert the session store's plain {role,text} messages into the
  * Anthropic-shape conversation the agent loop expects.
@@ -71,19 +94,51 @@ function buildDefaultToolRegistry(app, normalizePath) {
  *   { type: 'tool', tool: <name>, status: 'running'|'done'|'error',
  *     input, output, durationMs }
  */
+// Map our internal tool-use status to the chat view's renderer status.
+// Renderer expects one of: 'pending' | 'running' | 'completed' | 'error'.
+function toRendererStatus(status, isError) {
+  if (isError) return "error";
+  if (status === "running") return "running";
+  if (status === "done") return "completed";
+  if (status === "pending") return "pending";
+  return "pending";
+}
+
+function summarizeToolInput(toolName, input) {
+  if (!input || typeof input !== "object") return "";
+  if (toolName === "vault_read" || toolName === "vault_write") {
+    const path = typeof input.path === "string" ? input.path : "";
+    if (!path) return "";
+    if (toolName === "vault_write") {
+      const mode = typeof input.mode === "string" ? input.mode : "create";
+      return `${mode} → ${path}`;
+    }
+    if (typeof input.offset === "number" || typeof input.limit === "number") {
+      return `${path} (lines ${input.offset || 1}-${input.limit ? (input.offset || 1) + input.limit - 1 : "end"})`;
+    }
+    return path;
+  }
+  try { return JSON.stringify(input).slice(0, 120); } catch { return ""; }
+}
+
 function renderBlocks(state) {
   const blocks = [];
   if (state.text && state.text.length > 0) {
     blocks.push({ type: "stream-text", text: state.text });
   }
   for (const tu of state.toolUses) {
+    const status = toRendererStatus(tu.status, tu.isError);
+    const summary = summarizeToolInput(tu.name, tu.input);
+    const outputText = typeof tu.output === "string" ? tu.output : "";
     blocks.push({
       type: "tool",
       tool: tu.name,
-      status: tu.status,
+      status,
+      summary,
+      detail: outputText,
       input: tu.input,
-      output: tu.output,
-      isError: tu.isError,
+      output: outputText,
+      isError: !!tu.isError,
       durationMs: tu.durationMs,
     });
   }
@@ -170,21 +225,35 @@ async function runDirectAgentTurn({
     if (!handlers || typeof handlers.onPermissionRequest !== "function") {
       return { behavior: "deny" };
     }
-    const decision = await handlers.onPermissionRequest({
-      tool: req.tool,
-      input: req.input,
-      summary: req.summary,
-    });
-    if (decision === "always") return { behavior: "allow", persist: "session" };
-    if (decision === "once")   return { behavior: "allow" };
-    return { behavior: "deny" };
+    // Map our internal "ask" request to the OpenCode-style permission
+    // object the existing PermissionRequestModal renders.
+    const permObj = {
+      type: req.tool || "tool",
+      title: `${req.tool || "tool"}: ${req.summary || ""}`.trim(),
+      pattern: req.summary || "",
+      metadata: req.input || {},
+    };
+    try {
+      const decision = await handlers.onPermissionRequest(permObj);
+      if (decision === "always") return { behavior: "allow", persist: "session" };
+      if (decision === "once")   return { behavior: "allow" };
+      return { behavior: "deny" };
+    } catch (e) {
+      log(`permission ask failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { behavior: "deny" };
+    }
   }
 
   const loopImpl = runAgentLoopImpl || runAgentLoop;
+  const log = (msg) => {
+    if (plugin && typeof plugin.log === "function") plugin.log(`[direct-agent] ${msg}`);
+  };
+  log(`turn start provider=${provider.id} model=${provider.userConfig.model} historyLen=${history.length}`);
 
   for await (const ev of loopImpl({
     provider,
     registry,
+    system: DEFAULT_SYSTEM_PROMPT,
     messages: history,
     signal,
     ctx: { app: view.app, grants: {} },
@@ -207,6 +276,7 @@ async function runDirectAgentTurn({
         break;
       }
       case "tool_start": {
+        log(`tool_start ${ev.tool} input=${summarizeToolInput(ev.tool, ev.input)}`);
         state.toolUses.push({
           id: ev.toolUseId,
           name: ev.tool,
@@ -223,8 +293,6 @@ async function runDirectAgentTurn({
       case "tool_progress": {
         const t = findToolUse(ev.toolUseId);
         if (t) {
-          // Progress message currently displayed as part of output —
-          // the chat view's tool card will render this as a status note.
           if (ev.message) t.output = ev.message;
           pushBlocksUpdate();
         }
@@ -237,6 +305,7 @@ async function runDirectAgentTurn({
           t.output = ev.content;
           t.isError = !!ev.isError;
           t.durationMs = Date.now() - t.startedAt;
+          log(`tool_finish ${ev.tool} status=${t.status} ms=${t.durationMs}`);
         }
         pushBlocksUpdate();
         break;
@@ -250,6 +319,7 @@ async function runDirectAgentTurn({
       case "error": {
         const err = ev.error || {};
         const message = err.message || err.type || "Agent runtime error.";
+        log(`error ${err.type || ""} ${message}`);
         const wrapped = new Error(message);
         if (err.type) wrapped.code = err.type;
         throw wrapped;
@@ -262,6 +332,7 @@ async function runDirectAgentTurn({
   // ---------------------------------------------------------------------
   // 5. Compose final response in the shape sendMessage returns
   // ---------------------------------------------------------------------
+  log(`turn end stop=${stopReason || "?"} textLen=${state.text.length} tools=${state.toolUses.length}`);
   const finalBlocks = renderBlocks(state);
   const meta = composeMetaLine(provider, stopReason, state);
   return {
