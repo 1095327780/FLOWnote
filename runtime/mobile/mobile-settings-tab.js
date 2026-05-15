@@ -18,6 +18,9 @@ const {
   getAiProviderDisplayName,
   testConnection,
 } = require("./mobile-ai-service");
+const {
+  renderAgentProviderSection,
+} = require("../settings/agent-provider-section-methods");
 
 class MobileSettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
@@ -51,6 +54,14 @@ class MobileSettingsTab extends PluginSettingTab {
             new Notice(t("notices.languageAppliedReloadTip", "Language updated. Command names and ribbon tooltip update after reload."));
           });
       });
+
+    // Agent provider section — same UI on desktop and mobile.
+    renderAgentProviderSection({
+      containerEl,
+      plugin: this.plugin,
+      tab: this,
+      refresh: () => this.display(),
+    });
 
     const mc = this.plugin.settings.mobileCapture;
     mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
