@@ -337,9 +337,10 @@ async function runDirectAgentTurn({
         pushBlocksUpdate();
         break;
       }
-      case "turn_complete":
-        // intentional no-op — we only finalize at 'done'
+      case "turn_complete": {
+        log(`turn ${ev.turnIndex} complete stop=${ev.stopReason || "?"} textLen=${state.text.length} toolsSoFar=${state.toolUses.length}`);
         break;
+      }
       case "done":
         // loop signaled completion; exit the for-await
         break;
@@ -360,11 +361,31 @@ async function runDirectAgentTurn({
   // 5. Compose final response in the shape sendMessage returns
   // ---------------------------------------------------------------------
   log(`turn end stop=${stopReason || "?"} textLen=${state.text.length} tools=${state.toolUses.length}`);
+
+  // If the model ran out of output budget before producing anything
+  // useful, surface a clear message instead of a silent empty bubble.
+  let finalText = state.text;
+  if (!finalText && stopReason === "max_tokens") {
+    finalText = (
+      "⚠️ 模型在还没产生输出之前就用尽了本轮的 token 预算。\n\n" +
+      "可能原因：上下文太长 + 输出预算太紧。请尝试：\n" +
+      "• 减少附加文件或拆分多次问\n" +
+      "• 或在设置里给 maxTokensPerTurn 调大值（默认 16384）"
+    );
+  }
+
   const finalBlocks = renderBlocks(state);
+  // Replace the streaming text block (if any) with the final text so the
+  // UI shows the friendly max_tokens warning when appropriate.
+  if (finalText !== state.text) {
+    const idx = finalBlocks.findIndex((b) => b.type === "stream-text");
+    if (idx >= 0) finalBlocks[idx] = { type: "stream-text", text: finalText };
+    else finalBlocks.unshift({ type: "stream-text", text: finalText });
+  }
   const meta = composeMetaLine(provider, stopReason, state);
   return {
     messageId: `direct-${Date.now()}`,
-    text: state.text,
+    text: finalText,
     reasoning: "",
     meta,
     blocks: finalBlocks,
