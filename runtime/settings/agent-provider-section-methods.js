@@ -418,27 +418,6 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
         });
     });
 
-  // Skill folder — where the model looks for SKILL.md files. Default
-  // `.opencode/skills` matches the user's existing OpenCode-era setup;
-  // they can repoint this to anywhere in the vault.
-  new Setting(containerEl)
-    .setName(t("settings.agent.skillRootName", "技能目录（高级）"))
-    .setDesc(t(
-      "settings.agent.skillRootDesc",
-      "存放 SKILL.md 的金库相对路径。每个子目录是一个技能（含一个 SKILL.md）。" +
-      "留空 = 使用默认 .opencode/skills（兼容旧版 OpenCode 安装）。改完需要重新打开会话生效。",
-    ))
-    .addText((tx) => {
-      tx
-        .setPlaceholder(".opencode/skills")
-        .setValue(agent.direct.skillRoot || "")
-        .onChange(async (v) => {
-          agent.direct.skillRoot = String(v || "").trim();
-          await plugin.saveSettings();
-          // Clear cached skill registry so the next turn re-scans.
-          if (plugin) plugin.__flownoteSkillCache = null;
-        });
-    });
 }
 
 /**

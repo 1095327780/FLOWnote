@@ -237,6 +237,9 @@ class BasicSettingsSectionMethods {
           this.plugin.settings.skillsDir = v.trim() || ".opencode/skills";
           await this.plugin.saveSettings();
           await this.plugin.reloadSkills();
+          // Also drop the direct-agent skill cache so the next turn
+          // picks up the new directory.
+          this.plugin.__flownoteSkillCache = null;
         });
       });
 
