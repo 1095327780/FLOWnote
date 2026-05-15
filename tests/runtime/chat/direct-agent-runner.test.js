@@ -196,7 +196,7 @@ test("runDirectAgentTurn surfaces tool_start / tool_finish through onBlocks", as
   const toolBlock = finalBlocks.find((b) => b.type === "tool");
   assert.ok(toolBlock, "expected a tool block in onBlocks");
   assert.equal(toolBlock.tool, "vault_read");
-  assert.equal(toolBlock.status, "done");
+  assert.equal(toolBlock.status, "completed");
   assert.equal(toolBlock.output, "file x.md");
 });
 
@@ -251,11 +251,15 @@ test("runDirectAgentTurn routes permission 'ask' to view handlers", async () => 
   });
 
   assert.equal(out.permissionRequests.length, 1);
-  assert.equal(out.permissionRequests[0].tool, "vault_write");
+  // Permission objects are massaged into the OpenCode-style modal shape
+  // (type/title/pattern/metadata) so the existing PermissionRequestModal
+  // can render them.
+  assert.equal(out.permissionRequests[0].type, "vault_write");
+  assert.match(String(out.permissionRequests[0].title || ""), /vault_write/);
   assert.equal(response.text, "done");
   const finalBlocks = out.blocks[out.blocks.length - 1] || [];
   const t = finalBlocks.find((b) => b.type === "tool");
-  assert.equal(t.status, "done");
+  assert.equal(t.status, "completed");
 });
 
 // ---------------------------------------------------------------------------
