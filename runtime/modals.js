@@ -1,5 +1,6 @@
 const { Modal } = require("obsidian");
 const { interpolateTemplate } = require("./i18n-runtime");
+const { describePermissionAction } = require("./permission-action-description");
 
 function tr(tFn, key, fallback, params = {}) {
   if (typeof tFn === "function") return tFn(key, params, { defaultValue: fallback });
@@ -92,36 +93,55 @@ class PermissionRequestModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("oc-perm-modal");
-    contentEl.createEl("h2", { text: tr(this.t, "modals.permission.title", "FLOWnote Permission Request") });
 
-    const title =
-      (typeof this.permission.title === "string" && this.permission.title.trim()) ||
-      tr(this.t, "modals.permission.defaultTitle", "Model requested a restricted operation");
-    contentEl.createDiv({ cls: "oc-perm-title", text: title });
-
-    const meta = [];
-    if (typeof this.permission.type === "string" && this.permission.type) {
-      meta.push(tr(this.t, "modals.permission.type", "Type: {value}", { value: this.permission.type }));
-    }
-    if (this.permission.pattern) {
-      meta.push(tr(this.t, "modals.permission.pattern", "Pattern: {value}", {
-        value: this.formatForDisplay(this.permission.pattern, 400),
-      }));
-    }
-    if (meta.length) {
-      contentEl.createEl("pre", { cls: "oc-perm-meta", text: meta.join("\n") });
-    }
-
-    const details = contentEl.createEl("details", { cls: "oc-perm-details" });
-    details.createEl("summary", { text: tr(this.t, "modals.permission.metadata", "View full metadata") });
-    details.createEl("pre", {
-      text: this.formatForDisplay(this.permission.metadata || {}, 2400) || tr(this.t, "modals.empty", "(empty)"),
+    // Header — short, plain-language framing. NO "FLOWnote Permission Request"
+    // jargon. The user is being asked one question: do you want to allow this?
+    contentEl.createEl("h2", {
+      text: tr(this.t, "modals.permission.title", "AI 想做一个改动"),
+    });
+    contentEl.createDiv({
+      cls: "oc-perm-subtitle",
+      text: tr(
+        this.t,
+        "modals.permission.subtitle",
+        "AI 助手即将改动你的笔记。确认一下你是否同意：",
+      ),
     });
 
+    // Main action sentence — built per-tool, in user language.
+    const action = describePermissionAction(this.permission, this.t);
+    contentEl.createDiv({ cls: "oc-perm-action", text: action });
+
+    // Technical details collapsed by default — for power users / debugging.
+    const details = contentEl.createEl("details", { cls: "oc-perm-details" });
+    details.createEl("summary", {
+      text: tr(this.t, "modals.permission.detailsToggle", "技术细节（一般不用看）"),
+    });
+    const toolLabel = String(this.permission.type || "");
+    if (toolLabel) {
+      details.createDiv({
+        cls: "oc-perm-detail-row",
+        text: tr(this.t, "modals.permission.tool", "工具：{value}", { value: toolLabel }),
+      });
+    }
+    details.createEl("pre", {
+      text: this.formatForDisplay(this.permission.metadata || {}, 2400) ||
+        tr(this.t, "modals.empty", "(空)"),
+    });
+
+    // Buttons — plain language, no "(Session)" jargon.
     const actions = contentEl.createDiv({ cls: "oc-perm-actions" });
-    const rejectBtn = actions.createEl("button", { cls: "mod-muted", text: tr(this.t, "modals.permission.reject", "Reject") });
-    const onceBtn = actions.createEl("button", { cls: "mod-cta", text: tr(this.t, "modals.permission.once", "Allow Once") });
-    const alwaysBtn = actions.createEl("button", { text: tr(this.t, "modals.permission.always", "Always Allow (Session)") });
+    const rejectBtn = actions.createEl("button", {
+      cls: "mod-muted",
+      text: tr(this.t, "modals.permission.reject", "拒绝"),
+    });
+    const onceBtn = actions.createEl("button", {
+      cls: "mod-cta",
+      text: tr(this.t, "modals.permission.once", "本次允许"),
+    });
+    const alwaysBtn = actions.createEl("button", {
+      text: tr(this.t, "modals.permission.always", "本次会话内一直允许"),
+    });
 
     rejectBtn.addEventListener("click", () => this.resolveAndClose("reject"));
     onceBtn.addEventListener("click", () => this.resolveAndClose("once"));
@@ -397,6 +417,10 @@ class ModelSelectorModal extends Modal {
 
 module.exports = {
   AskUserQuestionModal,
+  // Re-exported for back-compat — actual impl lives in
+  // ./permission-action-description.js so it can be unit-tested without
+  // an Obsidian shim.
+  describePermissionAction,
   DiagnosticsModal,
   ModelSelectorModal,
   PermissionRequestModal,

@@ -499,8 +499,31 @@ class FLOWnoteAssistantPlugin extends Plugin {
   }
 
   log(line) {
-    if (!this.settings || !this.settings.debugLogs) return;
-    console.log("[FLOWnote]", line);
+    const settings = this.settings || {};
+    if (settings.debugLogs) {
+      console.log("[FLOWnote]", line);
+    }
+    // Always mirror [direct-agent] lines to a file inside the plugin
+    // dir — these are the only logs we currently have for the new
+    // agent runtime, and the user can't easily share dev-tools console
+    // output. File logging is gated NOT on debugLogs because it's a
+    // diagnostic for a maturing subsystem (will be removed once stable).
+    const text = String(line || "");
+    if (text.startsWith("[direct-agent]")) {
+      this._appendAgentTrace(text).catch(() => { /* swallow */ });
+    }
+  }
+
+  async _appendAgentTrace(line) {
+    try {
+      const adapter = this.app && this.app.vault && this.app.vault.adapter;
+      if (!adapter || typeof adapter.append !== "function") return;
+      const path = `${this.manifest && this.manifest.dir ? this.manifest.dir : ".obsidian/plugins/flownote"}/agent-trace.log`;
+      const ts = new Date().toISOString();
+      await adapter.append(path, `${ts} ${line}\n`);
+    } catch {
+      // Never let logging break the plugin. Silent on failure.
+    }
   }
 
   getVaultPath() {
