@@ -394,6 +394,29 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
         await plugin.saveSettings();
       });
     });
+
+  // Active model's hard ceiling, shown as the placeholder so the user
+  // knows what "default" means in concrete terms.
+  const activeModel = (spec.models || []).find((m) => m && m.id === agent.direct.model);
+  const modelCeiling = (activeModel && activeModel.maxOutput) || 0;
+  new Setting(containerEl)
+    .setName(t("settings.agent.maxOutputName", "单次输出 token 上限（高级）"))
+    .setDesc(t(
+      "settings.agent.maxOutputDesc",
+      "留 0 或空 = 直接用当前模型的硬上限（推荐，模型只生成需要的长度，多余不浪费）。" +
+      "想限制成本时可手动填一个较小值。" +
+      (modelCeiling > 0 ? `当前模型「${activeModel.label}」硬上限：${modelCeiling.toLocaleString()} tokens。` : ""),
+    ))
+    .addText((tx) => {
+      tx
+        .setPlaceholder(modelCeiling > 0 ? String(modelCeiling) : "16384")
+        .setValue(agent.direct.maxOutputTokens ? String(agent.direct.maxOutputTokens) : "")
+        .onChange(async (v) => {
+          const n = Number(String(v || "").trim());
+          agent.direct.maxOutputTokens = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+          await plugin.saveSettings();
+        });
+    });
 }
 
 /**

@@ -35,6 +35,9 @@ const DEFAULT_DIRECT = Object.freeze({
   userAgentOverride: "",
   versionHeaderOverride: "",
   stream: true,
+  // 0 / negative / undefined → use the active model's maxOutput from
+  // registry. Positive integer overrides that.
+  maxOutputTokens: 0,
 });
 
 const DEFAULT_AGENT_SETTINGS = Object.freeze({
@@ -62,6 +65,7 @@ function defaultAgentSettings() {
       userAgentOverride: "",
       versionHeaderOverride: "",
       stream: true,
+      maxOutputTokens: 0,
     },
   };
 }
@@ -143,6 +147,9 @@ function normalizeAgentSettings(raw) {
   direct.userAgentOverride = String(direct.userAgentOverride || "");
   direct.versionHeaderOverride = String(direct.versionHeaderOverride || "");
   if (typeof direct.stream !== "boolean") direct.stream = true;
+  // maxOutputTokens: 0 / non-positive / not-a-number → 0 ("use model default")
+  const moRaw = Number(direct.maxOutputTokens);
+  direct.maxOutputTokens = Number.isFinite(moRaw) && moRaw > 0 ? Math.floor(moRaw) : 0;
   // Region coercion
   if (direct.region !== "cn" && direct.region !== "intl") direct.region = undefined;
 
