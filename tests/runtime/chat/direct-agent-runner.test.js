@@ -332,18 +332,21 @@ test("buildDefaultToolRegistry registers the minimum surface with a bare vault",
   ]);
 });
 
-test("buildDefaultToolRegistry registers the full obsidian-native set when app has metadataCache + fileManager", () => {
+test("buildDefaultToolRegistry registers the full obsidian-native set when app has metadataCache + fileManager + workspace", () => {
   const vault = {
     getFileByPath: () => null,
+    getAbstractFileByPath: () => null,
     cachedRead: async () => "",
     create: async () => ({}),
     modify: async () => {},
+    createFolder: async () => {},
     getMarkdownFiles: () => [],
   };
   const app = {
     vault,
-    fileManager: { processFrontMatter: async () => {} },
+    fileManager: { processFrontMatter: async () => {}, renameFile: async () => {} },
     metadataCache: { getTags: () => ({}), getFileCache: () => null, resolvedLinks: {} },
+    workspace: { getActiveFile: () => null },
   };
   const skillRegistry = new SkillRegistry([]);
   const registry = buildDefaultToolRegistry(app, undefined, skillRegistry);
@@ -352,9 +355,12 @@ test("buildDefaultToolRegistry registers the full obsidian-native set when app h
     "ask_user",
     "skill_invoke",
     "vault_backlinks",
+    "vault_create_dir",
     "vault_daily",
     "vault_edit",
+    "vault_get_active_file",
     "vault_list",
+    "vault_move",
     "vault_property",
     "vault_read",
     "vault_search",

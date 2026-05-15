@@ -20,6 +20,7 @@ function createModuleLoaderMethods(options = {}) {
       const settingsTab = require("../settings-tab");
       const executableResolver = require("../executable-resolver");
       const skillService = require("../skill-service");
+      const skillMigration = require("../skill-migration");
       const settingsUtils = require("../settings-utils");
       const stateMigrations = require("../state-migrations");
 
@@ -34,6 +35,7 @@ function createModuleLoaderMethods(options = {}) {
         ExecutableResolver: executableResolver && executableResolver.ExecutableResolver ? executableResolver.ExecutableResolver : null,
         SkillService: skillService && skillService.SkillService ? skillService.SkillService : null,
         copyDirectoryRecursive: skillService && skillService.copyDirectoryRecursive ? skillService.copyDirectoryRecursive : null,
+        migrateSkillDir: skillMigration && skillMigration.migrateSkillDir ? skillMigration.migrateSkillDir : null,
         normalizeSettings: settingsUtils && settingsUtils.normalizeSettings ? settingsUtils.normalizeSettings : (raw) => raw || {},
         migrateLegacyMessages: stateMigrations && stateMigrations.migrateLegacyMessages ? stateMigrations.migrateLegacyMessages : (raw) => raw || {},
       };

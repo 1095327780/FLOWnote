@@ -402,6 +402,19 @@ class FLOWnoteAssistantPlugin extends Plugin {
       await this.loadPersistedData();
       setRuntimeLocale(this.getEffectiveLocale());
 
+      // One-time silent migration: .opencode/skills → .flownote/skills
+      // (design doc §8.2). Idempotent; failures never block plugin load.
+      if (typeof runtime.migrateSkillDir === "function") {
+        try {
+          const result = await runtime.migrateSkillDir(this);
+          if (result && result.migrated) {
+            this.log(`migrated .opencode/skills → .flownote/skills (${result.copied} files copied)`);
+          }
+        } catch (e) {
+          this.log(`skill dir migration failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
       this.sessionStore = new runtime.SessionStore(this);
 
       const vaultPath = this.getVaultPath();
