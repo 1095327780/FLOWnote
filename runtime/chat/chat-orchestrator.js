@@ -1,5 +1,6 @@
 const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
+const { runDirectAgentTurn } = require("./direct-agent-runner");
 
 function tr(view, key, fallback, params = {}) {
   return tFromContext(view, key, fallback, params);
@@ -467,12 +468,27 @@ async function runSendPrompt(view, userText, options = {}) {
       }
     }
 
-    const response = await view.plugin.opencodeClient.sendMessage({
-      sessionId,
-      prompt,
-      signal: requestAbort.signal,
-      ...createTransportHandlers(view, sessionId, draftId),
-    });
+    const agentMode = view.plugin.settings.agentProvider && view.plugin.settings.agentProvider.mode;
+    const handlers = createTransportHandlers(view, sessionId, draftId);
+
+    let response;
+    if (agentMode === "direct") {
+      response = await runDirectAgentTurn({
+        view,
+        sessionId,
+        draftId,
+        userText: prompt,
+        handlers,
+        signal: requestAbort.signal,
+      });
+    } else {
+      response = await view.plugin.opencodeClient.sendMessage({
+        sessionId,
+        prompt,
+        signal: requestAbort.signal,
+        ...handlers,
+      });
+    }
 
     finalizeAssistantDraft(view, sessionId, draftId, response);
   } catch (error) {
