@@ -473,6 +473,13 @@ async function runSendPrompt(view, userText, options = {}) {
 
     let response;
     if (agentMode === "direct") {
+      // Diagnostic: surface linked-context propagation so we can see in
+      // the dev console whether file drag-drop made it into the prompt.
+      if (typeof view.plugin.log === "function") {
+        const linkedCount = Array.isArray(linkedContextFiles) ? linkedContextFiles.length : 0;
+        const promptPreview = String(prompt || "").slice(0, 400).replace(/\n/g, " ⏎ ");
+        view.plugin.log(`[direct-agent] runSendPrompt linkedFiles=${linkedCount} paths=${JSON.stringify(linkedContextFiles)} promptLen=${String(prompt || "").length} promptHead="${promptPreview}"`);
+      }
       response = await runDirectAgentTurn({
         view,
         sessionId,
