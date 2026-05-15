@@ -27,6 +27,7 @@ const { createVaultGetActiveFileTool } = require("../agent/tools/vault-get-activ
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { loadSkills, formatSkillListing, SkillRegistry } = require("../agent/skill-registry");
+const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
@@ -94,36 +95,18 @@ const BASE_SYSTEM_PROMPT = [
   "                      skills\" below. Pass `skill` (name) and optional `args` (string).",
   "",
   "Core rules:",
-  "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call the tool.",
-  "  2. CRITICAL — Promise = tool call. If your reply states OR implies that ANY of these happened —",
-  "       • 创建/写入/新建/制卡/提炼/落库/归档/记录/保存/整理 a note, card, or draft",
-  "       • \"已…\" / \"搞定\" / \"已落库\" / \"已记录\" / \"已完成\" / a ✅ checkbox",
-  "       • a progress-summary TABLE listing items as \"完成 / 已处理 / 已建\"",
-  "       • created / wrote / saved / edited / updated / archived / moved / deleted in English",
-  "     …you MUST have ALREADY issued the matching vault_write / vault_edit / vault_move /",
-  "     vault_property / vault_daily / vault_create_dir tool calls IN THIS TURN. \"提炼了两个卡片\"",
-  "     does NOT mean \"we talked about two cards\" — it means TWO vault_write calls already fired.",
-  "     If they haven't fired yet, DO NOT WRITE the summary text. Call the tools first, then summarize.",
+  "  1. ALWAYS call the tools to do file operations. Don't describe what you would write — actually call the tool.",
+  "  2. Promise = tool call. If your reply claims a note/card was created/edited/saved/moved, the matching",
+  "     vault_* tool call MUST already be in this turn. Call the tools first, then summarize.",
   "  3. Prefer vault_edit for small in-place changes; reserve vault_write/overwrite for wholesale rewrites.",
+  "     vault_edit requires the file to have been read this session (vault_read or a prior vault_write satisfies it).",
   "  4. When the user attaches files, they appear in the conversation wrapped like this:",
   "       <<<FLOWNOTE_FILE path=\"some/path.md\">>>",
   "       ...file contents...",
   "       <<<END_FLOWNOTE_FILE>>>",
   "     The `path` attribute is the REAL vault path. Use it directly with vault_read/vault_write/vault_edit.",
-  "  5. To edit a file you don't have the latest contents of, call vault_read first.",
-  "  6. Reply in the same language the user used. Be concise.",
-  "  7. If you finish without needing tools, respond naturally with text only.",
-  "",
-  "Linking & verification:",
-  "  • Source / 出处 citations: ALWAYS put the wikilink in the NOTE BODY (e.g. an early line like",
-  "    `> 出处：[[Path/To/Source.md]]`). DO put it in frontmatter too (`source: \"[[Path/To/Source.md]]\"`,",
-  "    with quotes), BUT — and this is the key — the body link is what makes the backlink reliably",
-  "    show up in Obsidian's reverse-link panel. Frontmatter link recognition depends on the user's",
-  "    property-type configuration; the body wikilink does NOT. Do both, but body is the contract.",
-  "  • Do NOT call vault_backlinks to verify a link you just created in this same turn. Obsidian's",
-  "    metadataCache reindexes asynchronously — a fresh write may not appear in backlinks for a few",
-  "    seconds. Trust the vault_write/vault_edit result. If the user later questions whether the link",
-  "    landed, verify with vault_search (which reads the file content directly) rather than backlinks.",
+  "  5. Reply in the same language the user used. Be concise.",
+  "  6. If you finish without needing tools, respond naturally with text only.",
   "",
   "obsidian-cli compatibility map:",
   "  Some skills reference `obsidian-cli` (Obsidian's official CLI tool) for vault operations. " +
@@ -619,6 +602,12 @@ async function runDirectAgentTurn({
     log(`diagnostic log failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
+  // Per-turn FileStateCache — tracks every file the agent reads or
+  // writes during this conversation turn. Used by vault_edit to enforce
+  // read-before-edit, and by vault_backlinks to sidestep metadataCache
+  // reindex lag. Fresh instance each turn so stale state can't leak.
+  const fileStateCache = new FileStateCache();
+
   for await (const ev of loopImpl({
     provider,
     registry,
@@ -626,7 +615,7 @@ async function runDirectAgentTurn({
     messages: history,
     maxTokensPerTurn,
     signal,
-    ctx: { app: view.app, grants: {}, askUserFn },
+    ctx: { app: view.app, grants: {}, askUserFn, fileStateCache },
     onPermissionAsk,
   })) {
     if (!ev) continue;
@@ -717,21 +706,15 @@ async function runDirectAgentTurn({
   } else {
     log("turn tool summary: <no tool calls this turn>");
   }
-  // Heuristic warning: if the assistant text implies a concrete vault
-  // action (create / edit / extract a card / save progress / etc.) but
-  // no destructive tool fired, log a flag so we can audit. Wider net
-  // than just "wrote" — covers the "提炼了两个卡片草案" pattern that
-  // surfaced 2026-05-15.
-  const wroteText = state.text || "";
-  const claimedAction =
-    /(已[创建写编修保整记归落])/.test(wroteText) ||
-    /(提炼了|制卡|落库|归档|新建[了一]|创建了|写入了|保存了|整理[完到]|完成[了 ]|✅|搞定)/.test(wroteText) ||
-    /(created|wrote|edited|saved|updated|archived|moved|deleted|added)/i.test(wroteText);
+  // Diagnostic only: flag turns where the assistant produced text but
+  // no destructive tool call fired. Keeps the file trace useful for
+  // post-mortem without forcing the model to read regex rules. Behavior
+  // is unchanged either way — this is logged, not enforced.
   const hadDestructiveCall = state.toolUses.some((t) =>
     /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/.test(t.name) && !t.isError,
   );
-  if (claimedAction && !hadDestructiveCall && wroteText.length > 0) {
-    log(`turn WARNING: assistant text claims action but no destructive tool call fired (textLen=${wroteText.length}, tools=${state.toolUses.length})`);
+  if (state.text.length > 200 && !hadDestructiveCall && state.toolUses.length === 0) {
+    log(`turn note: long text response with no tool calls (textLen=${state.text.length}). Verify if model claimed actions.`);
   }
 
   // If the model ran out of output budget before producing anything
