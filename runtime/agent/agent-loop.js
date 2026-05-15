@@ -16,7 +16,11 @@
 // canned event stream and a ToolRegistry pre-populated with fakes.
 
 const DEFAULT_MAX_TURNS = 20;
-const DEFAULT_MAX_TOKENS_PER_TURN = 4096;
+// 16384 fits comfortably within every supported provider's per-response
+// output cap (DeepSeek V4: 384K, Claude: 64K, GLM/Kimi/MiniMax all 8K+),
+// while being roomy enough for vault_write turns that have to emit the
+// full new file content as tool input JSON.
+const DEFAULT_MAX_TOKENS_PER_TURN = 16384;
 
 /**
  * @param {Object} args
