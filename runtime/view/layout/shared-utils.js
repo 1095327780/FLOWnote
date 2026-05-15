@@ -135,9 +135,53 @@ function appendGroupedModelOptions(selectEl, models, view) {
     });
 }
 
+function isDirectAgentMode(view) {
+  const settings = view && view.plugin && view.plugin.settings;
+  const ap = settings && settings.agentProvider;
+  return ap && ap.mode === "direct";
+}
+
+function buildDirectModelOptions(view) {
+  // Pulls models from the active direct-mode provider's registry entry.
+  // Avoids depending on OpenCode's catalog so the bottom selector
+  // reflects what the agent will actually use this turn.
+  let registry;
+  try { registry = require("../../providers/registry"); } catch { return []; }
+  const ap = view.plugin.settings.agentProvider || {};
+  const direct = ap.direct || {};
+  const spec = registry.getProviderSpec(direct.providerId || "");
+  if (!spec || !Array.isArray(spec.models)) return [];
+  return spec.models.map((m) => ({
+    id: m.id,
+    label: m.label || m.id,
+  }));
+}
+
 function updateModelSelectOptions() {
   const modelSelect = this.elements && this.elements.modelSelect;
   if (!modelSelect) return;
+
+  // Direct mode: source the dropdown from the active provider's
+  // registry. The OpenCode-style "provider/model" optgroup grouping
+  // doesn't apply — there's exactly one provider active.
+  if (isDirectAgentMode(this)) {
+    const opts = buildDirectModelOptions(this);
+    const direct = this.plugin.settings.agentProvider.direct || {};
+    const currentModel = String(direct.model || "");
+    modelSelect.empty();
+    if (opts.length === 0) {
+      modelSelect.createEl("option", { value: "", text: tr(this, "view.model.placeholder", "Model") });
+    } else {
+      for (const m of opts) {
+        modelSelect.createEl("option", { value: m.id, text: m.label });
+      }
+    }
+    const has = opts.some((m) => m.id === currentModel);
+    modelSelect.value = has ? currentModel : (opts[0] ? opts[0].id : "");
+    this.selectedModel = modelSelect.value;
+    syncInlineModelSelectLabel.call(this);
+    return;
+  }
 
   const selectedBefore = String(this.selectedModel || modelSelect.value || "");
   const models = Array.isArray(this.plugin && this.plugin.cachedModels) ? this.plugin.cachedModels : [];
@@ -157,6 +201,25 @@ function syncInlineModelSelectLabel() {
   const modelSelect = this.elements && this.elements.modelSelect;
   const modelSelectText = this.elements && this.elements.modelSelectText;
   if (!modelSelect || !modelSelectText) return;
+
+  // Direct mode label: "<Provider> / <Model label>" — gives the user
+  // an at-a-glance signal of where chat traffic is being routed.
+  if (isDirectAgentMode(this)) {
+    let registry;
+    try { registry = require("../../providers/registry"); } catch { registry = null; }
+    const ap = this.plugin.settings.agentProvider || {};
+    const direct = ap.direct || {};
+    const spec = registry ? registry.getProviderSpec(direct.providerId || "") : null;
+    const providerLabel = (spec && spec.displayName) || direct.providerId || "?";
+    const option = modelSelect.options && modelSelect.selectedIndex >= 0
+      ? modelSelect.options[modelSelect.selectedIndex]
+      : null;
+    const modelLabel = String((option && option.text) || direct.model || "").trim() || tr(this, "view.model.placeholder", "Model");
+    const displayText = `${providerLabel} / ${modelLabel}`;
+    modelSelectText.textContent = displayText;
+    modelSelectText.setAttribute("title", displayText);
+    return;
+  }
 
   const option = modelSelect.options && modelSelect.selectedIndex >= 0
     ? modelSelect.options[modelSelect.selectedIndex]

@@ -1,5 +1,6 @@
 const { Notice, setIcon } = require("obsidian");
 const { tr } = require("./shared-utils");
+const { summarizeActiveAgent } = require("./agent-summary");
 
 const OPENCODE_DOCS_URL = "https://opencode.ai/docs";
 
@@ -67,12 +68,41 @@ async function copyText(text) {
   return false;
 }
 
+function renderDirectConnectionStatus(popover, view, summary) {
+  const title = popover.createDiv({ cls: "oc-connection-popover-title" });
+  const body = popover.createDiv({ cls: "oc-connection-popover-body" });
+  const appendLine = (text) => {
+    if (!text) return;
+    body.createDiv({ cls: "oc-connection-popover-line", text: String(text) });
+  };
+
+  if (!summary.configComplete) {
+    title.setText(`Direct 模式 · 未就绪`);
+    appendLine(`服务商：${summary.providerLabel}`);
+    if (summary.missingReason) appendLine(`待补全：${summary.missingReason}`);
+    appendLine("打开 Obsidian → 设置 → FLOWnote 完成配置。");
+    return;
+  }
+  title.setText(`${summary.providerLabel} 已就绪`);
+  appendLine(`模型：${summary.modelLabel || summary.modelId}`);
+  appendLine(`API Key 已配置。点击「测试连接」按钮可发起一次真实请求验证。`);
+}
+
 function renderConnectionStatusPopoverContent(view, result) {
   const popover = view.elements && view.elements.statusPopover;
   if (!popover) return;
+  popover.empty();
+
+  // Direct mode: connection state is entirely about the agent provider
+  // (API key + model + reachability). The OpenCode probe is irrelevant.
+  const summary = view && view.plugin ? summarizeActiveAgent(view.plugin) : null;
+  if (summary && summary.mode === "direct") {
+    renderDirectConnectionStatus(popover, view, summary);
+    return;
+  }
+
   const hasResult = Boolean(result && typeof result === "object" && result.connection && result.executable);
   const normalized = normalizeDiagnosticsResult(result);
-  popover.empty();
 
   const title = popover.createDiv({ cls: "oc-connection-popover-title" });
   const body = popover.createDiv({ cls: "oc-connection-popover-body" });
@@ -473,6 +503,23 @@ function applyStatus(result) {
   this.latestDiagnosticsResult = result && typeof result === "object" ? result : null;
 
   dot.removeClass("ok", "error", "warn");
+
+  // Direct mode: dot color reflects agent config readiness, not OpenCode.
+  const summary = this.plugin ? summarizeActiveAgent(this.plugin) : null;
+  if (summary && summary.mode === "direct") {
+    if (summary.configComplete) {
+      dot.addClass("ok");
+      const label = `${summary.providerLabel} · ${summary.modelLabel || summary.modelId}`;
+      dot.setAttribute("aria-label", label);
+      dot.setAttribute("title", label);
+    } else {
+      dot.addClass("warn");
+      const label = `${summary.providerLabel} · ${summary.missingReason || "未就绪"}`;
+      dot.setAttribute("aria-label", label);
+      dot.setAttribute("title", label);
+    }
+    return;
+  }
 
   if (!result || !result.connection) {
     dot.addClass("warn");
