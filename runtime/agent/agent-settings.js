@@ -38,6 +38,10 @@ const DEFAULT_DIRECT = Object.freeze({
   // 0 / negative / undefined → use the active model's maxOutput from
   // registry. Positive integer overrides that.
   maxOutputTokens: 0,
+  // Vault-relative path that holds skill folders (each containing a
+  // SKILL.md). Empty string → default (.opencode/skills) so existing
+  // installs keep working.
+  skillRoot: "",
 });
 
 const DEFAULT_AGENT_SETTINGS = Object.freeze({
@@ -66,6 +70,7 @@ function defaultAgentSettings() {
       versionHeaderOverride: "",
       stream: true,
       maxOutputTokens: 0,
+      skillRoot: "",
     },
   };
 }
@@ -150,6 +155,10 @@ function normalizeAgentSettings(raw) {
   // maxOutputTokens: 0 / non-positive / not-a-number → 0 ("use model default")
   const moRaw = Number(direct.maxOutputTokens);
   direct.maxOutputTokens = Number.isFinite(moRaw) && moRaw > 0 ? Math.floor(moRaw) : 0;
+  // skillRoot: vault-relative path (forward slashes). Empty string is the signal for "use default".
+  direct.skillRoot = typeof direct.skillRoot === "string"
+    ? direct.skillRoot.trim().replace(/\\+/g, "/").replace(/\/+$/, "")
+    : "";
   // Region coercion
   if (direct.region !== "cn" && direct.region !== "intl") direct.region = undefined;
 

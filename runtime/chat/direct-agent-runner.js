@@ -13,32 +13,58 @@ const { runAgentLoop } = require("../agent/agent-loop");
 const { ToolRegistry } = require("../agent/tool-registry");
 const { createVaultReadTool } = require("../agent/tools/vault-read");
 const { createVaultWriteTool } = require("../agent/tools/vault-write");
+const { createVaultEditTool } = require("../agent/tools/vault-edit");
+const { createVaultListTool } = require("../agent/tools/vault-list");
+const { createVaultSearchTool } = require("../agent/tools/vault-search");
+const { createAskUserTool } = require("../agent/tools/ask-user");
+const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
+const { loadSkills, formatSkillListing, SkillRegistry } = require("../agent/skill-registry");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
 
-const DEFAULT_SYSTEM_PROMPT = [
+const DEFAULT_SKILL_ROOT = ".opencode/skills";
+
+const BASE_SYSTEM_PROMPT = [
   "You are FLOWnote, an AI assistant running inside Obsidian. The user's notes live in an Obsidian vault.",
   "",
   "You have these tools available:",
-  "  • vault_read  — read a markdown note. Pass the vault-relative path (e.g. \"daily/2026-05-15.md\").",
-  "                  Supports optional offset/limit to slice long files.",
-  "  • vault_write — create / overwrite / append text in the vault. Pass `path`, `content`, and `mode`:",
-  "                    mode=\"create\"    → fails if the file already exists",
-  "                    mode=\"overwrite\" → replace existing content (use this to edit a file)",
-  "                    mode=\"append\"   → add to the end",
+  "  • vault_read   — read a markdown note. Pass `path` (vault-relative, forward slashes).",
+  "                   Optional `offset` + `limit` to slice long files.",
+  "  • vault_list   — enumerate notes/folders. Optional `path`, `pattern` (glob), `extensions`,",
+  "                   `recursive`, `include_folders`, `limit`.",
+  "  • vault_search — search note contents. Required `query` (substring; set `regex: true` for regex).",
+  "                   Optional `path`, `pattern`, `case_sensitive`, `extensions`, `max_files`, `max_matches`.",
+  "  • vault_edit   — precise string replacement in a single note. Pass `path`, `old_string`,",
+  "                   `new_string`, optional `replace_all`. The match must be unique unless replace_all.",
+  "                   Prefer this over vault_write for surgical edits (faster, safer).",
+  "  • vault_write  — create / overwrite / append text. Pass `path`, `content`, `mode`:",
+  "                     mode=\"create\"    → fails if the file already exists",
+  "                     mode=\"overwrite\" → replace existing content (full rewrite only)",
+  "                     mode=\"append\"   → add to the end",
+  "  • ask_user     — ask the user a multiple-choice question when truly ambiguous. Don't",
+  "                   abuse this — most ambiguity can be resolved with vault_list / vault_search.",
+  "  • skill_invoke — load a vault skill's instructions so you can follow them. See \"Available",
+  "                   skills\" below. Pass `skill` (name) and optional `args` (string).",
   "",
   "Core rules:",
-  "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call vault_write.",
-  "  2. When the user attaches files, they appear in the conversation wrapped like this:",
+  "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call the tool.",
+  "  2. Prefer vault_edit for small in-place changes; reserve vault_write/overwrite for wholesale rewrites.",
+  "  3. When the user attaches files, they appear in the conversation wrapped like this:",
   "       <<<FLOWNOTE_FILE path=\"some/path.md\">>>",
   "       ...file contents...",
   "       <<<END_FLOWNOTE_FILE>>>",
-  "     The `path` attribute is the REAL vault path. Use it directly when calling vault_read or vault_write.",
-  "  3. To edit a file: call vault_read first if you don't already have the latest content; then call vault_write with mode=\"overwrite\" passing the FULL new content (no partial edits in this version).",
-  "  4. Reply in the same language the user used. Be concise.",
-  "  5. If you finish without needing tools, respond naturally with text only.",
+  "     The `path` attribute is the REAL vault path. Use it directly with vault_read/vault_write/vault_edit.",
+  "  4. To edit a file you don't have the latest contents of, call vault_read first.",
+  "  5. Reply in the same language the user used. Be concise.",
+  "  6. If you finish without needing tools, respond naturally with text only.",
 ].join("\n");
+
+function buildSystemPrompt(skillManifests) {
+  const listing = formatSkillListing(skillManifests);
+  if (!listing) return BASE_SYSTEM_PROMPT;
+  return `${BASE_SYSTEM_PROMPT}\n\nAvailable skills (call via skill_invoke):\n${listing}`;
+}
 
 /**
  * Convert the session store's plain {role,text} messages into the
@@ -80,20 +106,71 @@ function buildAnthropicHistory(storedMessages, draftId) {
 }
 
 /**
- * Build the tool registry the agent loop runs with. v0.5.0 ships
- * vault_read + vault_write; the rest land in M2.
+ * Build the tool registry the agent loop runs with. M2 ships the full
+ * tool surface: vault_read, vault_list, vault_search, vault_edit,
+ * vault_write, ask_user, skill_invoke.
  *
  * @param {Object} app  Obsidian App
  * @param {Function} [normalizePath]
+ * @param {SkillRegistry} [skillRegistry]   omit to skip skill_invoke registration
  * @returns {ToolRegistry}
  */
-function buildDefaultToolRegistry(app, normalizePath) {
+function buildDefaultToolRegistry(app, normalizePath, skillRegistry) {
   const registry = new ToolRegistry();
   if (app && app.vault) {
     registry.register(createVaultReadTool({ vault: app.vault, normalizePath }));
+    registry.register(createVaultListTool({ vault: app.vault, normalizePath }));
+    registry.register(createVaultSearchTool({ vault: app.vault, normalizePath }));
+    registry.register(createVaultEditTool({ vault: app.vault, normalizePath }));
     registry.register(createVaultWriteTool({ vault: app.vault, normalizePath }));
   }
+  registry.register(createAskUserTool());
+  if (skillRegistry && typeof skillRegistry.list === "function") {
+    registry.register(createSkillInvokeTool({ skillRegistry }));
+  }
   return registry;
+}
+
+/**
+ * Load skills from the vault. Cached on the plugin object so we don't
+ * re-scan disk on every turn. Cache invalidates when the configured
+ * skill root path changes.
+ *
+ * @param {Object} plugin   Obsidian plugin instance
+ * @returns {Promise<SkillRegistry>}
+ */
+async function ensureSkillRegistry(plugin) {
+  if (!plugin || !plugin.app || !plugin.app.vault) {
+    return new SkillRegistry([]);
+  }
+  const settings = plugin.settings && plugin.settings.agentProvider;
+  const direct = settings && settings.direct;
+  const skillRoot = (direct && typeof direct.skillRoot === "string" && direct.skillRoot.trim())
+    ? direct.skillRoot.trim()
+    : DEFAULT_SKILL_ROOT;
+
+  // Cache key: skill root string. Re-load if the user points elsewhere.
+  if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === skillRoot) {
+    return plugin.__flownoteSkillCache.registry;
+  }
+
+  let manifests = [];
+  try {
+    manifests = await loadSkills({ rootPath: skillRoot, vault: plugin.app.vault });
+  } catch (e) {
+    manifests = [];
+    if (typeof plugin.log === "function") {
+      plugin.log(`[direct-agent] skill load failed for ${skillRoot}: ${e && e.message ? e.message : e}`);
+    }
+  }
+  const registry = new SkillRegistry(manifests);
+  plugin.__flownoteSkillCache = { root: skillRoot, registry };
+  return registry;
+}
+
+/** Discard the cached SkillRegistry so the next turn reloads from disk. */
+function invalidateSkillCache(plugin) {
+  if (plugin) plugin.__flownoteSkillCache = null;
 }
 
 /**
@@ -117,17 +194,37 @@ function toRendererStatus(status, isError) {
 
 function summarizeToolInput(toolName, input) {
   if (!input || typeof input !== "object") return "";
-  if (toolName === "vault_read" || toolName === "vault_write") {
+  if (toolName === "vault_read") {
     const path = typeof input.path === "string" ? input.path : "";
     if (!path) return "";
-    if (toolName === "vault_write") {
-      const mode = typeof input.mode === "string" ? input.mode : "create";
-      return `${mode} → ${path}`;
-    }
     if (typeof input.offset === "number" || typeof input.limit === "number") {
       return `${path} (lines ${input.offset || 1}-${input.limit ? (input.offset || 1) + input.limit - 1 : "end"})`;
     }
     return path;
+  }
+  if (toolName === "vault_write") {
+    const path = typeof input.path === "string" ? input.path : "";
+    const mode = typeof input.mode === "string" ? input.mode : "create";
+    return path ? `${mode} → ${path}` : mode;
+  }
+  if (toolName === "vault_edit") {
+    return typeof input.path === "string" ? input.path : "";
+  }
+  if (toolName === "vault_list") {
+    const path = typeof input.path === "string" && input.path ? input.path : "/";
+    return input.pattern ? `${path} (${input.pattern})` : path;
+  }
+  if (toolName === "vault_search") {
+    const q = typeof input.query === "string" ? input.query : "";
+    return input.path ? `"${q}" in ${input.path}` : `"${q}"`;
+  }
+  if (toolName === "skill_invoke") {
+    const skill = typeof input.skill === "string" ? input.skill : "";
+    return input.args ? `${skill} ${input.args}` : skill;
+  }
+  if (toolName === "ask_user") {
+    const qs = Array.isArray(input.questions) ? input.questions : [];
+    return qs.length ? `${qs.length} question(s): ${qs[0].header || qs[0].question || ""}` : "";
   }
   try { return JSON.stringify(input).slice(0, 120); } catch { return ""; }
 }
@@ -179,6 +276,7 @@ async function runDirectAgentTurn({
   requestImpl,
   toolRegistryOverride,
   runAgentLoopImpl,
+  skillRegistryOverride,
 }) {
   const plugin = view.plugin;
   const settings = plugin.settings.agentProvider || {};
@@ -189,7 +287,7 @@ async function runDirectAgentTurn({
   const provider = resolveAgentProvider(settings, { requestImpl });
 
   // ---------------------------------------------------------------------
-  // 2. Build the tool registry against the live vault
+  // 2. Load skills + build the tool registry against the live vault
   // ---------------------------------------------------------------------
   let normalizePath;
   try {
@@ -198,7 +296,9 @@ async function runDirectAgentTurn({
   } catch (_e) {
     normalizePath = undefined;
   }
-  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath);
+  const skillRegistry = skillRegistryOverride || (await ensureSkillRegistry(plugin));
+  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry);
+  const systemPrompt = buildSystemPrompt(skillRegistry.list ? skillRegistry.list() : []);
 
   // ---------------------------------------------------------------------
   // 3. Build the conversation
@@ -253,6 +353,17 @@ async function runDirectAgentTurn({
     }
   }
 
+  // ask_user bridge: the tool yields a question payload; we surface it
+  // through the handlers.onAskUser callback the chat view installs. If
+  // that callback is missing, the tool itself returns an error result —
+  // the model handles graceful fallback.
+  async function askUserFn(payload) {
+    if (!handlers || typeof handlers.onAskUser !== "function") {
+      throw new Error("no onAskUser handler installed");
+    }
+    return await handlers.onAskUser(payload);
+  }
+
   const loopImpl = runAgentLoopImpl || runAgentLoop;
   const log = (msg) => {
     if (plugin && typeof plugin.log === "function") plugin.log(`[direct-agent] ${msg}`);
@@ -297,11 +408,11 @@ async function runDirectAgentTurn({
   for await (const ev of loopImpl({
     provider,
     registry,
-    system: DEFAULT_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: history,
     maxTokensPerTurn,
     signal,
-    ctx: { app: view.app, grants: {} },
+    ctx: { app: view.app, grants: {}, askUserFn },
     onPermissionAsk,
   })) {
     if (!ev) continue;
@@ -427,4 +538,8 @@ module.exports = {
   runDirectAgentTurn,
   buildAnthropicHistory,
   buildDefaultToolRegistry,
+  buildSystemPrompt,
+  ensureSkillRegistry,
+  invalidateSkillCache,
+  DEFAULT_SKILL_ROOT,
 };
