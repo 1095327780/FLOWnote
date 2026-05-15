@@ -261,6 +261,37 @@ async function ensureActiveSession() {
 async function applyModelSelection(modelID, options = {}) {
   const normalized = String(modelID || "").trim();
   const previous = String(this.selectedModel || "");
+
+  // Direct mode: model selection persists into settings.agentProvider.direct.model.
+  // No OpenCode round-trip.
+  const ap = this.plugin.settings.agentProvider;
+  if (ap && ap.mode === "direct") {
+    const direct = ap.direct || {};
+    const previousDirectModel = String(direct.model || "");
+    let registry;
+    try { registry = require("../providers/registry"); } catch { registry = null; }
+    const spec = registry ? registry.getProviderSpec(direct.providerId || "") : null;
+    const valid = !spec ? true : (spec.models || []).some((m) => m && m.id === normalized);
+    if (normalized && !valid) {
+      throw new Error(tr(this, "view.model.unavailable", "Model unavailable or not authorized: {model}", { model: normalized }));
+    }
+    direct.model = normalized;
+    this.selectedModel = normalized;
+    await this.plugin.saveSettings();
+    if (this.elements.modelSelect) {
+      this.elements.modelSelect.value = normalized;
+    }
+    syncInlineModelSelectLabelFromSelect(this);
+    if (!options.silentNotice) new Notice(tr(this, "view.model.switched", "Switched model: {model}", { model: normalized }));
+    // Refresh the connection-status indicator so the new model is reflected.
+    if (typeof this.applyStatus === "function") {
+      this.applyStatus(this.latestDiagnosticsResult);
+    }
+    return tr(this, "view.model.switched", "Switched model: {model}", { model: normalized });
+    // eslint-disable-next-line no-unused-vars
+    void previousDirectModel; // referenced for future rollback hook
+  }
+
   const previousSetting = String(this.plugin.settings.defaultModel || "");
   const availableModels = Array.isArray(this.plugin.cachedModels) ? this.plugin.cachedModels : [];
 
