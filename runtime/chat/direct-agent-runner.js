@@ -257,7 +257,24 @@ async function runDirectAgentTurn({
   const log = (msg) => {
     if (plugin && typeof plugin.log === "function") plugin.log(`[direct-agent] ${msg}`);
   };
-  log(`turn start provider=${provider.id} model=${provider.userConfig.model} historyLen=${history.length}`);
+
+  // Use the active model's maxOutput as the per-turn output cap. This
+  // is a ceiling, not a target — the model only generates what it
+  // generates. Setting it to the model's hard limit gives the longest
+  // possible response when the user actually needs it.
+  //
+  // Resolution order:
+  //   1. settings.direct.maxOutputTokens (user override; if non-positive
+  //      it's treated as "use model default")
+  //   2. provider.spec.models[].maxOutput for the active model
+  //   3. fallback constant (16K — safe across all providers)
+  const activeModelInfo = (provider.spec.models || []).find((m) => m && m.id === provider.userConfig.model);
+  const userMaxOutput = settings && settings.direct && Number(settings.direct.maxOutputTokens);
+  const maxTokensPerTurn = (Number.isFinite(userMaxOutput) && userMaxOutput > 0)
+    ? userMaxOutput
+    : ((activeModelInfo && activeModelInfo.maxOutput) || 16_384);
+
+  log(`turn start provider=${provider.id} model=${provider.userConfig.model} historyLen=${history.length} maxOutput=${maxTokensPerTurn}`);
   // Diagnostic: dump the actual user-turn text being sent to the model.
   // First 600 chars are enough to spot whether <<<FLOWNOTE_FILE>>> tags
   // landed in there.
@@ -282,6 +299,7 @@ async function runDirectAgentTurn({
     registry,
     system: DEFAULT_SYSTEM_PROMPT,
     messages: history,
+    maxTokensPerTurn,
     signal,
     ctx: { app: view.app, grants: {} },
     onPermissionAsk,
@@ -367,10 +385,12 @@ async function runDirectAgentTurn({
   let finalText = state.text;
   if (!finalText && stopReason === "max_tokens") {
     finalText = (
-      "⚠️ 模型在还没产生输出之前就用尽了本轮的 token 预算。\n\n" +
-      "可能原因：上下文太长 + 输出预算太紧。请尝试：\n" +
-      "• 减少附加文件或拆分多次问\n" +
-      "• 或在设置里给 maxTokensPerTurn 调大值（默认 16384）"
+      "⚠️ 模型在还没产生输出之前就用尽了本轮的输出额度。\n\n" +
+      "已经按当前模型（" + (activeModelInfo ? activeModelInfo.label : provider.userConfig.model) +
+      "）的硬上限 " + maxTokensPerTurn + " tokens 请求，超过这个就是该模型的固有限制。\n\n" +
+      "建议：\n" +
+      "• 换支持更大输出的模型（如 DeepSeek V4 Flash/Pro 支持 384K 输出）\n" +
+      "• 拆分任务：先让模型只输出 [总结部分]，再单独写回文件"
     );
   }
 
