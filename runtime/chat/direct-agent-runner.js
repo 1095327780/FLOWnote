@@ -25,6 +25,24 @@ const { getProviderSpec } = require("../providers/registry");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 
+// Local-timezone YYYY-MM-DD. Local — not UTC — because the user's "today"
+// is whatever calendar date their wall clock shows. Used to anchor the
+// model when it writes daily notes, weekly reviews, etc.
+function getLocalISODate(now) {
+  const d = now instanceof Date ? now : new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+const ZH_WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
+
+function describeToday(now) {
+  const d = now instanceof Date ? now : new Date();
+  return `${getLocalISODate(d)} (星期${ZH_WEEKDAY[d.getDay()]})`;
+}
+
 const BASE_SYSTEM_PROMPT = [
   "You are FLOWnote, an AI assistant running inside Obsidian. The user's notes live in an Obsidian vault.",
   "",
@@ -60,10 +78,23 @@ const BASE_SYSTEM_PROMPT = [
   "  6. If you finish without needing tools, respond naturally with text only.",
 ].join("\n");
 
-function buildSystemPrompt(skillManifests) {
+function buildSystemPrompt(skillManifests, opts) {
+  const parts = [BASE_SYSTEM_PROMPT];
+  const ctxLines = [];
+  if (opts && opts.todayLabel) {
+    ctxLines.push(`# currentDate\n今天是 ${opts.todayLabel}。涉及"今天 / 昨天 / 本周"等相对时间时，以这个日期为准。`);
+  }
+  if (opts && typeof opts.vaultName === "string" && opts.vaultName) {
+    ctxLines.push(`# vault\n当前 Obsidian 库名：${opts.vaultName}`);
+  }
+  if (ctxLines.length > 0) {
+    parts.push(`Context:\n${ctxLines.join("\n\n")}`);
+  }
   const listing = formatSkillListing(skillManifests);
-  if (!listing) return BASE_SYSTEM_PROMPT;
-  return `${BASE_SYSTEM_PROMPT}\n\nAvailable skills (call via skill_invoke):\n${listing}`;
+  if (listing) {
+    parts.push(`Available skills (call via skill_invoke):\n${listing}`);
+  }
+  return parts.join("\n\n");
 }
 
 /**
@@ -298,7 +329,13 @@ async function runDirectAgentTurn({
   }
   const skillRegistry = skillRegistryOverride || (await ensureSkillRegistry(plugin));
   const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry);
-  const systemPrompt = buildSystemPrompt(skillRegistry.list ? skillRegistry.list() : []);
+  const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
+    ? String(view.app.vault.getName() || "")
+    : "";
+  const systemPrompt = buildSystemPrompt(
+    skillRegistry.list ? skillRegistry.list() : [],
+    { todayLabel: describeToday(), vaultName },
+  );
 
   // ---------------------------------------------------------------------
   // 3. Build the conversation
@@ -541,5 +578,7 @@ module.exports = {
   buildSystemPrompt,
   ensureSkillRegistry,
   invalidateSkillCache,
+  getLocalISODate,
+  describeToday,
   DEFAULT_SKILL_ROOT,
 };
