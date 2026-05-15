@@ -44,9 +44,14 @@ const DEFAULT_SYSTEM_PROMPT = [
  * Convert the session store's plain {role,text} messages into the
  * Anthropic-shape conversation the agent loop expects.
  *
- * Drops the current draft (still pending) and the just-pushed user
- * message — the user message is passed back separately as the "current
- * turn input" so the loop can re-build the conversation cleanly.
+ * Skips:
+ *   - the in-flight assistant draft (no content yet)
+ *   - any pending assistant messages
+ *   - empty-text messages
+ *   - the LAST user message (it's the one that was just pushed by
+ *     mountPendingDraft, and it contains the raw user input WITHOUT
+ *     the composePromptWithLinkedFiles wrapper — the runner will append
+ *     the properly composed userText as the actual current turn)
  *
  * @param {Array<Object>} storedMessages
  * @param {string}        draftId           the in-flight assistant draft to skip
@@ -64,6 +69,12 @@ function buildAnthropicHistory(storedMessages, draftId) {
       role: msg.role,
       content: [{ type: "text", text }],
     });
+  }
+  // Drop the most recent user message: it's the just-pushed raw-input
+  // version. The caller will append the composed userText (which carries
+  // any linked-context file blocks) as the actual current turn.
+  if (out.length > 0 && out[out.length - 1].role === "user") {
+    out.pop();
   }
   return out;
 }
@@ -196,13 +207,11 @@ async function runDirectAgentTurn({
     ? plugin.sessionStore.getActiveMessages()
     : [];
   const history = buildAnthropicHistory(stored, draftId);
-  // Add the current user turn at the end. The session store already
-  // contains it (we just pushed it in mountPendingDraft), but we filter
-  // for non-pending plus explicit text — relying on history alone is
-  // safe.
-  if (!history.length || history[history.length - 1].role !== "user") {
-    history.push({ role: "user", content: [{ type: "text", text: String(userText || "") }] });
-  }
+  // buildAnthropicHistory drops the most recent user message because
+  // that's the raw version from the session store. Append the composed
+  // userText (which the orchestrator built via composePromptWithLinkedFiles
+  // and skill injection) as the actual current turn.
+  history.push({ role: "user", content: [{ type: "text", text: String(userText || "") }] });
 
   // ---------------------------------------------------------------------
   // 4. Translate agent-loop events → chat handler calls
@@ -249,6 +258,24 @@ async function runDirectAgentTurn({
     if (plugin && typeof plugin.log === "function") plugin.log(`[direct-agent] ${msg}`);
   };
   log(`turn start provider=${provider.id} model=${provider.userConfig.model} historyLen=${history.length}`);
+  // Diagnostic: dump the actual user-turn text being sent to the model.
+  // First 600 chars are enough to spot whether <<<FLOWNOTE_FILE>>> tags
+  // landed in there.
+  try {
+    const lastUserMsg = history[history.length - 1];
+    if (lastUserMsg && lastUserMsg.role === "user" && Array.isArray(lastUserMsg.content)) {
+      const textJoined = lastUserMsg.content
+        .filter((b) => b && b.type === "text")
+        .map((b) => String(b.text || ""))
+        .join("\n");
+      const head = textJoined.slice(0, 600).replace(/\n/g, " ⏎ ");
+      log(`outgoing user text len=${textJoined.length} head="${head}"`);
+      const hasFileTag = /<<<FLOWNOTE_FILE\s+path="/.test(textJoined);
+      log(`outgoing user text has FLOWNOTE_FILE tag=${hasFileTag}`);
+    }
+  } catch (e) {
+    log(`diagnostic log failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   for await (const ev of loopImpl({
     provider,

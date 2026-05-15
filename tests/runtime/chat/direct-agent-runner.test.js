@@ -74,18 +74,19 @@ function collectHandlerCalls() {
 // buildAnthropicHistory
 // ---------------------------------------------------------------------------
 
-test("buildAnthropicHistory: converts user+assistant text messages, drops pending drafts and the active draft", () => {
+test("buildAnthropicHistory: returns prior turns and drops the trailing user message (caller re-appends composed version)", () => {
   const stored = [
     { id: "u1", role: "user", text: "hi" },
     { id: "a1", role: "assistant", text: "hello" },
-    { id: "u2", role: "user", text: "next?" },
+    { id: "u2", role: "user", text: "next?" },          // ← this is the just-pushed current turn
     { id: "draft-x", role: "assistant", text: "", pending: true },
   ];
   const history = buildAnthropicHistory(stored, "draft-x");
-  assert.equal(history.length, 3);
+  // The trailing user message is removed so the runner can re-append
+  // the composed userText (with linked-context files) as the actual turn.
+  assert.equal(history.length, 2);
   assert.deepEqual(history[0], { role: "user", content: [{ type: "text", text: "hi" }] });
   assert.deepEqual(history[1], { role: "assistant", content: [{ type: "text", text: "hello" }] });
-  assert.deepEqual(history[2], { role: "user", content: [{ type: "text", text: "next?" }] });
 });
 
 test("buildAnthropicHistory: skips empty-text messages", () => {
@@ -93,9 +94,23 @@ test("buildAnthropicHistory: skips empty-text messages", () => {
     { id: "u1", role: "user", text: "" },
     { id: "u2", role: "user", text: "real" },
   ];
+  // The trailing user message is dropped; remaining "real" was the only
+  // valid user msg before the trailing-drop pass, so after drop list is empty.
   const history = buildAnthropicHistory(stored, "draft");
-  assert.equal(history.length, 1);
-  assert.equal(history[0].content[0].text, "real");
+  assert.equal(history.length, 0);
+});
+
+test("buildAnthropicHistory: keeps assistant messages even when the trailing message is an assistant", () => {
+  // Edge case: somehow the last message is assistant (e.g. resumed
+  // session). Don't drop it — the runner will still append the new
+  // current-turn user message.
+  const stored = [
+    { id: "u1", role: "user", text: "hi" },
+    { id: "a1", role: "assistant", text: "hello" },
+  ];
+  const history = buildAnthropicHistory(stored, "draft");
+  assert.equal(history.length, 2);
+  assert.equal(history[1].role, "assistant");
 });
 
 // ---------------------------------------------------------------------------
