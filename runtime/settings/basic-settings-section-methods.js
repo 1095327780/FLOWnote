@@ -243,6 +243,11 @@ class BasicSettingsSectionMethods {
         });
       });
 
+    // --- Skill management section -----------------------------------------
+    if (typeof this.renderSkillManagementSection === "function") {
+      this.renderSkillManagementSection(containerEl);
+    }
+
     new Setting(containerEl)
       .setName(t("settings.basic.reinstallSkillsName", "重新安装内置 Skills 与模板"))
       .setDesc(t(

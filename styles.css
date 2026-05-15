@@ -2797,6 +2797,126 @@ padding: 3px 7px;
   margin-top: 4px;
 }
 
+/* Skill management UI */
+.oc-skill-mgmt-intro {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.oc-skill-mgmt-host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-skill-mgmt-header {
+  display: flex;
+  justify-content: flex-end;
+}
+.oc-skill-mgmt-empty,
+.oc-skill-mgmt-error {
+  padding: 14px;
+  border: 1px dashed var(--oc-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.oc-skill-mgmt-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.oc-skill-mgmt-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--oc-border);
+  align-items: center;
+}
+.oc-skill-mgmt-row:last-child {
+  border-bottom: none;
+}
+.oc-skill-mgmt-row-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.oc-skill-mgmt-name {
+  font-weight: 600;
+}
+.oc-skill-mgmt-slug {
+  font-size: 11px;
+  font-family: var(--font-monospace, monospace);
+  color: var(--text-muted);
+}
+.oc-skill-mgmt-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-skill-mgmt-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Skill editor modal */
+.oc-skill-editor-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--oc-border);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--oc-surface-raised);
+  box-shadow: var(--oc-shadow-soft);
+  min-width: 540px;
+}
+.oc-skill-editor-modal h2 { margin: 0; }
+.oc-skill-editor-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.oc-skill-editor-field-label {
+  font-weight: 600;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.oc-skill-editor-field-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.oc-skill-editor-input {
+  width: 100%;
+  font-family: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+.oc-skill-editor-body {
+  width: 100%;
+  font-family: var(--font-monospace, monospace);
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+.oc-skill-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .oc-model-modal-subtitle,
 .oc-skill-modal-subtitle,
 .oc-prompt-desc,

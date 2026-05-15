@@ -419,6 +419,40 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
     }
   }
 
+  /**
+   * Fetch the live model list from <baseUrl>/models (OpenAI convention
+   * — every OpenAI-compat provider exposes it). Returns an array of
+   * { id, label } objects ready to merge into the dropdown.
+   *
+   * Throws on transport / auth errors so the settings UI can surface
+   * the failure rather than silently falling back to the registry.
+   */
+  async function listModels() {
+    const url = `${resolveBaseUrl(spec, userConfig).replace(/\/+$/, "")}/models`;
+    const res = await requestImpl({
+      url,
+      method: "GET",
+      headers: buildHeaders(spec, userConfig),
+    });
+    const status = res && typeof res.status === "number" ? res.status : 0;
+    if (status < 200 || status >= 300) {
+      throw new Error(`listModels: ${status} from ${url}`);
+    }
+    let body = res && res.json;
+    if (!body && res && typeof res.text === "string") {
+      try { body = JSON.parse(res.text); } catch { body = null; }
+    }
+    const data = body && Array.isArray(body.data) ? body.data : [];
+    /** @type {Array<{id: string, label: string}>} */
+    const out = [];
+    for (const m of data) {
+      if (!m || typeof m.id !== "string" || !m.id) continue;
+      out.push({ id: m.id, label: m.id });
+    }
+    out.sort((a, b) => a.id.localeCompare(b.id));
+    return out;
+  }
+
   async function countTokens(messages) {
     let chars = 0;
     let cjk = 0;
@@ -444,6 +478,7 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
     createMessage,
     countTokens,
     testConnection,
+    listModels,
   };
 }
 

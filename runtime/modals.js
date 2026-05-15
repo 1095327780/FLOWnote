@@ -156,6 +156,143 @@ class PermissionRequestModal extends Modal {
   }
 }
 
+// Modal: edit a skill's frontmatter fields + body. Used by the
+// settings-tab Skill Management section. Resolves with the edited
+// SkillDoc (or null on cancel). All state lives on the form inputs —
+// no derived state — so cancel is a true no-op.
+class SkillEditorModal extends Modal {
+  constructor(app, options, onResolve, t) {
+    super(app);
+    this.options = options || {};
+    this.onResolve = onResolve;
+    this.t = t;
+    this.resolved = false;
+    this.initial = options.skill || null;
+  }
+
+  resolveAndClose(value) {
+    if (this.resolved) return;
+    this.resolved = true;
+    if (typeof this.onResolve === "function") this.onResolve(value);
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("oc-skill-editor-modal");
+
+    const isEdit = !!this.initial;
+    contentEl.createEl("h2", {
+      text: tr(this.t, isEdit ? "modals.skillEditor.titleEdit" : "modals.skillEditor.titleCreate",
+        isEdit ? "编辑技能" : "新建技能"),
+    });
+    contentEl.createDiv({
+      cls: "oc-skill-editor-subtitle",
+      text: tr(this.t, "modals.skillEditor.subtitle",
+        "技能的元数据写在前置 YAML 里；正文用 Markdown 写工作流。完成后点保存。"),
+    });
+
+    const slugInput = this._field(contentEl, {
+      label: tr(this.t, "modals.skillEditor.slug", "技能 ID（文件夹名）"),
+      hint: tr(this.t, "modals.skillEditor.slugHint",
+        "只能小写字母、数字、连字符。一旦保存就是该技能的唯一身份，改 ID 等同于重命名。"),
+      value: isEdit ? this.initial.slug : "",
+      disabled: false,
+    });
+    const nameInput = this._field(contentEl, {
+      label: tr(this.t, "modals.skillEditor.name", "技能名称"),
+      hint: tr(this.t, "modals.skillEditor.nameHint", "显示给 AI 看的名字，可以是中文。"),
+      value: isEdit ? this.initial.name : "",
+    });
+    const descInput = this._field(contentEl, {
+      label: tr(this.t, "modals.skillEditor.description", "技能描述"),
+      hint: tr(this.t, "modals.skillEditor.descriptionHint",
+        "一两句话告诉 AI 这个技能干啥、什么时候用。AI 会在系统提示里看到这一段。"),
+      value: isEdit ? this.initial.description : "",
+      multiline: true,
+      rows: 3,
+    });
+    const whenInput = this._field(contentEl, {
+      label: tr(this.t, "modals.skillEditor.whenToUse", "触发场景（可选）"),
+      hint: tr(this.t, "modals.skillEditor.whenToUseHint",
+        "比 description 更具体的触发条件。比如「用户说『继续制卡』时」。"),
+      value: isEdit && this.initial.whenToUse ? this.initial.whenToUse : "",
+      multiline: true,
+      rows: 2,
+    });
+    const toolsInput = this._field(contentEl, {
+      label: tr(this.t, "modals.skillEditor.allowedTools", "允许使用的工具（可选）"),
+      hint: tr(this.t, "modals.skillEditor.allowedToolsHint",
+        "逗号分隔。留空表示不限制。例：vault_read, vault_write, vault_edit"),
+      value: isEdit && Array.isArray(this.initial.allowedTools)
+        ? this.initial.allowedTools.join(", ")
+        : "",
+    });
+    const bodyLabel = contentEl.createDiv({ cls: "oc-skill-editor-field-label" });
+    bodyLabel.setText(tr(this.t, "modals.skillEditor.body", "技能正文（Markdown）"));
+    contentEl.createDiv({
+      cls: "oc-skill-editor-field-hint",
+      text: tr(this.t, "modals.skillEditor.bodyHint",
+        "AI 调用这个技能时会读到这部分。写清楚工作流、参数、注意事项。"),
+    });
+    const bodyArea = contentEl.createEl("textarea", { cls: "oc-skill-editor-body" });
+    bodyArea.rows = 16;
+    bodyArea.value = isEdit ? this.initial.body : "";
+
+    const actions = contentEl.createDiv({ cls: "oc-skill-editor-actions" });
+    const cancelBtn = actions.createEl("button", { cls: "mod-muted", text: tr(this.t, "modals.cancel", "取消") });
+    const saveBtn = actions.createEl("button", { cls: "mod-cta", text: tr(this.t, "modals.skillEditor.save", "保存") });
+
+    cancelBtn.addEventListener("click", () => this.resolveAndClose(null));
+    saveBtn.addEventListener("click", () => {
+      const slug = String(slugInput.value || "").trim();
+      const name = String(nameInput.value || "").trim();
+      const description = String(descInput.value || "").trim();
+      const whenToUse = String(whenInput.value || "").trim();
+      const toolsRaw = String(toolsInput.value || "").trim();
+      const body = String(bodyArea.value || "");
+      const allowedTools = toolsRaw
+        ? toolsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+      this.resolveAndClose({
+        slug,
+        name,
+        description,
+        whenToUse: whenToUse || undefined,
+        allowedTools,
+        body,
+      });
+    });
+  }
+
+  _field(container, { label, hint, value, multiline, rows, disabled }) {
+    const lab = container.createDiv({ cls: "oc-skill-editor-field-label" });
+    lab.setText(label);
+    if (hint) {
+      container.createDiv({ cls: "oc-skill-editor-field-hint", text: hint });
+    }
+    let input;
+    if (multiline) {
+      input = container.createEl("textarea", { cls: "oc-skill-editor-input" });
+      input.rows = rows || 3;
+    } else {
+      input = container.createEl("input", { cls: "oc-skill-editor-input", attr: { type: "text" } });
+    }
+    if (disabled) input.disabled = true;
+    input.value = value || "";
+    return input;
+  }
+
+  onClose() {
+    if (!this.resolved && typeof this.onResolve === "function") {
+      this.onResolve(null);
+      this.resolved = true;
+    }
+    this.contentEl.empty();
+  }
+}
+
 class AskUserQuestionModal extends Modal {
   constructor(app, payload, onResolve, t) {
     super(app);
@@ -425,4 +562,5 @@ module.exports = {
   ModelSelectorModal,
   PermissionRequestModal,
   PromptAppendModal,
+  SkillEditorModal,
 };
