@@ -95,13 +95,15 @@ const BASE_SYSTEM_PROMPT = [
   "",
   "Core rules:",
   "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call the tool.",
-  "  2. CRITICAL — Promise = tool call. If your reply states or implies that you created / edited /",
-  "     moved / deleted N notes or files, you MUST issue N corresponding tool calls IN THE SAME",
-  "     TURN. Saying \"我已经创建了卡片A和卡片B并把它们链接到了文章\" without three matching",
-  "     vault_write/vault_edit calls is a bug — the user sees your tool-call chips and will catch",
-  "     the mismatch. Before ending your turn, mentally tally: every concrete file change you",
-  "     claimed must be backed by a tool call in this turn. If not, KEEP GOING — call the missing",
-  "     tools now.",
+  "  2. CRITICAL — Promise = tool call. If your reply states OR implies that ANY of these happened —",
+  "       • 创建/写入/新建/制卡/提炼/落库/归档/记录/保存/整理 a note, card, or draft",
+  "       • \"已…\" / \"搞定\" / \"已落库\" / \"已记录\" / \"已完成\" / a ✅ checkbox",
+  "       • a progress-summary TABLE listing items as \"完成 / 已处理 / 已建\"",
+  "       • created / wrote / saved / edited / updated / archived / moved / deleted in English",
+  "     …you MUST have ALREADY issued the matching vault_write / vault_edit / vault_move /",
+  "     vault_property / vault_daily / vault_create_dir tool calls IN THIS TURN. \"提炼了两个卡片\"",
+  "     does NOT mean \"we talked about two cards\" — it means TWO vault_write calls already fired.",
+  "     If they haven't fired yet, DO NOT WRITE the summary text. Call the tools first, then summarize.",
   "  3. Prefer vault_edit for small in-place changes; reserve vault_write/overwrite for wholesale rewrites.",
   "  4. When the user attaches files, they appear in the conversation wrapped like this:",
   "       <<<FLOWNOTE_FILE path=\"some/path.md\">>>",
@@ -111,6 +113,17 @@ const BASE_SYSTEM_PROMPT = [
   "  5. To edit a file you don't have the latest contents of, call vault_read first.",
   "  6. Reply in the same language the user used. Be concise.",
   "  7. If you finish without needing tools, respond naturally with text only.",
+  "",
+  "Linking & verification:",
+  "  • Source / 出处 citations: ALWAYS put the wikilink in the NOTE BODY (e.g. an early line like",
+  "    `> 出处：[[Path/To/Source.md]]`). DO put it in frontmatter too (`source: \"[[Path/To/Source.md]]\"`,",
+  "    with quotes), BUT — and this is the key — the body link is what makes the backlink reliably",
+  "    show up in Obsidian's reverse-link panel. Frontmatter link recognition depends on the user's",
+  "    property-type configuration; the body wikilink does NOT. Do both, but body is the contract.",
+  "  • Do NOT call vault_backlinks to verify a link you just created in this same turn. Obsidian's",
+  "    metadataCache reindexes asynchronously — a fresh write may not appear in backlinks for a few",
+  "    seconds. Trust the vault_write/vault_edit result. If the user later questions whether the link",
+  "    landed, verify with vault_search (which reads the file content directly) rather than backlinks.",
   "",
   "obsidian-cli compatibility map:",
   "  Some skills reference `obsidian-cli` (Obsidian's official CLI tool) for vault operations. " +
@@ -704,12 +717,19 @@ async function runDirectAgentTurn({
   } else {
     log("turn tool summary: <no tool calls this turn>");
   }
-  // Heuristic warning: if the assistant text claims to have written /
-  // created / edited / saved something but no destructive tool fired,
-  // log a flag so we can audit. This will appear in agent-trace.log.
+  // Heuristic warning: if the assistant text implies a concrete vault
+  // action (create / edit / extract a card / save progress / etc.) but
+  // no destructive tool fired, log a flag so we can audit. Wider net
+  // than just "wrote" — covers the "提炼了两个卡片草案" pattern that
+  // surfaced 2026-05-15.
   const wroteText = state.text || "";
-  const claimedAction = /(已[创建写编修]|created|wrote|edited|saved|新建|创建了|写入了|保存了|added|moved|删除|deleted)/.test(wroteText);
-  const hadDestructiveCall = state.toolUses.some((t) => /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/.test(t.name) && !t.isError);
+  const claimedAction =
+    /(已[创建写编修保整记归落])/.test(wroteText) ||
+    /(提炼了|制卡|落库|归档|新建[了一]|创建了|写入了|保存了|整理[完到]|完成[了 ]|✅|搞定)/.test(wroteText) ||
+    /(created|wrote|edited|saved|updated|archived|moved|deleted|added)/i.test(wroteText);
+  const hadDestructiveCall = state.toolUses.some((t) =>
+    /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/.test(t.name) && !t.isError,
+  );
   if (claimedAction && !hadDestructiveCall && wroteText.length > 0) {
     log(`turn WARNING: assistant text claims action but no destructive tool call fired (textLen=${wroteText.length}, tools=${state.toolUses.length})`);
   }

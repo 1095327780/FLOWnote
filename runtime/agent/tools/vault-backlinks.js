@@ -142,7 +142,12 @@ function createVaultBacklinksTool({ app, normalizePath } = {}) {
       if (map.size === 0) {
         yield {
           type: "result",
-          content: `vault_backlinks: no notes link to "${path}".`,
+          content:
+            `vault_backlinks: no notes link to "${path}".\n\n` +
+            "Note: Obsidian's metadataCache reindexes asynchronously, so a wikilink " +
+            "written in the past few seconds may not show here yet. If you JUST wrote " +
+            "a file with a `[[link]]` to this path, trust the write and don't retry — " +
+            "use vault_search (which reads file content directly) if you need confirmation.",
         };
         return;
       }
