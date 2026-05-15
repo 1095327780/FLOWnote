@@ -4,8 +4,10 @@ const assert = require("node:assert/strict");
 const {
   runDirectAgentTurn,
   buildAnthropicHistory,
+  buildDefaultToolRegistry,
 } = require("../../../runtime/chat/direct-agent-runner");
 const { ToolRegistry, buildTool } = require("../../../runtime/agent/tool-registry");
+const { SkillRegistry } = require("../../../runtime/agent/skill-registry");
 const {
   defaultAgentSettings,
   setApiKeyFor,
@@ -297,6 +299,168 @@ test("runDirectAgentTurn surfaces MISSING_API_KEY when key is empty", async () =
     }),
     /No API key configured/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// M2 tool surface — buildDefaultToolRegistry registers the full set
+// ---------------------------------------------------------------------------
+
+test("buildDefaultToolRegistry registers all 7 vault/ask/skill tools when a vault is present", () => {
+  const vault = {
+    getFileByPath: () => null,
+    cachedRead: async () => "",
+    create: async () => ({}),
+    modify: async () => {},
+  };
+  const skillRegistry = new SkillRegistry([
+    { name: "ah-card", description: "Card crafter", body: "..." },
+  ]);
+  const registry = buildDefaultToolRegistry({ vault }, undefined, skillRegistry);
+  const names = registry.list().map((t) => t.name).sort();
+  assert.deepEqual(names, [
+    "ask_user",
+    "skill_invoke",
+    "vault_edit",
+    "vault_list",
+    "vault_read",
+    "vault_search",
+    "vault_write",
+  ]);
+});
+
+test("buildDefaultToolRegistry omits skill_invoke when no SkillRegistry is supplied", () => {
+  const vault = {
+    getFileByPath: () => null,
+    cachedRead: async () => "",
+    create: async () => ({}),
+    modify: async () => {},
+  };
+  const registry = buildDefaultToolRegistry({ vault });
+  assert.equal(registry.get("skill_invoke"), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// runDirectAgentTurn injects skill listing + currentDate into system prompt
+// ---------------------------------------------------------------------------
+
+test("runDirectAgentTurn passes a system prompt containing currentDate + skill listing", async () => {
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "hi" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  // Capture what the provider was actually called with.
+  let capturedInput = null;
+  const provider = {
+    id: "mock",
+    displayName: "Mock",
+    spec: { id: "mock", displayName: "Mock", protocol: "anthropic-messages", models: [] },
+    userConfig: { providerId: "mock", mode: "api", apiKey: "k", model: "mock-1" },
+    async *createMessage(input) {
+      capturedInput = input;
+      yield ev.msgStart();
+      yield ev.textBlock(0);
+      yield ev.textDelta(0, "ok");
+      yield ev.blockStop(0);
+      yield ev.msgDelta("end_turn");
+      yield ev.msgStop();
+    },
+  };
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+  const skillRegistry = new SkillRegistry([
+    { name: "ah-card", description: "Card crafter", body: "Body of ah-card." },
+    { name: "ah-note", description: "Daily note", body: "Body of ah-note." },
+  ]);
+  const { handlers } = collectHandlerCalls();
+
+  await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "hi",
+    handlers,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+    skillRegistryOverride: skillRegistry,
+  });
+
+  assert.ok(capturedInput, "provider must have been called");
+  const sys = capturedInput.system || "";
+  // Local date is YYYY-MM-DD; we don't assert the value (would be flaky),
+  // just the marker.
+  assert.match(sys, /# currentDate/);
+  assert.match(sys, /\d{4}-\d{2}-\d{2}/);
+  assert.match(sys, /Available skills/);
+  assert.match(sys, /- ah-card:/);
+  assert.match(sys, /- ah-note:/);
+});
+
+// ---------------------------------------------------------------------------
+// ask_user handler bridge: chat-orchestrator-style onAskUser is invoked
+// ---------------------------------------------------------------------------
+
+test("runDirectAgentTurn routes ask_user tool calls through handlers.onAskUser", async () => {
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "decide" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  const provider = makeFakeProvider([
+    [
+      ev.msgStart(),
+      ev.toolUseStart(0, "tu-1", "ask_user"),
+      ev.toolUseJson(
+        0,
+        JSON.stringify({
+          questions: [
+            {
+              question: "Which one?",
+              header: "Pick",
+              options: [
+                { label: "A", description: "first" },
+                { label: "B", description: "second" },
+              ],
+            },
+          ],
+        }),
+      ),
+      ev.blockStop(0),
+      ev.msgDelta("tool_use"),
+      ev.msgStop(),
+    ],
+    [
+      ev.msgStart(),
+      ev.textBlock(0),
+      ev.textDelta(0, "got A"),
+      ev.blockStop(0),
+      ev.msgDelta("end_turn"),
+      ev.msgStop(),
+    ],
+  ]);
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+
+  const askCalls = [];
+  const handlers = {
+    onToken: () => {},
+    onBlocks: () => {},
+    onPermissionRequest: async () => "once",
+    onAskUser: async (payload) => {
+      askCalls.push(payload);
+      return { answers: { "Which one?": "A" } };
+    },
+  };
+
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "decide",
+    handlers,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+  });
+
+  assert.equal(askCalls.length, 1);
+  assert.equal(askCalls[0].questions[0].question, "Which one?");
+  assert.equal(response.text, "got A");
 });
 
 test("runDirectAgentTurn meta line carries provider + model + tool count", async () => {

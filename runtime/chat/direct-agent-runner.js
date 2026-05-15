@@ -76,6 +76,13 @@ const BASE_SYSTEM_PROMPT = [
   "  4. To edit a file you don't have the latest contents of, call vault_read first.",
   "  5. Reply in the same language the user used. Be concise.",
   "  6. If you finish without needing tools, respond naturally with text only.",
+  "",
+  "Skill compatibility note:",
+  "  Some skills reference `obsidian-cli` as an \"official skill\" for vault operations. " +
+  "That was an OpenCode-era helper and does NOT exist in this runtime. When a skill says " +
+  "\"use obsidian-cli to read/search/write\", silently translate that to: vault_read for reading, " +
+  "vault_list / vault_search for discovery, vault_edit for in-place edits, vault_write for " +
+  "create/overwrite. Same for any reference to Bash/Read/Write tools — they don't exist here.",
 ].join("\n");
 
 function buildSystemPrompt(skillManifests, opts) {
@@ -163,6 +170,24 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry) {
 }
 
 /**
+ * Resolve where SKILL.md files live. We share the path with the legacy
+ * SkillService (slash-command path) so the user never has to configure
+ * the directory twice. Order:
+ *   1. plugin.settings.skillsDir      (legacy + slash-command source of truth)
+ *   2. DEFAULT_SKILL_ROOT             (.opencode/skills — back-compat default)
+ *
+ * @param {Object} plugin
+ * @returns {string}
+ */
+function resolveSkillRoot(plugin) {
+  if (plugin && plugin.settings && typeof plugin.settings.skillsDir === "string") {
+    const trimmed = plugin.settings.skillsDir.trim();
+    if (trimmed) return trimmed;
+  }
+  return DEFAULT_SKILL_ROOT;
+}
+
+/**
  * Load skills from the vault. Cached on the plugin object so we don't
  * re-scan disk on every turn. Cache invalidates when the configured
  * skill root path changes.
@@ -174,11 +199,7 @@ async function ensureSkillRegistry(plugin) {
   if (!plugin || !plugin.app || !plugin.app.vault) {
     return new SkillRegistry([]);
   }
-  const settings = plugin.settings && plugin.settings.agentProvider;
-  const direct = settings && settings.direct;
-  const skillRoot = (direct && typeof direct.skillRoot === "string" && direct.skillRoot.trim())
-    ? direct.skillRoot.trim()
-    : DEFAULT_SKILL_ROOT;
+  const skillRoot = resolveSkillRoot(plugin);
 
   // Cache key: skill root string. Re-load if the user points elsewhere.
   if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === skillRoot) {
