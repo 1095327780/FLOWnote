@@ -95,15 +95,22 @@ const BASE_SYSTEM_PROMPT = [
   "",
   "Core rules:",
   "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call the tool.",
-  "  2. Prefer vault_edit for small in-place changes; reserve vault_write/overwrite for wholesale rewrites.",
-  "  3. When the user attaches files, they appear in the conversation wrapped like this:",
+  "  2. CRITICAL — Promise = tool call. If your reply states or implies that you created / edited /",
+  "     moved / deleted N notes or files, you MUST issue N corresponding tool calls IN THE SAME",
+  "     TURN. Saying \"我已经创建了卡片A和卡片B并把它们链接到了文章\" without three matching",
+  "     vault_write/vault_edit calls is a bug — the user sees your tool-call chips and will catch",
+  "     the mismatch. Before ending your turn, mentally tally: every concrete file change you",
+  "     claimed must be backed by a tool call in this turn. If not, KEEP GOING — call the missing",
+  "     tools now.",
+  "  3. Prefer vault_edit for small in-place changes; reserve vault_write/overwrite for wholesale rewrites.",
+  "  4. When the user attaches files, they appear in the conversation wrapped like this:",
   "       <<<FLOWNOTE_FILE path=\"some/path.md\">>>",
   "       ...file contents...",
   "       <<<END_FLOWNOTE_FILE>>>",
   "     The `path` attribute is the REAL vault path. Use it directly with vault_read/vault_write/vault_edit.",
-  "  4. To edit a file you don't have the latest contents of, call vault_read first.",
-  "  5. Reply in the same language the user used. Be concise.",
-  "  6. If you finish without needing tools, respond naturally with text only.",
+  "  5. To edit a file you don't have the latest contents of, call vault_read first.",
+  "  6. Reply in the same language the user used. Be concise.",
+  "  7. If you finish without needing tools, respond naturally with text only.",
   "",
   "obsidian-cli compatibility map:",
   "  Some skills reference `obsidian-cli` (Obsidian's official CLI tool) for vault operations. " +
@@ -684,6 +691,28 @@ async function runDirectAgentTurn({
   // 5. Compose final response in the shape sendMessage returns
   // ---------------------------------------------------------------------
   log(`turn end stop=${stopReason || "?"} textLen=${state.text.length} tools=${state.toolUses.length}`);
+  // Per-tool summary so reading the trace file later tells you exactly
+  // what fired this turn. Format: name(status,Nbytes) — easy to scan
+  // for "the model claimed 3 files but only 1 tool ran".
+  if (state.toolUses.length > 0) {
+    const summary = state.toolUses.map((t) => {
+      const sz = typeof t.output === "string" ? t.output.length : 0;
+      const status = t.isError ? "ERR" : (t.status || "?");
+      return `${t.name}(${status},${sz}b)`;
+    }).join(" ");
+    log(`turn tool summary: ${summary}`);
+  } else {
+    log("turn tool summary: <no tool calls this turn>");
+  }
+  // Heuristic warning: if the assistant text claims to have written /
+  // created / edited / saved something but no destructive tool fired,
+  // log a flag so we can audit. This will appear in agent-trace.log.
+  const wroteText = state.text || "";
+  const claimedAction = /(已[创建写编修]|created|wrote|edited|saved|新建|创建了|写入了|保存了|added|moved|删除|deleted)/.test(wroteText);
+  const hadDestructiveCall = state.toolUses.some((t) => /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/.test(t.name) && !t.isError);
+  if (claimedAction && !hadDestructiveCall && wroteText.length > 0) {
+    log(`turn WARNING: assistant text claims action but no destructive tool call fired (textLen=${wroteText.length}, tools=${state.toolUses.length})`);
+  }
 
   // If the model ran out of output budget before producing anything
   // useful, surface a clear message instead of a silent empty bubble.

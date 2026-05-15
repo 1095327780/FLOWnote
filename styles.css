@@ -2891,6 +2891,28 @@ padding: 3px 7px;
   font-weight: 600;
 }
 
+.oc-perm-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.oc-perm-action {
+  padding: 12px 14px;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--oc-brand-faint) 35%, var(--background-primary));
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.oc-perm-detail-row {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 10px 4px 10px;
+  font-family: var(--font-monospace, monospace);
+}
+
 .oc-perm-meta,
 .oc-diagnostics-modal pre {
   margin: 0;
