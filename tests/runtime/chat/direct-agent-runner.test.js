@@ -305,7 +305,7 @@ test("runDirectAgentTurn surfaces MISSING_API_KEY when key is empty", async () =
 // M2 tool surface — buildDefaultToolRegistry registers the full set
 // ---------------------------------------------------------------------------
 
-test("buildDefaultToolRegistry registers all 7 vault/ask/skill tools when a vault is present", () => {
+test("buildDefaultToolRegistry registers the minimum surface with a bare vault", () => {
   const vault = {
     getFileByPath: () => null,
     cachedRead: async () => "",
@@ -317,13 +317,49 @@ test("buildDefaultToolRegistry registers all 7 vault/ask/skill tools when a vaul
   ]);
   const registry = buildDefaultToolRegistry({ vault }, undefined, skillRegistry);
   const names = registry.list().map((t) => t.name).sort();
+  // Without fileManager / metadataCache, the obsidian-native tools that
+  // depend on them are skipped; vault_daily still registers because it
+  // works against vault.create/modify directly.
   assert.deepEqual(names, [
     "ask_user",
     "skill_invoke",
+    "vault_daily",
     "vault_edit",
     "vault_list",
     "vault_read",
     "vault_search",
+    "vault_write",
+  ]);
+});
+
+test("buildDefaultToolRegistry registers the full obsidian-native set when app has metadataCache + fileManager", () => {
+  const vault = {
+    getFileByPath: () => null,
+    cachedRead: async () => "",
+    create: async () => ({}),
+    modify: async () => {},
+    getMarkdownFiles: () => [],
+  };
+  const app = {
+    vault,
+    fileManager: { processFrontMatter: async () => {} },
+    metadataCache: { getTags: () => ({}), getFileCache: () => null, resolvedLinks: {} },
+  };
+  const skillRegistry = new SkillRegistry([]);
+  const registry = buildDefaultToolRegistry(app, undefined, skillRegistry);
+  const names = registry.list().map((t) => t.name).sort();
+  assert.deepEqual(names, [
+    "ask_user",
+    "skill_invoke",
+    "vault_backlinks",
+    "vault_daily",
+    "vault_edit",
+    "vault_list",
+    "vault_property",
+    "vault_read",
+    "vault_search",
+    "vault_tags",
+    "vault_tasks",
     "vault_write",
   ]);
 });

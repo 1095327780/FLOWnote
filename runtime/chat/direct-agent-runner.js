@@ -16,6 +16,11 @@ const { createVaultWriteTool } = require("../agent/tools/vault-write");
 const { createVaultEditTool } = require("../agent/tools/vault-edit");
 const { createVaultListTool } = require("../agent/tools/vault-list");
 const { createVaultSearchTool } = require("../agent/tools/vault-search");
+const { createVaultDailyTool } = require("../agent/tools/vault-daily");
+const { createVaultPropertyTool } = require("../agent/tools/vault-property");
+const { createVaultBacklinksTool } = require("../agent/tools/vault-backlinks");
+const { createVaultTasksTool } = require("../agent/tools/vault-tasks");
+const { createVaultTagsTool } = require("../agent/tools/vault-tags");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { loadSkills, formatSkillListing, SkillRegistry } = require("../agent/skill-registry");
@@ -47,23 +52,36 @@ const BASE_SYSTEM_PROMPT = [
   "You are FLOWnote, an AI assistant running inside Obsidian. The user's notes live in an Obsidian vault.",
   "",
   "You have these tools available:",
-  "  • vault_read   — read a markdown note. Pass `path` (vault-relative, forward slashes).",
-  "                   Optional `offset` + `limit` to slice long files.",
-  "  • vault_list   — enumerate notes/folders. Optional `path`, `pattern` (glob), `extensions`,",
-  "                   `recursive`, `include_folders`, `limit`.",
-  "  • vault_search — search note contents. Required `query` (substring; set `regex: true` for regex).",
-  "                   Optional `path`, `pattern`, `case_sensitive`, `extensions`, `max_files`, `max_matches`.",
-  "  • vault_edit   — precise string replacement in a single note. Pass `path`, `old_string`,",
-  "                   `new_string`, optional `replace_all`. The match must be unique unless replace_all.",
-  "                   Prefer this over vault_write for surgical edits (faster, safer).",
-  "  • vault_write  — create / overwrite / append text. Pass `path`, `content`, `mode`:",
-  "                     mode=\"create\"    → fails if the file already exists",
-  "                     mode=\"overwrite\" → replace existing content (full rewrite only)",
-  "                     mode=\"append\"   → add to the end",
-  "  • ask_user     — ask the user a multiple-choice question when truly ambiguous. Don't",
-  "                   abuse this — most ambiguity can be resolved with vault_list / vault_search.",
-  "  • skill_invoke — load a vault skill's instructions so you can follow them. See \"Available",
-  "                   skills\" below. Pass `skill` (name) and optional `args` (string).",
+  "  • vault_read      — read a markdown note. Pass `path` (vault-relative, forward slashes).",
+  "                      Optional `offset` + `limit` to slice long files.",
+  "  • vault_list      — enumerate notes/folders. Optional `path`, `pattern` (glob), `extensions`,",
+  "                      `recursive`, `include_folders`, `limit`.",
+  "  • vault_search    — search note contents. Required `query` (substring; set `regex: true` for regex).",
+  "                      Optional `path`, `pattern`, `case_sensitive`, `extensions`, `max_files`, `max_matches`.",
+  "  • vault_edit      — precise string replacement in a single note. Pass `path`, `old_string`,",
+  "                      `new_string`, optional `replace_all`. The match must be unique unless replace_all.",
+  "                      Prefer this over vault_write for surgical edits (faster, safer).",
+  "  • vault_write     — create / overwrite / append text. Pass `path`, `content`, `mode`:",
+  "                        mode=\"create\"    → fails if the file already exists",
+  "                        mode=\"overwrite\" → replace existing content (full rewrite only)",
+  "                        mode=\"append\"   → add to the end",
+  "  • vault_daily     — read / append / create the user's daily note. Pass `mode` (read|append|create),",
+  "                      optional `date` (YYYY-MM-DD, defaults to today), optional `content`.",
+  "                      Uses the daily-notes plugin's folder + format + template automatically.",
+  "                      Prefer this whenever the user means \"today's note\" / \"昨日日记\" / \"周记\".",
+  "  • vault_property  — read/set/delete a YAML frontmatter property. Pass `path`, `name`, `op`",
+  "                      (get|set|delete), `value` (for set). Use for status / tags / source /",
+  "                      due-date / any frontmatter field.",
+  "  • vault_backlinks — list notes that link TO a given note. Pass `path`. Useful for finding",
+  "                      related notes (ah-card flow) without reading every file.",
+  "  • vault_tasks     — list checkbox tasks across the vault. Optional `path` scope, `status`",
+  "                      (open|done|all). Use for daily/weekly task review.",
+  "  • vault_tags      — `mode: list` returns top tags + counts; `mode: files` returns notes that",
+  "                      carry a given `tag` (with or without leading #).",
+  "  • ask_user        — ask the user a multiple-choice question when truly ambiguous. Don't",
+  "                      abuse this — most ambiguity can be resolved with vault_list / vault_search.",
+  "  • skill_invoke    — load a vault skill's instructions so you can follow them. See \"Available",
+  "                      skills\" below. Pass `skill` (name) and optional `args` (string).",
   "",
   "Core rules:",
   "  1. ALWAYS call the tools to do file operations. Do NOT just describe what you would write — actually call the tool.",
@@ -77,12 +95,21 @@ const BASE_SYSTEM_PROMPT = [
   "  5. Reply in the same language the user used. Be concise.",
   "  6. If you finish without needing tools, respond naturally with text only.",
   "",
-  "Skill compatibility note:",
-  "  Some skills reference `obsidian-cli` as an \"official skill\" for vault operations. " +
-  "That was an OpenCode-era helper and does NOT exist in this runtime. When a skill says " +
-  "\"use obsidian-cli to read/search/write\", silently translate that to: vault_read for reading, " +
-  "vault_list / vault_search for discovery, vault_edit for in-place edits, vault_write for " +
-  "create/overwrite. Same for any reference to Bash/Read/Write tools — they don't exist here.",
+  "obsidian-cli compatibility map:",
+  "  Some skills reference `obsidian-cli` (Obsidian's official CLI tool) for vault operations. " +
+  "The CLI itself is desktop-only and not available in this runtime, but the same operations " +
+  "are exposed as native tools here. Translate as follows:",
+  "    obsidian read              → vault_read",
+  "    obsidian create            → vault_write mode=\"create\"",
+  "    obsidian append            → vault_write mode=\"append\"",
+  "    obsidian search            → vault_search",
+  "    obsidian daily:read        → vault_daily mode=\"read\"",
+  "    obsidian daily:append      → vault_daily mode=\"append\"",
+  "    obsidian property:set      → vault_property op=\"set\"",
+  "    obsidian backlinks         → vault_backlinks",
+  "    obsidian tasks             → vault_tasks",
+  "    obsidian tags              → vault_tags",
+  "  Same idea for any reference to Bash / Read / Write tools — they don't exist here; use the vault_* tools above.",
 ].join("\n");
 
 function buildSystemPrompt(skillManifests, opts) {
@@ -161,6 +188,21 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry) {
     registry.register(createVaultSearchTool({ vault: app.vault, normalizePath }));
     registry.register(createVaultEditTool({ vault: app.vault, normalizePath }));
     registry.register(createVaultWriteTool({ vault: app.vault, normalizePath }));
+    // Obsidian-native tools — replace the operations the old skills used
+    // to delegate to `obsidian-cli`. Each one is gated on the relevant
+    // app sub-API existing, so we degrade gracefully on minimal vault
+    // mocks (tests) or older Obsidian versions.
+    registry.register(createVaultDailyTool({ app, normalizePath }));
+    if (app.fileManager && typeof app.fileManager.processFrontMatter === "function") {
+      registry.register(createVaultPropertyTool({ app, normalizePath }));
+    }
+    if (app.metadataCache) {
+      registry.register(createVaultBacklinksTool({ app, normalizePath }));
+      if (typeof app.metadataCache.getFileCache === "function") {
+        registry.register(createVaultTasksTool({ app, normalizePath }));
+      }
+      registry.register(createVaultTagsTool({ app }));
+    }
   }
   registry.register(createAskUserTool());
   if (skillRegistry && typeof skillRegistry.list === "function") {
@@ -269,6 +311,28 @@ function summarizeToolInput(toolName, input) {
   if (toolName === "vault_search") {
     const q = typeof input.query === "string" ? input.query : "";
     return input.path ? `"${q}" in ${input.path}` : `"${q}"`;
+  }
+  if (toolName === "vault_daily") {
+    const mode = typeof input.mode === "string" ? input.mode : "read";
+    const date = typeof input.date === "string" ? input.date : "today";
+    return `${mode} ${date}`;
+  }
+  if (toolName === "vault_property") {
+    const op = typeof input.op === "string" ? input.op : "get";
+    return `${op} ${input.name || "?"} → ${input.path || "?"}`;
+  }
+  if (toolName === "vault_backlinks") {
+    return typeof input.path === "string" ? input.path : "";
+  }
+  if (toolName === "vault_tasks") {
+    const status = typeof input.status === "string" ? input.status : "open";
+    const path = typeof input.path === "string" && input.path ? input.path : "/";
+    return `${status} in ${path}`;
+  }
+  if (toolName === "vault_tags") {
+    const mode = typeof input.mode === "string" ? input.mode : "list";
+    if (mode === "files") return `files ${input.tag || ""}`;
+    return "list";
   }
   if (toolName === "skill_invoke") {
     const skill = typeof input.skill === "string" ? input.skill : "";
