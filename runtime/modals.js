@@ -136,6 +136,125 @@ class PermissionRequestModal extends Modal {
   }
 }
 
+class AskUserQuestionModal extends Modal {
+  constructor(app, payload, onResolve, t) {
+    super(app);
+    this.payload = payload || { questions: [] };
+    this.onResolve = onResolve;
+    this.t = t;
+    this.resolved = false;
+    // Per-question state: { selectedLabels: Set<string>, otherText: string }
+    this.state = (this.payload.questions || []).map(() => ({
+      selectedLabels: new Set(),
+      otherText: "",
+      otherChecked: false,
+    }));
+  }
+
+  resolveAndClose(answers) {
+    if (this.resolved) return;
+    this.resolved = true;
+    if (typeof this.onResolve === "function") this.onResolve(answers);
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("oc-ask-modal");
+    contentEl.createEl("h2", { text: tr(this.t, "modals.ask.title", "FLOWnote 想问你") });
+
+    const questions = Array.isArray(this.payload.questions) ? this.payload.questions : [];
+    questions.forEach((q, qIdx) => {
+      const block = contentEl.createDiv({ cls: "oc-ask-question" });
+      block.createEl("h3", { text: q.question || "" });
+      if (q.header) {
+        block.createDiv({ cls: "oc-ask-header", text: `[${q.header}]` });
+      }
+      const opts = Array.isArray(q.options) ? q.options : [];
+      const isMulti = !!q.multiSelect;
+      const inputType = isMulti ? "checkbox" : "radio";
+      const groupName = `oc-ask-q-${qIdx}`;
+
+      opts.forEach((opt) => {
+        const row = block.createDiv({ cls: "oc-ask-option" });
+        const labelEl = row.createEl("label");
+        const input = labelEl.createEl("input", { attr: { type: inputType, name: groupName } });
+        labelEl.createSpan({ cls: "oc-ask-option-label", text: opt.label || "" });
+        if (opt.description) {
+          row.createDiv({ cls: "oc-ask-option-desc", text: opt.description });
+        }
+        input.addEventListener("change", () => {
+          const st = this.state[qIdx];
+          if (isMulti) {
+            if (input.checked) st.selectedLabels.add(opt.label);
+            else st.selectedLabels.delete(opt.label);
+          } else {
+            st.selectedLabels.clear();
+            if (input.checked) st.selectedLabels.add(opt.label);
+          }
+        });
+      });
+
+      // "Other" — free-text fallback.
+      const otherRow = block.createDiv({ cls: "oc-ask-option oc-ask-other" });
+      const otherLabel = otherRow.createEl("label");
+      const otherInput = otherLabel.createEl("input", {
+        attr: { type: inputType, name: groupName },
+      });
+      otherLabel.createSpan({ cls: "oc-ask-option-label", text: tr(this.t, "modals.ask.other", "其它（自己写）") });
+      const textInput = otherRow.createEl("textarea", {
+        cls: "oc-ask-other-text",
+        attr: { placeholder: tr(this.t, "modals.ask.otherPlaceholder", "在这里写你的回答…") },
+      });
+      otherInput.addEventListener("change", () => {
+        const st = this.state[qIdx];
+        st.otherChecked = otherInput.checked;
+        if (!isMulti && otherInput.checked) {
+          st.selectedLabels.clear();
+        }
+      });
+      textInput.addEventListener("input", () => {
+        this.state[qIdx].otherText = String(textInput.value || "");
+      });
+    });
+
+    const actions = contentEl.createDiv({ cls: "oc-ask-actions" });
+    const cancelBtn = actions.createEl("button", {
+      cls: "mod-muted",
+      text: tr(this.t, "modals.ask.dismiss", "跳过"),
+    });
+    const okBtn = actions.createEl("button", {
+      cls: "mod-cta",
+      text: tr(this.t, "modals.ask.submit", "提交"),
+    });
+    cancelBtn.addEventListener("click", () => this.resolveAndClose({ dismissed: true }));
+    okBtn.addEventListener("click", () => {
+      const answers = {};
+      questions.forEach((q, qIdx) => {
+        const st = this.state[qIdx];
+        const isMulti = !!q.multiSelect;
+        const picked = Array.from(st.selectedLabels);
+        if (st.otherChecked && st.otherText.trim()) picked.push(st.otherText.trim());
+        if (isMulti) {
+          answers[q.question] = picked;
+        } else {
+          answers[q.question] = picked[0] || "";
+        }
+      });
+      this.resolveAndClose({ answers });
+    });
+  }
+
+  onClose() {
+    if (!this.resolved && typeof this.onResolve === "function") {
+      this.onResolve({ dismissed: true });
+      this.resolved = true;
+    }
+    this.contentEl.empty();
+  }
+}
+
 class PromptAppendModal extends Modal {
   constructor(app, promptText, onSubmit, t) {
     super(app);
@@ -277,6 +396,7 @@ class ModelSelectorModal extends Modal {
 }
 
 module.exports = {
+  AskUserQuestionModal,
   DiagnosticsModal,
   ModelSelectorModal,
   PermissionRequestModal,

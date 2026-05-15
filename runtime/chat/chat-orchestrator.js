@@ -255,6 +255,17 @@ function createTransportHandlers(view, sessionId, draftId) {
       return "reject";
     },
 
+    onAskUser: async (payload) => {
+      // Direct-mode ask_user bridge. The chat view opens an AskUserQuestionModal
+      // and resolves with { answers } or { dismissed: true }.
+      view.setRuntimeStatus(tr(view, "view.ask.waiting", "Waiting for your answer..."), "info");
+      try {
+        return await view.showAskUserModal(payload || { questions: [] });
+      } finally {
+        view.setRuntimeStatus(null);
+      }
+    },
+
     onQuestionRequest: (questionRequest) => {
       const request = view.upsertPendingQuestionRequest(questionRequest || {});
       if (!request) return;

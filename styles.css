@@ -2717,7 +2717,8 @@ padding: 3px 7px;
 .oc-perm-modal,
 .oc-prompt-modal,
 .oc-diagnostics-modal,
-.oc-skill-modal {
+.oc-skill-modal,
+.oc-ask-modal {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2732,8 +2733,68 @@ padding: 3px 7px;
 .oc-perm-modal h2,
 .oc-prompt-modal h2,
 .oc-diagnostics-modal h2,
-.oc-skill-modal h2 {
+.oc-skill-modal h2,
+.oc-ask-modal h2 {
   margin: 0;
+}
+
+.oc-ask-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  background: var(--oc-surface-muted);
+}
+
+.oc-ask-question h3 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+}
+
+.oc-ask-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace, monospace);
+}
+
+.oc-ask-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.oc-ask-option label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.oc-ask-option-label {
+  font-weight: 500;
+}
+
+.oc-ask-option-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-left: 22px;
+}
+
+.oc-ask-other-text {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 4px;
+  font-family: inherit;
+}
+
+.oc-ask-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .oc-model-modal-subtitle,

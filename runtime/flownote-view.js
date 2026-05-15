@@ -3,6 +3,7 @@ const {
   Notice,
 } = require("obsidian");
 const {
+  AskUserQuestionModal,
   PermissionRequestModal,
   PromptAppendModal,
 } = require("./modals");
@@ -110,6 +111,18 @@ class FLOWnoteAssistantView extends ItemView {
         permission,
         (answer) => resolve(answer || null),
         stringifyForDisplay,
+        typeof this.plugin.t === "function" ? this.plugin.t.bind(this.plugin) : null,
+      );
+      modal.open();
+    });
+  }
+
+  showAskUserModal(payload) {
+    return new Promise((resolve) => {
+      const modal = new AskUserQuestionModal(
+        this.app,
+        payload,
+        (answer) => resolve(answer || { dismissed: true }),
         typeof this.plugin.t === "function" ? this.plugin.t.bind(this.plugin) : null,
       );
       modal.open();
