@@ -21,6 +21,9 @@ const { createVaultPropertyTool } = require("../agent/tools/vault-property");
 const { createVaultBacklinksTool } = require("../agent/tools/vault-backlinks");
 const { createVaultTasksTool } = require("../agent/tools/vault-tasks");
 const { createVaultTagsTool } = require("../agent/tools/vault-tags");
+const { createVaultMoveTool } = require("../agent/tools/vault-move");
+const { createVaultCreateDirTool } = require("../agent/tools/vault-create-dir");
+const { createVaultGetActiveFileTool } = require("../agent/tools/vault-get-active-file");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { loadSkills, formatSkillListing, SkillRegistry } = require("../agent/skill-registry");
@@ -78,6 +81,13 @@ const BASE_SYSTEM_PROMPT = [
   "                      (open|done|all). Use for daily/weekly task review.",
   "  • vault_tags      — `mode: list` returns top tags + counts; `mode: files` returns notes that",
   "                      carry a given `tag` (with or without leading #).",
+  "  • vault_move      — rename or move a note OR folder. Pass `from` and `to` (both vault-relative).",
+  "                      Obsidian rewrites wikilinks pointing at the moved file(s) automatically —",
+  "                      ALWAYS prefer this over vault_write to a new path + delete.",
+  "  • vault_create_dir — `mkdir -p` for a vault folder. Pass `path`. Use BEFORE vault_write when",
+  "                      laying out a new directory structure (e.g. a fresh project folder).",
+  "  • vault_get_active_file — return the note currently open in the editor (path + basename +",
+  "                      parent folder). Use when the user says \"this note\" / \"add to here\".",
   "  • ask_user        — ask the user a multiple-choice question when truly ambiguous. Don't",
   "                      abuse this — most ambiguity can be resolved with vault_list / vault_search.",
   "  • skill_invoke    — load a vault skill's instructions so you can follow them. See \"Available",
@@ -110,6 +120,44 @@ const BASE_SYSTEM_PROMPT = [
   "    obsidian tasks             → vault_tasks",
   "    obsidian tags              → vault_tags",
   "  Same idea for any reference to Bash / Read / Write tools — they don't exist here; use the vault_* tools above.",
+  "",
+  "Vault navigation (read this BEFORE searching):",
+  "",
+  "  The user's vault uses a PARA + Zettelkasten hybrid:",
+  "    01-捕获层/  daily notes, inbox, reading clippings (capture stage)",
+  "    02-培养层/  permanent notes, literature notes, topic pages (📍 prefix)",
+  "    03-连接层/  domain pages (🌱 prefix) — top-level knowledge hubs",
+  "    04-创造层/  active projects, archives",
+  "",
+  "  When the user asks about a topic, asks \"what do I know about X\", asks to extract notes,",
+  "  asks to summarize their thinking, or otherwise needs you to RETRIEVE knowledge from the vault:",
+  "",
+  "    STEP 1 — Read the authoritative index FIRST: `Meta/索引/kb-manifest.md`. This file is",
+  "             maintained by the user's /ah-index skill and lists every domain page, topic",
+  "             page, and permanent-note grouping. It is the FAST PATH — do not search before",
+  "             you have read it.",
+  "",
+  "    STEP 2 — If kb-manifest.md exists AND was updated recently, follow the link hierarchy",
+  "             it describes: domain page (🌱) → topic page (📍) → permanent note. Use",
+  "             vault_read on the specific page the user cares about, then vault_read again on",
+  "             the permanent notes it links to.",
+  "",
+  "    STEP 3 — If kb-manifest.md is MISSING, EMPTY, or its `更新时间` / `version` frontmatter",
+  "             field shows it's older than ~30 days, tell the user (in their language):",
+  "               \"你的知识库索引看起来过期/不存在，建议运行 /ah-index 重建一下，AI 才能高效",
+  "                  地通过领域页 → 主题页 → 永久笔记的层级帮你找东西。\"",
+  "             Then proceed to STEP 4.",
+  "",
+  "    STEP 4 — Fallback (no usable index): vault_list to enumerate 02-培养层/永久笔记 and",
+  "             03-连接层, vault_search to find by content. Tell the user EXPLICITLY that you're",
+  "             doing a manual scan because the index is unavailable.",
+  "",
+  "  Naming conventions (use to identify file type WITHOUT reading content):",
+  "    🌱 *.md    → domain page (knowledge hub)",
+  "    📍 *.md    → topic page (groups permanent notes)",
+  "    《...》*.md → literature note (book/article)",
+  "    YYYY-MM-DD.md → daily note",
+  "    no prefix → permanent note (atomic assertion)",
 ].join("\n");
 
 function buildSystemPrompt(skillManifests, opts) {
@@ -202,6 +250,19 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry) {
         registry.register(createVaultTasksTool({ app, normalizePath }));
       }
       registry.register(createVaultTagsTool({ app }));
+    }
+    if (
+      typeof app.vault.getAbstractFileByPath === "function" &&
+      app.fileManager &&
+      typeof app.fileManager.renameFile === "function"
+    ) {
+      registry.register(createVaultMoveTool({ app, normalizePath }));
+    }
+    if (typeof app.vault.createFolder === "function" && typeof app.vault.getAbstractFileByPath === "function") {
+      registry.register(createVaultCreateDirTool({ app, normalizePath }));
+    }
+    if (app.workspace && typeof app.workspace.getActiveFile === "function") {
+      registry.register(createVaultGetActiveFileTool({ app }));
     }
   }
   registry.register(createAskUserTool());
@@ -333,6 +394,17 @@ function summarizeToolInput(toolName, input) {
     const mode = typeof input.mode === "string" ? input.mode : "list";
     if (mode === "files") return `files ${input.tag || ""}`;
     return "list";
+  }
+  if (toolName === "vault_move") {
+    const from = typeof input.from === "string" ? input.from : "?";
+    const to = typeof input.to === "string" ? input.to : "?";
+    return `${from} → ${to}`;
+  }
+  if (toolName === "vault_create_dir") {
+    return typeof input.path === "string" ? input.path : "";
+  }
+  if (toolName === "vault_get_active_file") {
+    return "";
   }
   if (toolName === "skill_invoke") {
     const skill = typeof input.skill === "string" ? input.skill : "";
