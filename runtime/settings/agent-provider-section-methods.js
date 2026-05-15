@@ -231,20 +231,81 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
           });
       });
   } else if (Array.isArray(spec.models) && spec.models.length > 0) {
-    new Setting(containerEl)
+    // Cached fetched models from provider.listModels(), merged with the
+    // registry baseline so the user gets the latest provider-side names
+    // (e.g. when a vendor releases a new tier between plugin releases).
+    if (!plugin.__flownoteFetchedModels) plugin.__flownoteFetchedModels = {};
+    const fetched = plugin.__flownoteFetchedModels[spec.id];
+    const fetchedAt = fetched && fetched.fetchedAt;
+    const fetchedAgeMin = fetchedAt ? Math.round((Date.now() - fetchedAt) / 60000) : null;
+    const fetchedList = (fetched && Array.isArray(fetched.models)) ? fetched.models : [];
+
+    // Merge: registry entries first (preserves curated labels), then any
+    // fetched ids the registry doesn't know about.
+    const registryIds = new Set(spec.models.map((m) => m.id));
+    const merged = [
+      ...spec.models.map((m) => ({ id: m.id, label: m.deprecated ? `${m.label} (deprecated)` : m.label })),
+      ...fetchedList
+        .filter((m) => !registryIds.has(m.id))
+        .map((m) => ({ id: m.id, label: `${m.label || m.id}（来自接口）` })),
+    ];
+
+    const modelSetting = new Setting(containerEl)
       .setName(t("settings.agent.modelName", "模型"))
-      .setDesc(t("settings.agent.modelDesc", "选择该服务商提供的模型。"))
+      .setDesc(
+        fetchedAgeMin === null
+          ? t("settings.agent.modelDesc", "选择该服务商提供的模型。点击右侧刷新可从官方接口拉取最新列表。")
+          : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin }),
+      )
       .addDropdown((d) => {
-        for (const m of spec.models) {
-          const label = m.deprecated ? `${m.label} (deprecated)` : m.label;
-          d.addOption(m.id, label);
-        }
+        for (const m of merged) d.addOption(m.id, m.label);
         d.setValue(agent.direct.model || spec.defaultModel);
         d.onChange(async (v) => {
           agent.direct.model = v;
           await plugin.saveSettings();
         });
+      })
+      .addButton((b) => {
+        b.setButtonText(t("settings.agent.modelRefresh", "刷新"));
+        b.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /v1/models 接口拉取最新模型列表（需要已填 API Key）。"));
+        b.onClick(async () => {
+          b.setDisabled(true);
+          const originalText = b.buttonEl.textContent;
+          b.setButtonText(t("settings.agent.modelRefreshLoading", "拉取中…"));
+          try {
+            const userConfig = {
+              providerId: spec.id,
+              mode: agent.direct.providerMode || spec.defaultMode,
+              region: agent.direct.region,
+              apiKey: getActiveApiKey(agent),
+              model: agent.direct.model || spec.defaultModel,
+              baseUrlOverride: agent.direct.baseUrlOverride || "",
+              userAgentOverride: agent.direct.userAgentOverride || "",
+              versionHeaderOverride: agent.direct.versionHeaderOverride || "",
+              stream: false,
+            };
+            if (!userConfig.apiKey) {
+              throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
+            }
+            const provider = buildProviderFromSpec({ spec, userConfig });
+            if (typeof provider.listModels !== "function") {
+              throw new Error(t("settings.agent.modelRefreshUnsupported", "当前协议不支持自动获取模型列表。"));
+            }
+            const list = await provider.listModels();
+            plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
+            new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: list.length }));
+            // Re-render the settings tab so the dropdown picks up the new list.
+            if (typeof refresh === "function") refresh();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
+            b.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
+            b.setDisabled(false);
+          }
+        });
       });
+    // Use modelSetting so eslint doesn't flag it unused.
+    void modelSetting;
   }
 
   // --- Test button ---------------------------------------------------------

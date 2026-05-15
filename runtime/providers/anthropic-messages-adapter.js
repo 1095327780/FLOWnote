@@ -248,6 +248,54 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
   }
 
   /**
+   * Fetch the live model list. Anthropic native doesn't have a public
+   * list endpoint, but the Chinese providers using this protocol
+   * (DeepSeek, MiniMax, Moonshot) do — they expose `/v1/models` on
+   * their OpenAI-compat sibling endpoint. We use `spec.modelsListEndpoint`
+   * if defined, otherwise derive from the Anthropic-compat base URL by
+   * stripping the trailing `/anthropic` and appending `/v1/models`.
+   *
+   * Throws "not supported" if neither path is available, so the settings
+   * UI can fall back to the hardcoded registry list cleanly.
+   */
+  async function listModels() {
+    let url = spec.modelsListEndpoint;
+    if (!url) {
+      const base = resolveBaseUrl(spec, userConfig).replace(/\/+$/, "");
+      const stripped = base.replace(/\/anthropic$/, "");
+      if (stripped === base) {
+        throw new Error("listModels: provider does not advertise a model-list endpoint");
+      }
+      url = `${stripped}/v1/models`;
+    }
+    const headers = buildHeaders(spec, userConfig);
+    // /v1/models is an OpenAI-shape endpoint — use Bearer auth even if
+    // the spec was configured with x-api-key for the Messages endpoint.
+    if (spec.auth.scheme !== "bearer") {
+      delete headers[spec.auth.headerName];
+      headers.Authorization = `Bearer ${userConfig.apiKey || ""}`;
+    }
+    const res = await requestImpl({ url, method: "GET", headers });
+    const status = res && typeof res.status === "number" ? res.status : 0;
+    if (status < 200 || status >= 300) {
+      throw new Error(`listModels: ${status} from ${url}`);
+    }
+    let body = res && res.json;
+    if (!body && res && typeof res.text === "string") {
+      try { body = JSON.parse(res.text); } catch { body = null; }
+    }
+    const data = body && Array.isArray(body.data) ? body.data : [];
+    /** @type {Array<{id: string, label: string}>} */
+    const out = [];
+    for (const m of data) {
+      if (!m || typeof m.id !== "string" || !m.id) continue;
+      out.push({ id: m.id, label: m.id });
+    }
+    out.sort((a, b) => a.id.localeCompare(b.id));
+    return out;
+  }
+
+  /**
    * Best-effort local token estimate. Anthropic exposes a server-side
    * counter but it's an extra round-trip; for v0.5.0 we approximate.
    *
@@ -279,6 +327,7 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
     createMessage,
     countTokens,
     testConnection,
+    listModels,
   };
 }
 
