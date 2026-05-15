@@ -84,7 +84,7 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
       return input && typeof input.path === "string" ? input.path : "";
     },
 
-    async *execute(input, _ctx) {
+    async *execute(input, ctx) {
       const normalized = normalize(input.path);
       const file = vault.getFileByPath(normalized);
       if (!file) {
@@ -97,6 +97,15 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
       }
       const raw = await vault.cachedRead(file);
       const text = typeof raw === "string" ? raw : String(raw || "");
+
+      // Record the full file content in the session's FileStateCache
+      // so vault_edit can verify read-before-edit and vault_backlinks
+      // can sidestep metadataCache lag. Always record the WHOLE file
+      // (not a slice) so the cache stays trustworthy for downstream
+      // string-replacement / link-scanning consumers.
+      if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordRead === "function") {
+        ctx.fileStateCache.recordRead(normalized, text);
+      }
 
       const offset = Number.isInteger(input.offset) ? input.offset : 1;
       const limit = Number.isInteger(input.limit) ? input.limit : null;

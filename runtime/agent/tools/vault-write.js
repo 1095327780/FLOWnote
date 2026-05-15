@@ -110,11 +110,16 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
       return `${mode} ${path}`;
     },
 
-    async *execute(input, _ctx) {
+    async *execute(input, ctx) {
       const mode = input.mode || "create";
       const normalized = normalize(input.path);
       const content = input.content;
       const existing = vault.getFileByPath(normalized);
+      const recordWrite = (finalContent) => {
+        if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordWrite === "function") {
+          ctx.fileStateCache.recordWrite(normalized, finalContent);
+        }
+      };
 
       yield { type: "progress", message: `${mode} → ${normalized}` };
 
@@ -128,6 +133,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
           return;
         }
         await vault.create(normalized, content);
+        recordWrite(content);
         yield {
           type: "result",
           content: `Created "${normalized}" (${Buffer.byteLength(content, "utf8")} bytes).`,
@@ -141,6 +147,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         } else {
           await vault.create(normalized, content);
         }
+        recordWrite(content);
         yield {
           type: "result",
           content: `Wrote "${normalized}" (${Buffer.byteLength(content, "utf8")} bytes).`,
@@ -153,6 +160,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         const current = await vault.cachedRead(existing);
         const joined = `${current || ""}${content}`;
         await vault.modify(existing, joined);
+        recordWrite(joined);
         yield {
           type: "result",
           content: `Appended ${Buffer.byteLength(content, "utf8")} bytes to "${normalized}".`,
@@ -160,6 +168,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         return;
       }
       await vault.create(normalized, content);
+      recordWrite(content);
       yield {
         type: "result",
         content: `Created "${normalized}" via append (${Buffer.byteLength(content, "utf8")} bytes).`,

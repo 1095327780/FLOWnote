@@ -126,7 +126,7 @@ function createVaultBacklinksTool({ app, normalizePath } = {}) {
       return input && typeof input.path === "string" ? input.path : "";
     },
 
-    async *execute(input, _ctx) {
+    async *execute(input, ctx) {
       const path = normalize(input.path);
       const file = app.vault.getFileByPath(path);
       if (!file) {
@@ -139,15 +139,25 @@ function createVaultBacklinksTool({ app, normalizePath } = {}) {
       }
       const limit = Number.isInteger(input.limit) ? input.limit : DEFAULT_LIMIT;
       const map = collectBacklinks(app.metadataCache, file);
+
+      // metadataCache lag bypass: Obsidian reindexes asynchronously,
+      // so a wikilink written 1-2 seconds ago may not be in the
+      // resolvedLinks map yet. We DON'T want to make the model wait
+      // and retry. Instead, scan any files we WROTE this session
+      // (tracked in ctx.fileStateCache) for the target path, and
+      // merge them into the result. The cache has the post-write
+      // content, so even brand-new wikilinks are caught.
+      const recentlyWrittenHits = scanRecentWritesForLink(ctx, file);
+      for (const [src, count] of recentlyWrittenHits.entries()) {
+        // Don't double-count if the metadataCache already saw it.
+        const existing = map.get(src) || 0;
+        if (count > existing) map.set(src, count);
+      }
+
       if (map.size === 0) {
         yield {
           type: "result",
-          content:
-            `vault_backlinks: no notes link to "${path}".\n\n` +
-            "Note: Obsidian's metadataCache reindexes asynchronously, so a wikilink " +
-            "written in the past few seconds may not show here yet. If you JUST wrote " +
-            "a file with a `[[link]]` to this path, trust the write and don't retry — " +
-            "use vault_search (which reads file content directly) if you need confirmation.",
+          content: `vault_backlinks: no notes link to "${path}".`,
         };
         return;
       }
@@ -166,7 +176,51 @@ function createVaultBacklinksTool({ app, normalizePath } = {}) {
   });
 }
 
+/**
+ * Scan files written this session (cached in ctx.fileStateCache) for
+ * wikilinks pointing at the target file. We match three common forms:
+ *   [[target]]               — basename
+ *   [[folder/target]]        — relative path
+ *   [[folder/target.md]]     — explicit extension
+ *   [[…|display]] aliases    — anything before the |
+ *
+ * Returns Map<sourcePath, occurrenceCount>. Empty Map if cache is absent.
+ *
+ * @param {Object} ctx
+ * @param {Object} targetFile   { path, basename }
+ * @returns {Map<string, number>}
+ */
+function scanRecentWritesForLink(ctx, targetFile) {
+  const out = new Map();
+  if (!ctx || !ctx.fileStateCache || typeof ctx.fileStateCache.recentWrites !== "function") {
+    return out;
+  }
+  const path = String(targetFile && targetFile.path || "");
+  const basename = String(targetFile && targetFile.basename || path.split("/").pop().replace(/\.md$/i, ""));
+  if (!path && !basename) return out;
+  const noExt = path.replace(/\.md$/i, "");
+  // Build a regex matching `[[<target>]]` or `[[<target>|display]]`,
+  // where `<target>` may be: basename, noExt path, or full path.
+  // Escape regex specials in the candidate strings.
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const candidates = Array.from(new Set([basename, noExt, path].filter(Boolean).map(escape)));
+  if (candidates.length === 0) return out;
+  const re = new RegExp(`\\[\\[(?:${candidates.join("|")})(?:#[^\\]|]+)?(?:\\|[^\\]]+)?\\]\\]`, "g");
+
+  for (const entry of ctx.fileStateCache.recentWrites()) {
+    if (!entry || entry.path === path) continue; // ignore self-links
+    const content = typeof entry.content === "string" ? entry.content : "";
+    if (!content) continue;
+    re.lastIndex = 0;
+    let count = 0;
+    while (re.exec(content) !== null) count += 1;
+    if (count > 0) out.set(entry.path, count);
+  }
+  return out;
+}
+
 module.exports = {
   createVaultBacklinksTool,
   collectBacklinks,
+  scanRecentWritesForLink,
 };

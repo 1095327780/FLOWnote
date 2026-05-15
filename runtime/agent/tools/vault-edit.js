@@ -87,7 +87,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
     isDestructive: () => false, // edits are reversible by re-editing; overwrite is what we call "destructive"
     isConcurrencySafe: () => false,
 
-    async validate(input) {
+    async validate(input, ctx) {
       if (!input || typeof input.path !== "string" || !input.path.trim()) {
         return { ok: false, error: "Missing path." };
       }
@@ -105,6 +105,27 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       }
       if (input.replace_all !== undefined && typeof input.replace_all !== "boolean") {
         return { ok: false, error: "replace_all must be a boolean." };
+      }
+      // Read-before-edit gate (mirrors the reference project's
+      // FileStateCache approach). Reason: vault_edit does exact-string
+      // replacement; if the model is editing a file it hasn't opened
+      // this session, the replacement is almost certainly a guess and
+      // the result will either silently miss or corrupt the file.
+      // Passing through means the model MUST call vault_read on this
+      // path before editing it. A successful vault_write also satisfies
+      // the gate (the model just wrote the file, so it knows the
+      // content).
+      const normalized = normalize(input.path);
+      if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.has === "function") {
+        if (!ctx.fileStateCache.has(normalized)) {
+          return {
+            ok: false,
+            error:
+              `vault_edit refused: you must call vault_read on "${normalized}" first this ` +
+              "session before editing it. Read the file, identify the exact text you want to " +
+              "replace, then call vault_edit again.",
+          };
+        }
       }
       return { ok: true };
     },
@@ -126,7 +147,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       return input && typeof input.path === "string" ? input.path : "";
     },
 
-    async *execute(input, _ctx) {
+    async *execute(input, ctx) {
       const normalized = normalize(input.path);
       const file = vault.getFileByPath(normalized);
       if (!file) {
@@ -177,6 +198,9 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
 
       yield { type: "progress", message: `edit → ${normalized}` };
       await vault.modify(file, updated);
+      if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordWrite === "function") {
+        ctx.fileStateCache.recordWrite(normalized, updated);
+      }
 
       const delta = Buffer.byteLength(updated, "utf8") - Buffer.byteLength(current, "utf8");
       const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
