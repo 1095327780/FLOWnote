@@ -3836,10 +3836,6 @@ padding: 3px 7px;
   --m-font-mono:     "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --m-font-display:  "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
   --m-font-body:     -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
-}
-
-/* ---- Root + shell: dark canvas, full available height, kb-aware ---- */
-.is-mobile .oc-root.oc-surface {
   padding: 0;
   background: var(--m-bg);
   color: var(--m-text);
@@ -4206,7 +4202,7 @@ padding: 3px 7px;
 .is-mobile .oc-nav-sidebar,
 .is-mobile .oc-nav-btn-top,
 .is-mobile .oc-nav-btn-bottom {
-  display: none !important;
+  display: none;
 }
 
 /* Hide "Current session: …" context footer — session label belongs in the
@@ -4244,7 +4240,7 @@ padding: 3px 7px;
 .is-mobile .oc-composer .oc-input,
 .is-mobile .oc-composer-input,
 .is-mobile .oc-input-wrapper textarea {
-  font-size: 16px !important; /* prevents iOS auto-zoom on focus */
+  font-size: 16px; /* prevents iOS auto-zoom on focus */
   font-family: var(--m-font-body);
   color: var(--m-text);
   background: transparent;
@@ -4473,6 +4469,8 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   --m-accent-lime:   #16a34a;
   --m-glow-primary:  0 6px 18px rgba(0, 113, 227, 0.20);
   --m-glow-warm:     0 6px 16px rgba(217, 119, 6, 0.18);
+  background-color: #f5f6f9;
+  color: #1a1d24;
 
   /* Lighter ambient mesh — keep depth but don't tint the whole page. */
   background-image:
@@ -4481,15 +4479,14 @@ body.theme-light .is-mobile .oc-root.oc-surface {
 }
 
 /* Header glass: solid off-white. The base rule uses translucent + backdrop-filter
- * which on mobile lets the dark Obsidian shell show through; force solid white
- * with !important so it always reads correctly on bright screens. */
+ * which on mobile lets the dark Obsidian shell show through. */
 body.theme-light .is-mobile .oc-header {
-  background: #ffffff !important;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.96)) !important;
-  border-bottom-color: var(--m-border) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  color: var(--m-text) !important;
+  background: #ffffff;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.96));
+  border-bottom-color: var(--m-border);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--m-text);
 }
 
 /* Header / toolbar buttons: white surfaces with light borders. */
@@ -4568,8 +4565,8 @@ body.theme-light .is-mobile .oc-message-system {
 /* Markdown content: ensure body text is the deep charcoal, not Obsidian's
  * default which might be inherited from theme `--text-normal` (custom themes
  * frequently set this to a faded gray that looks washed-out on white).
- * Force with !important and target all descendants — Obsidian's markdown
- * renderer wraps content in elements with their own color rules. */
+ * Target all descendants because Obsidian's markdown renderer wraps
+ * content in elements with their own color rules. */
 body.theme-light .is-mobile .oc-message-content,
 body.theme-light .is-mobile .oc-message-content p,
 body.theme-light .is-mobile .oc-message-content li,
@@ -4577,7 +4574,7 @@ body.theme-light .is-mobile .oc-message-content td,
 body.theme-light .is-mobile .oc-message-content blockquote,
 body.theme-light .is-mobile .oc-message-content .markdown-rendered,
 body.theme-light .is-mobile .oc-message-content .markdown-preview-view {
-  color: #1a1d24 !important;
+  color: #1a1d24;
 }
 body.theme-light .is-mobile .oc-message-content h1,
 body.theme-light .is-mobile .oc-message-content h2,
@@ -4585,31 +4582,31 @@ body.theme-light .is-mobile .oc-message-content h3,
 body.theme-light .is-mobile .oc-message-content h4,
 body.theme-light .is-mobile .oc-message-content h5,
 body.theme-light .is-mobile .oc-message-content h6 {
-  color: var(--m-accent-strong) !important;
+  color: var(--m-accent-strong);
 }
 body.theme-light .is-mobile .oc-message-content a {
-  color: var(--m-accent) !important;
+  color: var(--m-accent);
 }
 body.theme-light .is-mobile .oc-message-content a.oc-vault-path-link code {
-  color: var(--m-accent) !important;
+  color: var(--m-accent);
 }
 body.theme-light .is-mobile .oc-message-content strong,
 body.theme-light .is-mobile .oc-message-content b {
-  color: #0b0d12 !important;
+  color: #0b0d12;
 }
 body.theme-light .is-mobile .oc-message-content code,
 body.theme-light .is-mobile .oc-message-content kbd {
-  background: var(--m-surface-2) !important;
-  border-color: var(--m-border) !important;
-  color: #1a1d24 !important;
+  background: var(--m-surface-2);
+  border-color: var(--m-border);
+  color: #1a1d24;
 }
 body.theme-light .is-mobile .oc-message-content pre {
-  background: var(--m-surface-2) !important;
-  border-color: var(--m-border) !important;
+  background: var(--m-surface-2);
+  border-color: var(--m-border);
 }
 body.theme-light .is-mobile .oc-message-content pre code {
-  color: #1a1d24 !important;
-  background: transparent !important;
+  color: #1a1d24;
+  background: transparent;
 }
 
 /* Linked context chip inside a message: stronger blue tint on white. */
@@ -4620,20 +4617,19 @@ body.theme-light .is-mobile .oc-message-context-files {
 }
 
 /* Composer: solid bright bg (was previously a translucent gradient that
- * let the dark shell bleed through). Force with !important to defeat the
- * base mobile rule which paints a dark rgba(0,0,0,0.18) overlay. */
+ * let the dark shell bleed through). */
 body.theme-light .is-mobile .oc-composer {
-  background: var(--m-bg) !important;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 40%) !important;
-  border-top: 1px solid var(--m-border) !important;
+  background: var(--m-bg);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 40%);
+  border-top: 1px solid var(--m-border);
 }
 body.theme-light .is-mobile .oc-input-wrapper {
-  background: #ffffff !important;
-  background-image: none !important;
-  border: 1px solid var(--m-border) !important;
+  background: #ffffff;
+  background-image: none;
+  border: 1px solid var(--m-border);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.04),
-    0 6px 18px rgba(0, 0, 0, 0.06) !important;
+    0 6px 18px rgba(0, 0, 0, 0.06);
 }
 body.theme-light .is-mobile .oc-input-wrapper:focus-within {
   border-color: var(--m-accent);
@@ -4664,27 +4660,27 @@ body.theme-light .is-mobile .oc-context-link-btn:active {
   border-color: var(--m-accent);
 }
 body.theme-light .is-mobile .oc-model-select-inline-wrap {
-  background: #eff1f6 !important;
-  background-image: none !important;
-  border-color: #d4d8e0 !important;
-  color: #4a5366 !important;
-  box-shadow: none !important;
+  background: #eff1f6;
+  background-image: none;
+  border-color: #d4d8e0;
+  color: #4a5366;
+  box-shadow: none;
 }
 body.theme-light .is-mobile .oc-model-select-inline-text {
-  color: #4a5366 !important;
+  color: #4a5366;
 }
 body.theme-light .is-mobile .oc-model-select-inline-caret {
-  color: #828b9b !important;
+  color: #828b9b;
 }
 body.theme-light .is-mobile .oc-model-select-inline,
 body.theme-light .is-mobile .oc-model-select-inline select {
-  background: transparent !important;
-  background-color: transparent !important;
-  color: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
+  background: transparent;
+  background-color: transparent;
+  color: transparent;
+  border: none;
+  box-shadow: none;
+  -webkit-appearance: none;
+  appearance: none;
 }
 body.theme-light .is-mobile .oc-cancel-btn {
   background: var(--m-surface-1);
@@ -4733,15 +4729,6 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
   color: var(--m-accent);
 }
 
-/* Root canvas in light mode: force the solid bg (the base rule paints
- * #08090d). Without !important the ambient mesh background-image keeps
- * the page looking dark on themes that strip the body.theme-light token
- * overrides. */
-body.theme-light .is-mobile .oc-root.oc-surface {
-  background-color: #f5f6f9 !important;
-  color: #1a1d24 !important;
-}
-
 /* ================================================================
  * SYSTEM LIGHT MODE OVERRIDE (OS-level signal, theme-agnostic)
  *
@@ -4758,107 +4745,107 @@ body.theme-light .is-mobile .oc-root.oc-surface {
 @media (prefers-color-scheme: light) {
   /* Surface canvas */
   .oc-root.oc-surface {
-    background-color: #f5f6f9 !important;
-    background-image: none !important;
-    color: #1a1d24 !important;
+    background-color: #f5f6f9;
+    background-image: none;
+    color: #1a1d24;
   }
   .oc-shell {
-    background: #f5f6f9 !important;
-    background-image: linear-gradient(180deg, #ffffff 0%, #f5f6f9 100%) !important;
+    background: #f5f6f9;
+    background-image: linear-gradient(180deg, #ffffff 0%, #f5f6f9 100%);
   }
 
   /* Header strip and its action buttons */
   .oc-header {
-    background: #ffffff !important;
-    color: #1a1d24 !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border-bottom: 1px solid #d4d8e0 !important;
+    background: #ffffff;
+    color: #1a1d24;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: 1px solid #d4d8e0;
   }
   .oc-brand-title,
   .oc-header-meta {
-    color: #1a1d24 !important;
+    color: #1a1d24;
   }
   .oc-icon-btn,
   .oc-header-btn,
   .oc-header-btn.oc-icon-btn {
-    background: #ffffff !important;
-    border: 1px solid #d4d8e0 !important;
-    color: #1a1d24 !important;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+    background: #ffffff;
+    border: 1px solid #d4d8e0;
+    color: #1a1d24;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   }
   .oc-icon-btn:hover,
   .oc-icon-btn:active,
   .oc-header-btn:hover,
   .oc-header-btn:active {
-    background: #eef3fa !important;
-    border-color: #0071e3 !important;
-    color: #0071e3 !important;
+    background: #eef3fa;
+    border-color: #0071e3;
+    color: #0071e3;
   }
   .oc-icon-btn svg,
   .oc-header-btn svg {
-    color: currentColor !important;
+    color: currentColor;
   }
 
   /* Composer (bottom input area) */
   .oc-composer {
-    background: #ffffff !important;
-    background-image: none !important;
-    border-top: 1px solid #d4d8e0 !important;
+    background: #ffffff;
+    background-image: none;
+    border-top: 1px solid #d4d8e0;
   }
   .oc-input-wrapper {
-    background: #ffffff !important;
-    background-image: none !important;
-    border: 1px solid #d4d8e0 !important;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 18px rgba(0, 0, 0, 0.06) !important;
+    background: #ffffff;
+    background-image: none;
+    border: 1px solid #d4d8e0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 18px rgba(0, 0, 0, 0.06);
   }
   .oc-input-wrapper:focus-within {
-    border-color: #0071e3 !important;
-    box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.4), 0 6px 18px rgba(0, 0, 0, 0.06) !important;
+    border-color: #0071e3;
+    box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.4), 0 6px 18px rgba(0, 0, 0, 0.06);
   }
   .oc-composer textarea,
   .oc-composer .oc-input,
   .oc-composer-input,
   .oc-input-wrapper textarea {
-    color: #1a1d24 !important;
-    background: transparent !important;
+    color: #1a1d24;
+    background: transparent;
   }
   .oc-composer textarea::placeholder {
-    color: #828b9b !important;
+    color: #828b9b;
   }
 
   /* Send / attach buttons in the composer */
   .oc-context-link-btn,
   .oc-cancel-btn {
-    background: #ffffff !important;
-    border: 1px solid #d4d8e0 !important;
-    color: #4a5366 !important;
+    background: #ffffff;
+    border: 1px solid #d4d8e0;
+    color: #4a5366;
   }
   .is-mobile .oc-model-select-inline-wrap {
-    background: #eff1f6 !important;
-    background-image: none !important;
-    border: 1px solid #d4d8e0 !important;
-    color: #4a5366 !important;
-    box-shadow: none !important;
+    background: #eff1f6;
+    background-image: none;
+    border: 1px solid #d4d8e0;
+    color: #4a5366;
+    box-shadow: none;
   }
   .is-mobile .oc-model-select-inline-text {
-    color: #4a5366 !important;
+    color: #4a5366;
   }
   .is-mobile .oc-model-select-inline-caret {
-    color: #828b9b !important;
+    color: #828b9b;
   }
   .is-mobile .oc-model-select-inline,
   .is-mobile .oc-model-select-inline select {
-    background: transparent !important;
-    background-color: transparent !important;
-    color: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    -webkit-appearance: none !important;
-    appearance: none !important;
+    background: transparent;
+    background-color: transparent;
+    color: transparent;
+    border: none;
+    box-shadow: none;
+    -webkit-appearance: none;
+    appearance: none;
   }
   .oc-send-btn {
-    color: #ffffff !important;
+    color: #ffffff;
   }
 
   /* Assistant message body markdown — force readable dark text. The
@@ -4871,7 +4858,7 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   .oc-message-content blockquote,
   .oc-message-content .markdown-rendered,
   .oc-message-content .markdown-preview-view {
-    color: #1a1d24 !important;
+    color: #1a1d24;
   }
   .oc-message-content h1,
   .oc-message-content h2,
@@ -4879,37 +4866,37 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   .oc-message-content h4,
   .oc-message-content h5,
   .oc-message-content h6 {
-    color: #0058b3 !important;
+    color: #0058b3;
   }
   .oc-message-content a {
-    color: #0071e3 !important;
+    color: #0071e3;
   }
   .oc-message-content a.oc-vault-path-link code {
-    color: #0071e3 !important;
+    color: #0071e3;
   }
   .oc-message-content strong,
   .oc-message-content b {
-    color: #0b0d12 !important;
+    color: #0b0d12;
   }
   .oc-message-content code,
   .oc-message-content kbd {
-    background: #eff1f6 !important;
-    color: #1a1d24 !important;
-    border: 1px solid #d4d8e0 !important;
+    background: #eff1f6;
+    color: #1a1d24;
+    border: 1px solid #d4d8e0;
   }
   .oc-message-content pre {
-    background: #eff1f6 !important;
-    border: 1px solid #d4d8e0 !important;
+    background: #eff1f6;
+    border: 1px solid #d4d8e0;
   }
   .oc-message-content pre code {
-    background: transparent !important;
-    color: #1a1d24 !important;
+    background: transparent;
+    color: #1a1d24;
   }
   /* User message bubble — soft blue tint on white */
   .oc-message-user {
-    background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%) !important;
-    border: 1px solid #b4d4f0 !important;
-    color: #1a1d24 !important;
+    background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%);
+    border: 1px solid #b4d4f0;
+    color: #1a1d24;
   }
 
   /* File picker / slash-command picker / mention picker popup. Uses
@@ -4917,52 +4904,52 @@ body.theme-light .is-mobile .oc-root.oc-surface {
    * theme — force readable light surface + dark text. */
   .oc-context-file-picker,
   .oc-slash-command-picker {
-    background: #ffffff !important;
-    border: 1px solid #d4d8e0 !important;
-    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.04) !important;
-    color: #1a1d24 !important;
+    background: #ffffff;
+    border: 1px solid #d4d8e0;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.04);
+    color: #1a1d24;
   }
   .oc-context-file-picker-search {
-    background: #f5f6f9 !important;
-    border: 1px solid #d4d8e0 !important;
-    color: #1a1d24 !important;
+    background: #f5f6f9;
+    border: 1px solid #d4d8e0;
+    color: #1a1d24;
   }
   .oc-context-file-picker-search::placeholder {
-    color: #828b9b !important;
+    color: #828b9b;
   }
   .oc-context-file-picker-empty {
-    color: #4a5366 !important;
+    color: #4a5366;
   }
   .oc-context-file-picker-item {
-    color: #1a1d24 !important;
+    color: #1a1d24;
   }
   .oc-context-file-picker-item-name {
-    color: #1a1d24 !important;
+    color: #1a1d24;
   }
   .oc-context-file-picker-item-path {
-    color: #4a5366 !important;
+    color: #4a5366;
   }
   .oc-context-file-picker-item-meta {
-    color: #0058b3 !important;
+    color: #0058b3;
   }
   .oc-context-file-picker-item:hover,
   .oc-context-file-picker-item.is-selected,
   .oc-context-file-picker-item:active {
-    background: #eef3fa !important;
+    background: #eef3fa;
   }
   .oc-slash-command-item-command {
-    color: #0058b3 !important;
+    color: #0058b3;
   }
   .oc-slash-command-item-meta {
-    color: #4a5366 !important;
+    color: #4a5366;
   }
 
   /* History dropdown (session switcher in header) */
   .oc-history-menu {
-    background: #ffffff !important;
-    border: 1px solid #d4d8e0 !important;
-    color: #1a1d24 !important;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12) !important;
+    background: #ffffff;
+    border: 1px solid #d4d8e0;
+    color: #1a1d24;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
   }
 
   /* Mobile welcome screen suggestion cards — paper-tone palette so they
@@ -4974,11 +4961,11 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   .is-mobile .oc-mobile-suggest-card,
   .oc-mobile-suggest-card,
   .oc-suggest-card {
-    background: #fbfaf6 !important;
-    background-image: linear-gradient(160deg, #ffffff 0%, #f5f3ee 100%) !important;
-    border: 1px solid #e3e1d8 !important;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.04) !important;
-    color: #1a1d24 !important;
+    background: #fbfaf6;
+    background-image: linear-gradient(160deg, #ffffff 0%, #f5f3ee 100%);
+    border: 1px solid #e3e1d8;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.04);
+    color: #1a1d24;
   }
   .is-mobile .oc-mobile-suggest-card:active,
   .oc-mobile-suggest-card:active,
@@ -4986,42 +4973,42 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   .oc-suggest-card:focus-visible,
   .oc-suggest-card:active {
     transform: translateY(-2px);
-    border-color: color-mix(in srgb, var(--card-accent, #0071e3) 50%, #d4d8e0) !important;
+    border-color: color-mix(in srgb, var(--card-accent, #0071e3) 50%, #d4d8e0);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-accent, #0071e3) 25%, transparent),
-                0 10px 24px rgba(0, 0, 0, 0.08) !important;
+                0 10px 24px rgba(0, 0, 0, 0.08);
   }
   .is-mobile .oc-mobile-suggest-card::before,
   .oc-mobile-suggest-card::before,
   .oc-suggest-card::before {
-    opacity: 0.85 !important;
+    opacity: 0.85;
   }
   .is-mobile .oc-mobile-suggest-cmd,
   .oc-mobile-suggest-cmd,
   .oc-suggest-cmd {
-    color: var(--card-accent, #0058b3) !important;
+    color: var(--card-accent, #0058b3);
   }
   .is-mobile .oc-mobile-suggest-title,
   .oc-mobile-suggest-title,
   .oc-suggest-title {
-    color: #1a1d24 !important;
+    color: #1a1d24;
   }
   .is-mobile .oc-mobile-suggest-hint,
   .oc-mobile-suggest-hint,
   .oc-suggest-hint {
-    color: #5b6478 !important;
+    color: #5b6478;
   }
   /* Welcome greeting + hint above the cards */
   .is-mobile .oc-welcome-greeting,
   .oc-welcome-greeting {
-    background: linear-gradient(120deg, #1a1d24 0%, #0071e3 55%, #d97706 100%) !important;
-    -webkit-background-clip: text !important;
-    background-clip: text !important;
-    color: transparent !important;
-    -webkit-text-fill-color: transparent !important;
+    background: linear-gradient(120deg, #1a1d24 0%, #0071e3 55%, #d97706 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
   }
   .is-mobile .oc-empty,
   .oc-empty {
-    color: #4a5366 !important;
+    color: #4a5366;
   }
 
   /* Mobile-specific overrides keep working too. */
@@ -5037,28 +5024,28 @@ body.theme-light .is-mobile .oc-root.oc-surface {
     --m-text-faint:   #828b9b;
     --m-accent:        #0071e3;
     --m-accent-strong: #0058b3;
-    background-color: #f5f6f9 !important;
-    color: #1a1d24 !important;
+    background-color: #f5f6f9;
+    color: #1a1d24;
   }
   body:not(.theme-dark) .is-mobile .oc-header {
-    background: #ffffff !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border-bottom: 1px solid #d4d8e0 !important;
+    background: #ffffff;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: 1px solid #d4d8e0;
   }
   body:not(.theme-dark) .is-mobile .oc-composer {
-    background: #f5f6f9 !important;
-    border-top: 1px solid #d4d8e0 !important;
+    background: #f5f6f9;
+    border-top: 1px solid #d4d8e0;
   }
   body:not(.theme-dark) .is-mobile .oc-input-wrapper {
-    background: #ffffff !important;
-    border: 1px solid #d4d8e0 !important;
+    background: #ffffff;
+    border: 1px solid #d4d8e0;
   }
   body:not(.theme-dark) .is-mobile .oc-message-content,
   body:not(.theme-dark) .is-mobile .oc-message-content p,
   body:not(.theme-dark) .is-mobile .oc-message-content li,
   body:not(.theme-dark) .is-mobile .oc-message-content td {
-    color: #1a1d24 !important;
+    color: #1a1d24;
   }
 }
 
@@ -5120,29 +5107,28 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   overflow: hidden;
 }
 
-/* Each setting-item inside a group: flat row with a thin top divider.
- * Force-override theme styles that paint a per-item rounded background. */
+/* Each setting-item inside a group: flat row with a thin top divider. */
 .oc-settings-group > .setting-item,
 .oc-settings-group .setting-item {
-  background: transparent !important;
-  background-color: transparent !important;
-  border: none !important;
-  border-top: 1px solid var(--oc-set-border) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  padding: 14px 16px !important;
-  margin: 0 !important;
+  background: transparent;
+  background-color: transparent;
+  border: none;
+  border-top: 1px solid var(--oc-set-border);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 14px 16px;
+  margin: 0;
 }
 .oc-settings-group > .setting-item:first-child,
 .oc-settings-group .setting-item:first-child {
-  border-top: none !important;
+  border-top: none;
 }
 /* Defensive: some themes paint a backplate on the info/control halves. */
 .oc-settings-group .setting-item-info,
 .oc-settings-group .setting-item-control {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 /* Some internal renderers (e.g. agent-provider-section, skill-management)
@@ -5204,16 +5190,16 @@ body.theme-light .is-mobile .oc-root.oc-surface {
   border-bottom: 1px solid var(--oc-set-border);
 }
 .oc-skill-secret-host .setting-item {
-  background: transparent !important;
-  border: none !important;
-  border-top: 1px solid var(--oc-set-border) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  margin: 0 !important;
-  padding: 12px !important;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--oc-set-border);
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 12px;
 }
 .oc-skill-secret-host .setting-item:first-of-type {
-  border-top: none !important;
+  border-top: none;
 }
 .oc-settings-group > .oc-skill-mgmt-host .oc-skill-mgmt-list,
 .oc-settings-group > .oc-template-mgmt-host .oc-template-mgmt-list {
