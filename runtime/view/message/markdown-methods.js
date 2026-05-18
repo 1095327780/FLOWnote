@@ -2,6 +2,10 @@ const { Notice, MarkdownRenderer, Keymap } = require("obsidian");
 const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils");
 const { domUtils } = require("./dom-utils");
 const { tFromContext } = require("../../i18n-runtime");
+const {
+  extractVaultPathMatchesFromText,
+  resolveVaultPathCandidate,
+} = require("./vault-path-links");
 
 const {
   setNodeText,
@@ -163,6 +167,91 @@ function attachInternalLinkHandlers(container) {
   });
 }
 
+function createVaultPathAnchor(linkPath, labelText, titleText) {
+  const anchor = document.createElement("a");
+  anchor.className = "oc-vault-path-link internal-link";
+  anchor.setAttribute("href", linkPath);
+  anchor.setAttribute("data-href", linkPath);
+  anchor.setAttribute("title", titleText || linkPath);
+  anchor.textContent = labelText || linkPath;
+  return anchor;
+}
+
+function shouldSkipVaultPathTextNode(textNode) {
+  const parent = textNode && textNode.parentElement;
+  if (!parent || typeof parent.closest !== "function") return true;
+  return Boolean(parent.closest("a, code, pre, script, style, textarea"));
+}
+
+function enhanceInlineCodeVaultPathLinks(container) {
+  if (!container || typeof container.querySelectorAll !== "function") return;
+  container.querySelectorAll("code").forEach((codeEl) => {
+    if (!codeEl || !codeEl.parentNode) return;
+    if (typeof codeEl.closest === "function" && codeEl.closest("a, pre")) return;
+
+    const label = String(codeEl.textContent || "").trim();
+    if (!label) return;
+    const linkPath = resolveVaultPathCandidate(this, label);
+    if (!linkPath) return;
+
+    const anchor = createVaultPathAnchor(linkPath, "", label);
+    anchor.textContent = "";
+    codeEl.parentNode.insertBefore(anchor, codeEl);
+    anchor.appendChild(codeEl);
+  });
+}
+
+function enhanceTextNodeVaultPathLinks(textNode) {
+  if (!textNode || !textNode.parentNode || shouldSkipVaultPathTextNode(textNode)) return;
+  const text = String(textNode.nodeValue || "");
+  const matches = extractVaultPathMatchesFromText(text)
+    .map((match) => ({
+      ...match,
+      linkPath: resolveVaultPathCandidate(this, match.path),
+    }))
+    .filter((match) => match.linkPath);
+
+  if (!matches.length) return;
+
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  for (const match of matches) {
+    const start = Math.max(cursor, Number(match.start) || 0);
+    const end = Math.max(start, Number(match.end) || start);
+    if (start > cursor) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor, start)));
+    }
+    const label = text.slice(start, end);
+    fragment.appendChild(createVaultPathAnchor(match.linkPath, label, match.linkPath));
+    cursor = end;
+  }
+  if (cursor < text.length) {
+    fragment.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+  textNode.parentNode.replaceChild(fragment, textNode);
+}
+
+function enhancePlainTextVaultPathLinks(container) {
+  if (!container || typeof document === "undefined" || typeof document.createTreeWalker !== "function") return;
+  const showText = typeof NodeFilter !== "undefined" && NodeFilter ? NodeFilter.SHOW_TEXT : 4;
+  const walker = document.createTreeWalker(container, showText);
+  const nodes = [];
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node);
+    node = walker.nextNode();
+  }
+  nodes.forEach((textNode) => {
+    this.enhanceTextNodeVaultPathLinks(textNode);
+  });
+}
+
+function enhanceVaultPathLinks(container) {
+  if (!container || typeof document === "undefined") return;
+  this.enhanceInlineCodeVaultPathLinks(container);
+  this.enhancePlainTextVaultPathLinks(container);
+}
+
 function renderMarkdownSafely(container, markdownText, onRendered) {
   if (!container) return;
   const text = String(markdownText || "");
@@ -198,6 +287,7 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
         version,
         rendered: true,
       });
+      this.enhanceVaultPathLinks(container);
       this.attachInternalLinkHandlers(container);
       if (typeof onRendered === "function") onRendered();
       const shouldForceBottom = Boolean(
@@ -216,6 +306,8 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
         version,
         rendered: true,
       });
+      this.enhanceVaultPathLinks(container);
+      this.attachInternalLinkHandlers(container);
       const shouldForceBottom = Boolean(
         this.currentAbort
         || (typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom()),
@@ -228,6 +320,10 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
 const markdownMethods = {
   attachCodeCopyButtons,
   attachInternalLinkHandlers,
+  enhanceInlineCodeVaultPathLinks,
+  enhancePlainTextVaultPathLinks,
+  enhanceTextNodeVaultPathLinks,
+  enhanceVaultPathLinks,
   getMarkdownRenderSourcePath,
   resolveInternalLinkText,
   renderMarkdownSafely,

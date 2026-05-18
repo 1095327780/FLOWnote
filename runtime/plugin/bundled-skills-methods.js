@@ -1,6 +1,20 @@
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
+// Node-only deps — see bundled-skills-utils.js for the same shim
+// pattern (mobile returns `{}` for these, doesn't throw).
+let fs = {};
+let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+let crypto = {};
+try {
+  const real = require("fs");
+  if (real && typeof real.existsSync === "function") fs = real;
+} catch { /* mobile */ }
+try {
+  const real = require("path");
+  if (real && typeof real.join === "function") path = real;
+} catch { /* mobile */ }
+try {
+  const real = require("crypto");
+  if (real && typeof real.createHash === "function") crypto = real;
+} catch { /* mobile */ }
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
 const {
   TEMPLATE_MAP_FILE,

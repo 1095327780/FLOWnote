@@ -1,9 +1,9 @@
 {
   "id": "flownote",
   "name": "FLOWnote",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "minAppVersion": "1.5.0",
-  "description": "OpenCode-powered note management with built-in skills, one-click setup, and AI workflows.",
+  "description": "AI-powered note management with built-in skills, direct API mode, optional OpenCode bridge, and mobile workflows.",
   "author": "阿浩learn",
   "isDesktopOnly": false
 }

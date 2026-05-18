@@ -1,5 +1,23 @@
-const fs = require("fs");
-const path = require("path");
+// Node-only deps. On Obsidian mobile these are absent / stubbed; this
+// module's CONSUMERS never run on mobile (bundled-skills sync is gated
+// off there), so falling back to a minimal shim keeps the require at
+// module-load side-effect-free without changing desktop behavior.
+//
+// IMPORTANT: Obsidian mobile's `require("path")` returns an empty `{}`
+// instead of throwing — so a naive `try { path = require(...); } catch`
+// would silently replace our shim with `{}` and explode at the first
+// top-level `path.join(...)` call. Detect that by sniffing for the
+// expected methods before adopting.
+let fs = {};
+let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+try {
+  const real = require("fs");
+  if (real && typeof real.existsSync === "function") fs = real;
+} catch { /* mobile */ }
+try {
+  const real = require("path");
+  if (real && typeof real.join === "function") path = real;
+} catch { /* mobile */ }
 
 const TEMPLATE_MAP_FILE = "template-map.json";
 const DEFAULT_META_TEMPLATES_DIR = path.join("Meta", "模板");

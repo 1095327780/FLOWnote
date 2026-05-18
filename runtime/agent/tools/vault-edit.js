@@ -12,6 +12,7 @@
 // the tool accordingly so the agent loop serializes it.
 
 const { buildTool } = require("../tool-registry");
+const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
   "Perform an exact string replacement inside a note in the user's Obsidian " +
@@ -202,7 +203,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
         ctx.fileStateCache.recordWrite(normalized, updated);
       }
 
-      const delta = Buffer.byteLength(updated, "utf8") - Buffer.byteLength(current, "utf8");
+      const delta = byteLengthUtf8(updated) - byteLengthUtf8(current);
       const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
       yield {
         type: "result",

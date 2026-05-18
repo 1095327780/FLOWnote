@@ -19,6 +19,9 @@ const {
 const {
   skillManagementSectionMethods,
 } = require("./settings/skill-management-section-methods");
+const {
+  templateManagementSectionMethods,
+} = require("./settings/template-management-section-methods");
 
 class FLOWnoteSettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
@@ -37,6 +40,7 @@ Object.assign(
   providerAuthActionsMethods,
   agentProviderSectionMethods,
   skillManagementSectionMethods,
+  templateManagementSectionMethods,
 );
 
 module.exports = { FLOWnoteSettingsTab };

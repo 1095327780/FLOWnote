@@ -66,3 +66,24 @@ test("SkillService should reflect disk edits after reload", () => {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+test("SkillService should load supplemental Claude-style skill directories", () => {
+  const fixture = createFixture();
+  try {
+    writeFile(
+      path.join(fixture.skillsRoot, "primary", "SKILL.md"),
+      "---\nname: primary\ndescription: primary\n---\n\n# Primary\n",
+    );
+    writeFile(
+      path.join(fixture.vaultPath, ".claude", "skills", "official", "SKILL.md"),
+      "---\nname: official\ndescription: official\n---\n\n# Official\n",
+    );
+
+    const service = new SkillService(fixture.vaultPath, { skillsDir: ".opencode/skills" });
+    const ids = service.loadSkills().map((item) => item.id).sort();
+
+    assert.deepEqual(ids, ["official", "primary"]);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});

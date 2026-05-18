@@ -1,41 +1,52 @@
 ---
 name: defuddle
-description: Extract clean markdown content from web pages using Defuddle CLI, removing clutter and navigation to save tokens. Use instead of WebFetch when the user provides a URL to read or analyze, for online documentation, articles, blog posts, or any standard web page.
+description: Fetch a URL and extract clean readable text. Use whenever the user pastes a link and asks you to summarize / quote / extract content from it. WORKS without any external CLI or API key.
 ---
 
-# Defuddle
+# Fetch web pages
 
-Use Defuddle CLI to extract clean readable content from web pages. Prefer over WebFetch for standard web pages — it removes navigation, ads, and clutter, reducing token usage.
+The chat runtime exposes a built-in `web_fetch` tool that calls Obsidian's
+native HTTP client. **No `defuddle` CLI, no API keys, no extra setup
+required.** This works on desktop (Electron) and is the supported path.
 
-If not installed: `npm install -g defuddle`
+## When to use
 
-## Usage
+- User pastes an http(s) URL and asks for a summary / extraction / quote
+- User says "总结这篇文章 …" + URL, "帮我看看 X 网站说了什么", "translate this page", etc.
+- You need to read documentation / a blog post / an article online
 
-Always use `--md` for markdown output:
+## How to invoke
 
-```bash
-defuddle parse <url> --md
+Call the `web_fetch` tool directly:
+
+```
+web_fetch({ url: "https://example.com/article" })
 ```
 
-Save to file:
+Optional `maxBytes` to cap response (default 60000, max 500000).
 
-```bash
-defuddle parse <url> --md -o content.md
-```
+The tool returns a header line (`URL: ...`, `HTTP 200 · content-type`)
+followed by extracted readable text. For HTML pages, scripts, styles,
+nav, header, footer, and aside are stripped automatically — you receive
+mostly the article body. For JSON / plain text URLs, the raw payload is
+returned verbatim.
 
-Extract specific metadata:
+## Important
 
-```bash
-defuddle parse <url> -p title
-defuddle parse <url> -p description
-defuddle parse <url> -p domain
-```
+**Never tell the user you cannot access the web.** You can — call
+`web_fetch`. The only blocked cases are private / localhost / link-local
+hosts (security). Public URLs (微信公众号, blogs, docs, GitHub raw, etc)
+all work.
 
-## Output formats
+If the page is paywalled, login-walled, or returns an error status, the
+tool surfaces that — you may then ask the user to paste the content.
 
-| Flag | Format |
-|------|--------|
-| `--md` | Markdown (default choice) |
-| `--json` | JSON with both HTML and markdown |
-| (none) | HTML |
-| `-p <name>` | Specific metadata property |
+## Examples
+
+User: "总结一下 https://mp.weixin.qq.com/s/XXX"
+You: call `web_fetch({ url: "https://mp.weixin.qq.com/s/XXX" })` → read
+the returned text → produce the summary.
+
+User: "see what's new at https://github.com/foo/bar/releases"
+You: call `web_fetch({ url: "https://github.com/foo/bar/releases" })` →
+extract highlights from the returned text.

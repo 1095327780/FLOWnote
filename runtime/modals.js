@@ -1,6 +1,16 @@
-const { Modal } = require("obsidian");
+const { Modal: ObsidianModal } = require("obsidian");
 const { interpolateTemplate } = require("./i18n-runtime");
 const { describePermissionAction } = require("./permission-action-description");
+
+const Modal = ObsidianModal || class {
+  constructor(app) {
+    this.app = app;
+    this.contentEl = null;
+  }
+
+  open() {}
+  close() {}
+};
 
 function tr(tFn, key, fallback, params = {}) {
   if (typeof tFn === "function") return tFn(key, params, { defaultValue: fallback });
@@ -117,8 +127,11 @@ class PermissionRequestModal extends Modal {
     details.createEl("summary", {
       text: tr(this.t, "modals.permission.detailsToggle", "技术细节（一般不用看）"),
     });
-    const toolLabel = String(this.permission.type || "");
-    if (toolLabel) {
+    const rawToolId = String(this.permission.type || "").trim();
+    if (rawToolId) {
+      const normalizedId = rawToolId.toLowerCase();
+      const localized = tr(this.t, `view.tools.${normalizedId}`, rawToolId);
+      const toolLabel = localized && localized !== `view.tools.${normalizedId}` ? localized : rawToolId;
       details.createDiv({
         cls: "oc-perm-detail-row",
         text: tr(this.t, "modals.permission.tool", "工具：{value}", { value: toolLabel }),
@@ -190,7 +203,7 @@ class SkillEditorModal extends Modal {
     contentEl.createDiv({
       cls: "oc-skill-editor-subtitle",
       text: tr(this.t, "modals.skillEditor.subtitle",
-        "技能的元数据写在前置 YAML 里；正文用 Markdown 写工作流。完成后点保存。"),
+        "此处只编辑技能根目录里的 SKILL.md；references、assets、scripts 等资源文件会保留在技能文件夹中，可通过设置页导入完整目录。"),
     });
 
     const slugInput = this._field(contentEl, {
@@ -552,7 +565,187 @@ class ModelSelectorModal extends Modal {
   }
 }
 
+class TemplateEditorModal extends Modal {
+  constructor(app, payload, onResolve, t) {
+    super(app);
+    this.payload = payload || {};
+    this.onResolve = onResolve;
+    this.t = t;
+    this.resolved = false;
+  }
+
+  resolveAndClose(value) {
+    if (this.resolved) return;
+    this.resolved = true;
+    if (typeof this.onResolve === "function") this.onResolve(value);
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("oc-template-editor-modal");
+
+    contentEl.createEl("h2", {
+      text: tr(this.t, "modals.templateEditor.title", "编辑模板：{name}", {
+        name: this.payload.name || this.payload.id || "",
+      }),
+    });
+
+    const subtitle = contentEl.createDiv({ cls: "oc-template-editor-subtitle" });
+    subtitle.setText(tr(this.t, "modals.templateEditor.subtitle",
+      "模板路径：{path}", { path: this.payload.userPath || "" }));
+
+    if (this.payload.source === "bundled") {
+      contentEl.createDiv({
+        cls: "oc-template-editor-hint",
+        text: tr(this.t, "modals.templateEditor.hintFromBundled",
+          "当前显示的是插件内置默认。保存后会写入到 {path}，之后由你掌控。",
+          { path: this.payload.userPath || "" }),
+      });
+    }
+
+    const bodyArea = contentEl.createEl("textarea", { cls: "oc-template-editor-body" });
+    bodyArea.rows = 22;
+    bodyArea.value = String(this.payload.content || "");
+
+    const actions = contentEl.createDiv({ cls: "oc-template-editor-actions" });
+    const cancelBtn = actions.createEl("button", {
+      cls: "mod-muted",
+      text: tr(this.t, "modals.cancel", "取消"),
+    });
+    const saveBtn = actions.createEl("button", {
+      cls: "mod-cta",
+      text: tr(this.t, "modals.templateEditor.save", "保存"),
+    });
+
+    cancelBtn.addEventListener("click", () => this.resolveAndClose(null));
+    saveBtn.addEventListener("click", () => {
+      this.resolveAndClose(String(bodyArea.value || ""));
+    });
+  }
+
+  onClose() {
+    if (!this.resolved && typeof this.onResolve === "function") {
+      this.onResolve(null);
+      this.resolved = true;
+    }
+    this.contentEl.empty();
+  }
+}
+
+class AgentModeNoticeModal extends Modal {
+  constructor(app, options = {}, onResolve, t) {
+    super(app);
+    this.options = options || {};
+    this.onResolve = onResolve;
+    this.t = t;
+    this.resolved = false;
+  }
+
+  resolveAndClose(value) {
+    if (this.resolved) return;
+    this.resolved = true;
+    if (typeof this.onResolve === "function") this.onResolve(value);
+    this.close();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    if (!contentEl) return;
+    contentEl.empty();
+    contentEl.addClass("oc-release-modal");
+
+    const isUpdate = this.options.kind === "update";
+    const currentMode = this.options.currentMode === "opencode-legacy" ? "opencode-legacy" : "direct";
+    contentEl.createEl("h2", {
+      text: tr(this.t, "modals.agentModeNotice.title", "FLOWnote AI 运行方式"),
+    });
+    contentEl.createDiv({
+      cls: "oc-release-subtitle",
+      text: isUpdate && currentMode === "opencode-legacy"
+        ? tr(
+          this.t,
+          "modals.agentModeNotice.updateIntro",
+          "这次更新不会改变你原来的工作流。为了避免升级后中断，已保留 OpenCode 桥接模式；你也可以随时切换到内置 AI 模式。",
+        )
+        : isUpdate
+          ? tr(
+            this.t,
+            "modals.agentModeNotice.updateIntroPreserveChoice",
+            "这次更新不会主动覆盖你已经选择的运行方式。你可以随时在内置 AI 模式和 OpenCode 桥接模式之间切换。",
+          )
+        : tr(
+          this.t,
+          "modals.agentModeNotice.firstIntro",
+          "首次安装已默认使用内置 AI 模式。你可以在设置中随时切换运行方式。",
+        ),
+    });
+
+    const cards = contentEl.createDiv({ cls: "oc-release-mode-grid" });
+    this.renderModeCard(cards, {
+      title: tr(this.t, "modals.agentModeNotice.directTitle", "内置 AI 模式"),
+      badge: tr(this.t, "modals.agentModeNotice.directBadge", "推荐新用户 / 移动端"),
+      items: [
+        tr(this.t, "modals.agentModeNotice.directApiKey", "在插件里配置自己的 API Key，直接调用模型服务。"),
+        tr(this.t, "modals.agentModeNotice.directMobile", "桌面端和手机端都能使用智能对话与技能流程。"),
+        tr(this.t, "modals.agentModeNotice.directNoExternal", "不依赖 OpenCode、终端或本机额外环境。"),
+      ],
+    });
+    this.renderModeCard(cards, {
+      title: tr(this.t, "modals.agentModeNotice.opencTitle", "OpenCode 桥接模式"),
+      badge: tr(this.t, "modals.agentModeNotice.opencBadge", "兼容旧用户 / 高级"),
+      items: [
+        tr(this.t, "modals.agentModeNotice.opencFreeModels", "继续通过本机 OpenCode 调用模型，适合已有 OpenCode 配置的用户。"),
+        tr(this.t, "modals.agentModeNotice.opencModels", "如果你想使用 OpenCode 提供的免费或实验模型，可以选择它。"),
+        tr(this.t, "modals.agentModeNotice.opencSetup", "配置更复杂，主要适合桌面端，需要本机环境可用。"),
+      ],
+    });
+
+    contentEl.createDiv({
+      cls: "oc-release-switch-hint",
+      text: tr(
+        this.t,
+        "modals.agentModeNotice.switchHint",
+        "切换位置：设置 → FLOWnote → AI 服务 → 运行方式。",
+      ),
+    });
+
+    const actions = contentEl.createDiv({ cls: "oc-release-actions" });
+    const settingsBtn = actions.createEl("button", {
+      cls: "mod-cta",
+      text: tr(this.t, "modals.agentModeNotice.openSettings", "去设置"),
+    });
+    const okBtn = actions.createEl("button", {
+      cls: "mod-muted",
+      text: tr(this.t, "modals.agentModeNotice.ok", "知道了"),
+    });
+    settingsBtn.addEventListener("click", () => this.resolveAndClose("settings"));
+    okBtn.addEventListener("click", () => this.resolveAndClose("ok"));
+  }
+
+  renderModeCard(parent, payload) {
+    const card = parent.createDiv({ cls: "oc-release-mode-card" });
+    const header = card.createDiv({ cls: "oc-release-mode-header" });
+    header.createDiv({ cls: "oc-release-mode-title", text: payload.title });
+    header.createDiv({ cls: "oc-release-mode-badge", text: payload.badge });
+    const list = card.createEl("ul");
+    for (const item of payload.items || []) {
+      list.createEl("li", { text: item });
+    }
+  }
+
+  onClose() {
+    if (!this.resolved && typeof this.onResolve === "function") {
+      this.resolved = true;
+      this.onResolve("dismissed");
+    }
+    if (this.contentEl) this.contentEl.empty();
+  }
+}
+
 module.exports = {
+  AgentModeNoticeModal,
   AskUserQuestionModal,
   // Re-exported for back-compat — actual impl lives in
   // ./permission-action-description.js so it can be unit-tested without
@@ -563,4 +756,5 @@ module.exports = {
   PermissionRequestModal,
   PromptAppendModal,
   SkillEditorModal,
+  TemplateEditorModal,
 };

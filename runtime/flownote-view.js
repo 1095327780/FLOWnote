@@ -71,6 +71,7 @@ class FLOWnoteAssistantView extends ItemView {
   async onOpen() {
     this.selectedModel = this.plugin.settings.defaultModel || "";
     this.render();
+    this._setupMobileKeyboardTracking();
   }
 
   onClose() {
@@ -91,6 +92,114 @@ class FLOWnoteAssistantView extends ItemView {
       this.currentAbort.abort();
       this.currentAbort = null;
     }
+    if (typeof this._mobileKeyboardCleanup === "function") {
+      this._mobileKeyboardCleanup();
+      this._mobileKeyboardCleanup = null;
+    }
+  }
+
+  /**
+   * Mobile keyboard tracking. iOS / Android soft keyboards shrink the
+   * visual viewport instead of resizing the window — without this hook
+   * the composer disappears behind the keyboard. We listen on
+   * `window.visualViewport` and expose the keyboard height as a CSS var
+   * `--oc-kb-offset` on the view's root, plus toggle `.is-kb-open` so
+   * styles can shift the layout (e.g. shrink the message area).
+   *
+   * Pattern adapted from runtime/mobile/capture-modal.js (the only piece
+   * of UX that was already battle-tested on the actual iOS keyboard).
+   */
+  _setupMobileKeyboardTracking() {
+    let isMobile = false;
+    try { isMobile = require("obsidian").Platform && require("obsidian").Platform.isMobile; } catch { /* desktop */ }
+    if (!isMobile) return;
+    const root = this.root || this.contentEl;
+    if (!root) return;
+    const vv = typeof window !== "undefined" && window.visualViewport ? window.visualViewport : null;
+    let baselineBottom = 0;
+    let rafId = 0;
+    const disposers = [];
+
+    // "Is the on-screen keyboard logically up?" is best derived from focus
+    // (does the document currently have an input/textarea/contenteditable
+    // focused?) rather than purely from viewport height — Obsidian iOS has
+    // a window where the bottom toolbar slides BACK in BEFORE the
+    // visualViewport.height fully restores, leaving viewport math thinking
+    // a small keyboard is still up. Without this guard the composer's
+    // is-kb-open class never clears → padding-bottom stays at 0 → the
+    // composer overlaps Obsidian's bottom navbar.
+    const isEditorFocused = () => {
+      const el = typeof document !== "undefined" ? document.activeElement : null;
+      if (!el) return false;
+      const tag = String(el.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") return true;
+      if (el.isContentEditable) return true;
+      return false;
+    };
+
+    const getViewportBottom = () => {
+      if (vv) return Number(vv.height || 0) + Number(vv.offsetTop || 0);
+      return Number(window.innerHeight || 0);
+    };
+    const apply = (kbHeight) => {
+      // Hard rule: keyboard cannot be up if nothing is focused. This is
+      // the primary fix for "keyboard dismissed → composer overlaps the
+      // Obsidian navbar". Even if the viewport math suggests a residual
+      // offset (e.g. while the toolbar is still re-animating in), we
+      // force-clear the state when no editable is focused.
+      const focused = isEditorFocused();
+      const offset = focused ? Math.max(0, Math.round(Number(kbHeight) || 0)) : 0;
+      root.style.setProperty("--oc-kb-offset", `${offset}px`);
+      root.toggleClass("is-kb-open", offset > 0);
+    };
+    const recalc = () => {
+      const current = getViewportBottom();
+      if (!baselineBottom || current > baselineBottom) baselineBottom = current;
+      apply(Math.max(0, baselineBottom - current));
+    };
+    const schedule = (delay = 0) => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (delay > 0) {
+        window.setTimeout(() => { rafId = requestAnimationFrame(recalc); }, delay);
+      } else {
+        rafId = requestAnimationFrame(recalc);
+      }
+    };
+    const bind = (target, event, handler, options) => {
+      target.addEventListener(event, handler, options);
+      disposers.push(() => target.removeEventListener(event, handler, options));
+    };
+
+    baselineBottom = getViewportBottom();
+    schedule();
+    schedule(80);
+    schedule(220);
+
+    if (vv) {
+      bind(vv, "resize", () => schedule());
+      bind(vv, "scroll", () => schedule());
+    }
+    bind(window, "resize", () => {
+      baselineBottom = Math.max(baselineBottom, getViewportBottom());
+      schedule();
+    });
+    // Focus changes inside the composer (textarea / picker search input)
+    // are the most reliable signal for "keyboard about to appear / leave".
+    // On focusout we run a few staggered recalcs so the viewport math
+    // settles AND the focused-element check clears the class immediately.
+    bind(document, "focusin", () => schedule(40));
+    bind(document, "focusout", () => {
+      schedule(0);
+      schedule(120);
+      schedule(360);
+    });
+
+    this._mobileKeyboardCleanup = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      for (const dispose of disposers) dispose();
+      root.style.removeProperty("--oc-kb-offset");
+      root.removeClass("is-kb-open");
+    };
   }
 
   appendAssistantMessage(sessionId, text, error = "") {

@@ -12,6 +12,87 @@ function createLaunchAttemptMethods(deps = {}) {
     toWslPath,
   } = deps;
 
+  const CHILD_ENV_KEYS = [
+    "PATH",
+    "PATHEXT",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SystemRoot",
+    "WINDIR",
+    "ComSpec",
+    "SHELL",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+  ];
+  const CHILD_ENV_PREFIXES = [
+    "OPENCODE_",
+    "OPENAI_",
+    "ANTHROPIC_",
+    "DEEPSEEK_",
+    "DASHSCOPE_",
+    "MOONSHOT_",
+    "ZHIPU_",
+    "SILICONFLOW_",
+    "GEMINI_",
+    "GOOGLE_",
+    "OPENROUTER_",
+    "AZURE_OPENAI_",
+  ];
+
+  function readEnvValue(name) {
+    try {
+      if (!process || !process.env) return "";
+      const value = process.env[name];
+      return typeof value === "string" && value ? value : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function shouldForwardEnvKey(name) {
+    const key = String(name || "");
+    if (!key) return false;
+    const upper = key.toUpperCase();
+    if (CHILD_ENV_KEYS.some((item) => item.toUpperCase() === upper)) return true;
+    if (CHILD_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))) return true;
+    return /_(API_KEY|ACCESS_TOKEN|BASE_URL|ENDPOINT)$/i.test(key);
+  }
+
+  function buildChildEnv(extra = {}) {
+    const env = {};
+    try {
+      for (const key of Object.keys((process && process.env) || {})) {
+        if (!shouldForwardEnvKey(key)) continue;
+        const value = readEnvValue(key);
+        if (value) env[key] = value;
+      }
+    } catch {
+      for (const key of CHILD_ENV_KEYS) {
+        const value = readEnvValue(key);
+        if (value) env[key] = value;
+      }
+    }
+    return { ...env, ...extra };
+  }
+
+  function defaultLaunchCwd() {
+    return readEnvValue("USERPROFILE") || os.homedir() || process.cwd();
+  }
+
   class LaunchAttemptMethods {
   createWslAttempt(runtimeHome, distro = "", shellName = "sh") {
     const pickedDistro = String(distro || "").trim();
@@ -19,14 +100,14 @@ function createLaunchAttemptMethods(deps = {}) {
     const args = [];
     if (pickedDistro) args.push("-d", pickedDistro);
     args.push("-e", pickedShell, "-lc", this.buildWslServeCommand(runtimeHome));
-    const wslLaunchCwd = process.env.USERPROFILE || os.homedir() || process.cwd();
+    const wslLaunchCwd = defaultLaunchCwd();
     return {
       label: pickedDistro ? `wsl(${pickedDistro}, ${pickedShell})` : `wsl(${pickedShell})`,
       command: "wsl.exe",
       args,
       options: {
         cwd: wslLaunchCwd,
-        env: { ...process.env },
+        env: buildChildEnv(),
         shell: false,
       },
       mode: "wsl",
@@ -131,7 +212,7 @@ function createLaunchAttemptMethods(deps = {}) {
       args: Array.isArray(profile.args) && profile.args.length ? profile.args : OPENCODE_SERVE_ARGS,
       options: {
         cwd: this.vaultPath,
-        env: { ...process.env, OPENCODE_HOME: runtimeHome },
+        env: buildChildEnv({ OPENCODE_HOME: runtimeHome }),
         shell: Boolean(profile.shell),
       },
       mode: "native",
@@ -177,7 +258,7 @@ function createLaunchAttemptMethods(deps = {}) {
     const seen = new Set();
     const strategy = this.normalizeLaunchStrategy(this.settings && this.settings.launchStrategy);
     const preferred = strategy === "auto" ? this.resolvePreferredLaunchProfile() : null;
-    const baseEnv = { ...process.env, OPENCODE_HOME: runtimeHome };
+    const baseEnv = buildChildEnv({ OPENCODE_HOME: runtimeHome });
     const baseOptions = {
       cwd: this.vaultPath,
       env: baseEnv,

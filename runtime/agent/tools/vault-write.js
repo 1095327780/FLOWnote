@@ -6,6 +6,7 @@
 // permission via permission-mode = acceptAll).
 
 const { buildTool } = require("../tool-registry");
+const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
   "Write content to a note in the user's Obsidian vault. " +
@@ -136,7 +137,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         recordWrite(content);
         yield {
           type: "result",
-          content: `Created "${normalized}" (${Buffer.byteLength(content, "utf8")} bytes).`,
+          content: `Created "${normalized}" (${byteLengthUtf8(content)} bytes).`,
         };
         return;
       }
@@ -150,7 +151,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         recordWrite(content);
         yield {
           type: "result",
-          content: `Wrote "${normalized}" (${Buffer.byteLength(content, "utf8")} bytes).`,
+          content: `Wrote "${normalized}" (${byteLengthUtf8(content)} bytes).`,
         };
         return;
       }
@@ -163,7 +164,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         recordWrite(joined);
         yield {
           type: "result",
-          content: `Appended ${Buffer.byteLength(content, "utf8")} bytes to "${normalized}".`,
+          content: `Appended ${byteLengthUtf8(content)} bytes to "${normalized}".`,
         };
         return;
       }
@@ -171,7 +172,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
       recordWrite(content);
       yield {
         type: "result",
-        content: `Created "${normalized}" via append (${Buffer.byteLength(content, "utf8")} bytes).`,
+        content: `Created "${normalized}" via append (${byteLengthUtf8(content)} bytes).`,
       };
     },
   });

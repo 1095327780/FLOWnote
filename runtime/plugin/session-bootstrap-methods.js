@@ -1,8 +1,39 @@
 const {
   extractAssistantPayloadFromEnvelope,
 } = require("../assistant-payload-utils");
+const {
+  getAgentModeNotice,
+  hasPersistedPluginData,
+  markAgentModeNoticeSeen,
+} = require("../release-notice");
 
 const RUNTIME_SCHEMA_VERSION = 1;
+
+/**
+ * Returns true iff `leaf` lives inside Obsidian's main editor area
+ * (workspace.rootSplit) rather than a left/right sidebar.
+ *
+ * Walks up the leaf's parent chain until we hit one of the workspace
+ * roots; matching `rootSplit` means main area. This is the official
+ * way to distinguish "tab area" leaves from sidebar leaves (see
+ * Obsidian's "Tabs and Splits" docs).
+ */
+function isLeafInMainArea(workspace, leaf) {
+  if (!leaf || !workspace) return false;
+  let cursor = leaf;
+  // `leaf.getRoot?.()` is the most direct shortcut; fall back to a
+  // parent walk for older Obsidian versions that don't expose it.
+  if (typeof leaf.getRoot === "function") {
+    const root = leaf.getRoot();
+    return root === workspace.rootSplit;
+  }
+  while (cursor && cursor.parent) {
+    cursor = cursor.parent;
+    if (cursor === workspace.rootSplit) return true;
+    if (cursor === workspace.leftSplit || cursor === workspace.rightSplit) return false;
+  }
+  return false;
+}
 
 function normalizeTimestampMs(value) {
   const raw = Number(value || 0);
@@ -111,13 +142,49 @@ const sessionBootstrapMethods = {
   },
 
   async activateView() {
-    const leaves = this.app.workspace.getLeavesOfType(this.getViewType());
-    if (leaves.length) {
-      await this.app.workspace.revealLeaf(leaves[0]);
+    let isMobile = false;
+    try { isMobile = require("obsidian").Platform && require("obsidian").Platform.isMobile; } catch { /* desktop */ }
+    const viewType = this.getViewType();
+    const workspace = this.app.workspace;
+
+    if (isMobile) {
+      // Mobile full-screen pattern (per Obsidian docs: leaves opened in
+      // the main "rootSplit" area get the same tab chrome as notes; the
+      // left/right sidebar leaves render as slide-in drawers and are NOT
+      // full-screen). Strategy:
+      //   1. Detach any saved leaves that landed in the sidebar from a
+      //      previous desktop layout — otherwise revealLeaf below will
+      //      re-pin to that sidebar slot.
+      //   2. Reuse a main-area leaf if one exists; otherwise create a
+      //      fresh tab via workspace.getLeaf("tab"). This is the exact
+      //      pattern Obsidian's docs recommend for "open a custom view
+      //      like a note tab" (Tasks Calendar, Thino, etc.).
+      const existing = workspace.getLeavesOfType(viewType);
+      let mainLeaf = null;
+      for (const leaf of existing) {
+        const inMainArea = isLeafInMainArea(workspace, leaf);
+        if (inMainArea && !mainLeaf) {
+          mainLeaf = leaf;
+        } else {
+          // Sidebar (or stale) leaf — detach so it doesn't compete.
+          try { leaf.detach(); } catch { /* ignore */ }
+        }
+      }
+      if (!mainLeaf) {
+        mainLeaf = workspace.getLeaf("tab");
+        await mainLeaf.setViewState({ type: viewType, active: true });
+      }
+      await workspace.revealLeaf(mainLeaf);
     } else {
-      const leaf = this.app.workspace.getRightLeaf(false);
-      await leaf.setViewState({ type: this.getViewType(), active: true });
-      await this.app.workspace.revealLeaf(leaf);
+      // Desktop: right sidebar (so the chat sits alongside the note).
+      const leaves = workspace.getLeavesOfType(viewType);
+      if (leaves.length) {
+        await workspace.revealLeaf(leaves[0]);
+      } else {
+        const leaf = workspace.getRightLeaf(false);
+        await leaf.setViewState({ type: viewType, active: true });
+        await workspace.revealLeaf(leaf);
+      }
     }
 
     void this.bootstrapData({ waitRemote: false, startRemote: true }).catch((e) => {
@@ -153,6 +220,7 @@ const sessionBootstrapMethods = {
   async loadPersistedData() {
     const runtime = this.ensureRuntimeModules();
     const raw = (await this.loadData()) || {};
+    const existingInstall = hasPersistedPluginData(raw);
     const rawSchemaVersion = Number(raw && raw.schemaVersion ? raw.schemaVersion : 0);
     this.schemaVersion = Number.isFinite(rawSchemaVersion) && rawSchemaVersion > 0
       ? Math.floor(rawSchemaVersion)
@@ -160,7 +228,7 @@ const sessionBootstrapMethods = {
 
     if (raw.settings || raw.runtimeState) {
       const rawSettings = raw.settings || {};
-      this.settings = runtime.normalizeSettings(rawSettings);
+      this.settings = runtime.normalizeSettings(rawSettings, { existingInstall });
       const runtimeStateRaw = raw.runtimeState || { sessions: [], activeSessionId: "", messagesBySession: {} };
       let beforeSnapshot = "";
       try {
@@ -178,19 +246,29 @@ const sessionBootstrapMethods = {
       this.runtimeStateMigrationDirty = Boolean(beforeSnapshot && afterSnapshot && beforeSnapshot !== afterSnapshot);
       this.ensureRuntimeStateShape();
       this.ensureModelCatalogState();
+      this.agentModeNotice = getAgentModeNotice(this.runtimeState, {
+        existingInstall,
+        version: this.manifest && this.manifest.version,
+      });
       return;
     }
 
-    this.settings = runtime.normalizeSettings(raw);
+    this.settings = runtime.normalizeSettings(raw, { existingInstall });
     this.runtimeState = runtime.migrateLegacyMessages({ sessions: [], activeSessionId: "", messagesBySession: {} });
     this.runtimeStateMigrationDirty = false;
     this.ensureRuntimeStateShape();
     this.ensureModelCatalogState();
+    this.agentModeNotice = getAgentModeNotice(this.runtimeState, {
+      existingInstall,
+      version: this.manifest && this.manifest.version,
+    });
   },
 
   async saveSettings() {
     const runtime = this.ensureRuntimeModules();
-    this.settings = runtime.normalizeSettings(this.settings);
+    this.settings = typeof runtime.normalizeSettingsInPlace === "function"
+      ? runtime.normalizeSettingsInPlace(this.settings)
+      : runtime.normalizeSettings(this.settings);
     if (this.skillService) this.skillService.updateSettings(this.settings);
     if (this.opencodeClient) this.opencodeClient.updateSettings(this.settings);
     await this.persistState();
@@ -203,6 +281,50 @@ const sessionBootstrapMethods = {
       settings: this.settings,
       runtimeState: this.runtimeState,
     });
+  },
+
+  showAgentModeNoticeIfNeeded() {
+    const notice = this.agentModeNotice;
+    if (!notice || !notice.version) return;
+    if (typeof window === "undefined" || typeof window.setTimeout !== "function") return;
+
+    this.agentModeNotice = null;
+    window.setTimeout(() => {
+      try {
+        const { AgentModeNoticeModal } = require("../modals");
+        const modal = new AgentModeNoticeModal(
+          this.app,
+          {
+            ...notice,
+            currentMode: this.settings && this.settings.agentProvider
+              ? this.settings.agentProvider.mode
+              : "",
+          },
+          (choice) => {
+            markAgentModeNoticeSeen(this.runtimeState, notice.version);
+            void this.persistState().catch((e) => {
+              this.log(`persist agent mode notice failed: ${e instanceof Error ? e.message : String(e)}`);
+            });
+            if (choice === "settings") {
+              try {
+                if (this.app && this.app.setting && typeof this.app.setting.open === "function") {
+                  this.app.setting.open();
+                  if (typeof this.app.setting.openTabById === "function") {
+                    this.app.setting.openTabById(this.manifest.id);
+                  }
+                }
+              } catch (e) {
+                this.log(`open settings from notice failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }
+          },
+          this.t.bind(this),
+        );
+        modal.open();
+      } catch (e) {
+        this.log(`show agent mode notice failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }, 500);
   },
 
   async reloadSkills(options = {}) {
@@ -259,18 +381,31 @@ const sessionBootstrapMethods = {
   },
 
   async createSession(title) {
-    const created = await this.opencodeClient.createSession(title || "");
-    const sessionId = String(
-      (created && (created.id || created.sessionID || created.sessionId))
-      || (created && created.session && (created.session.id || created.session.sessionID || created.session.sessionId))
-      || "",
-    ).trim();
+    // Direct mode (and mobile, which always uses direct) doesn't have a
+    // remote session backend — generate a local ID.
+    const mode = this.settings
+      && this.settings.agentProvider
+      && this.settings.agentProvider.mode;
+    const useDirect = mode === "direct" || !this.opencodeClient;
+    let sessionId = "";
+    let createdTitle = "";
+    if (useDirect) {
+      sessionId = `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    } else {
+      const created = await this.opencodeClient.createSession(title || "");
+      sessionId = String(
+        (created && (created.id || created.sessionID || created.sessionId))
+        || (created && created.session && (created.session.id || created.session.sessionID || created.session.sessionId))
+        || "",
+      ).trim();
+      createdTitle = String((created && created.title) || "").trim();
+    }
     if (!sessionId) {
       throw new Error("FLOWnote 创建会话失败：返回数据缺少会话 ID");
     }
     const session = {
       id: sessionId,
-      title: created.title || title || "新会话",
+      title: createdTitle || title || "新会话",
       updatedAt: Date.now(),
     };
 
@@ -397,7 +532,17 @@ const sessionBootstrapMethods = {
       this.log(`load model cache failed: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    const vaultPath = this.getVaultPath();
+    // Mobile (or any environment without fs-backed services): skip the
+    // bundled-skills sync + legacy SkillService load. Templates are
+    // still served from the embedded bundle via template-management.js,
+    // and skills are discovered by the agent-side SkillRegistry (vault
+    // adapter) on demand.
+    let vaultPath = "";
+    try { vaultPath = this.getVaultPath(); } catch { vaultPath = ""; }
+    if (!vaultPath || !this.skillService) {
+      this.bootstrapLocalDone = true;
+      return;
+    }
     const locale = String(
       options && options.locale
         ? options.locale
@@ -430,6 +575,19 @@ const sessionBootstrapMethods = {
   },
 
   async runBootstrapRemote() {
+    // No OpenCode bridge (mobile, or desktop running in direct mode
+    // before any OpenCode-only init): the remote model catalog + remote
+    // session sync don't apply. Refresh the model catalog via the
+    // direct-mode provider so the model picker still has something
+    // to show, but skip the remote session pull.
+    if (!this.opencodeClient) {
+      if (typeof this.refreshModelCatalog === "function") {
+        try { await this.refreshModelCatalog(); } catch { /* non-fatal */ }
+      }
+      this.bootstrapRemoteDone = true;
+      this.bootstrapRemoteAt = Date.now();
+      return;
+    }
     await this.refreshModelCatalog();
     await this.syncSessionsFromRemote();
     this.bootstrapRemoteDone = true;

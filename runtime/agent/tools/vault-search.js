@@ -8,6 +8,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { globToRegExp } = require("./vault-list");
+const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
   "Search note contents inside the user's Obsidian vault. Provide `query` " +
@@ -190,7 +191,7 @@ function createVaultSearchTool({ vault, normalizePath } = {}) {
         filesScanned += 1;
         const raw = typeof f.read === "function" ? await f.read() : await vault.cachedRead(f);
         let text = typeof raw === "string" ? raw : String(raw || "");
-        if (Buffer.byteLength(text, "utf8") > PER_FILE_BYTE_CAP) {
+        if (byteLengthUtf8(text) > PER_FILE_BYTE_CAP) {
           text = text.slice(0, PER_FILE_BYTE_CAP);
         }
         const fileLines = text.split(/\r?\n/);

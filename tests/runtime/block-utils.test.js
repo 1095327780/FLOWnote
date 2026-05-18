@@ -27,3 +27,13 @@ test("visibleAssistantBlocks should still hide step lifecycle blocks", () => {
   assert.equal(out.length, 1);
   assert.equal(out[0].type, "reasoning");
 });
+
+test("visibleAssistantBlocks should hide explicitly hidden tool blocks even when they are errors", () => {
+  const out = blockUtilsMethods.visibleAssistantBlocks([
+    { type: "tool", tool: "vault_read", status: "error", hidden: true },
+    { type: "tool", tool: "vault_read", status: "error" },
+  ]);
+
+  assert.equal(out.length, 1);
+  assert.equal(out[0].hidden, undefined);
+});

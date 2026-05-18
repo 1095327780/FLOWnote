@@ -17,6 +17,8 @@ const {
   requestUrl = async () => ({ status: 500, text: "", json: null }),
 } = obsidianModule;
 
+const FLOWNOTE_ICON_ID = "flownote-journal-glow";
+
 function resolveRuntimeModuleAbsolutePath(relativePath) {
   let fsMod;
   let pathMod;
@@ -115,18 +117,22 @@ function fallbackInterpolateTemplate(message, params = {}) {
   });
 }
 
+// Static require so esbuild bundles the i18n tables into main.js. The
+// previous `requireRuntimeModuleSafe()` form used a template literal
+// (`./runtime/${name}`) which esbuild can't analyze, so the runtime
+// require failed and ALL translations silently fell back to English.
 const localeUtilsModule = (() => {
   try {
-    return requireRuntimeModuleSafe("i18n-locale-utils");
+    return require("./runtime/i18n-locale-utils");
   } catch {
-    return {};
+    try { return requireRuntimeModuleSafe("i18n-locale-utils"); } catch { return {}; }
   }
 })();
 const i18nMessagesModule = (() => {
   try {
-    return requireRuntimeModuleSafe("i18n-messages");
+    return require("./runtime/i18n-messages");
   } catch {
-    return {};
+    try { return requireRuntimeModuleSafe("i18n-messages"); } catch { return {}; }
   }
 })();
 
@@ -192,6 +198,11 @@ function resolveFacadeModuleAbsolutePath(plugin, relativePath) {
   } catch (_error) {
     return "";
   }
+  // Mobile's require shim returns `{}` for Node built-ins instead of
+  // throwing. Bail out cleanly in that case — the bundle's own
+  // require_* entries handle the lookup.
+  if (!pathMod || typeof pathMod.join !== "function") return "";
+  if (!fsMod || typeof fsMod.existsSync !== "function") return "";
 
   const candidates = [];
   if (plugin && plugin.manifest && plugin.manifest.dir) {
@@ -383,6 +394,14 @@ class FLOWnoteAssistantPlugin extends Plugin {
   }
 
   async onload() {
+    // Register the custom FLOWnote icon BEFORE anything (desktop or
+    // mobile) calls addRibbonIcon with it. Skipping this causes the
+    // mobile quick-capture entry to render with a missing leading icon.
+    try {
+      const { registerFLOWnoteIcons } = require("./runtime/icons");
+      registerFLOWnoteIcons(obsidianModule.addIcon);
+    } catch (_e) { /* non-fatal */ }
+
     if (Platform.isMobile) {
       this.ensureMobileMethodsLoaded();
       await this.onloadMobile();
@@ -431,7 +450,7 @@ class FLOWnoteAssistantPlugin extends Plugin {
 
       this.registerView(this.getViewType(), (leaf) => new runtime.FLOWnoteAssistantView(leaf, this));
 
-      this.addRibbonIcon("bot", "FLOWnote", () => this.activateView());
+      this.addRibbonIcon(FLOWNOTE_ICON_ID, "FLOWnote", () => this.activateView());
 
       this.addCommand({
         id: "open-flownote",
@@ -465,6 +484,9 @@ class FLOWnoteAssistantPlugin extends Plugin {
       });
 
       this.addSettingTab(new runtime.FLOWnoteSettingsTab(this.app, this));
+      if (typeof this.showAgentModeNoticeIfNeeded === "function") {
+        this.showAgentModeNoticeIfNeeded();
+      }
       if (this.runtimeStateMigrationDirty) {
         this.runtimeStateMigrationDirty = false;
         void this.persistState().catch((e) => {

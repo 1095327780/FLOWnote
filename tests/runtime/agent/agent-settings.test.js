@@ -6,6 +6,7 @@ const {
   defaultAgentSettings,
   migrateAgentSettings,
   normalizeAgentSettings,
+  normalizeAgentSettingsInPlace,
   getActiveApiKey,
   setApiKeyFor,
   switchActiveProvider,
@@ -43,6 +44,12 @@ test("migrateAgentSettings: fresh install with no agentProvider gets direct mode
   migrateAgentSettings(settings);
   assert.equal(settings.agentProvider.mode, "direct");
   assert.equal(settings.agentProvider.direct.providerId, "deepseek");
+});
+
+test("migrateAgentSettings: persisted pre-agentProvider install keeps OpenCode bridge", () => {
+  const settings = { skillsDir: ".opencode/skills", launchStrategy: "auto" };
+  migrateAgentSettings(settings, { existingInstall: true });
+  assert.equal(settings.agentProvider.mode, "opencode-legacy");
 });
 
 test("migrateAgentSettings: existing OpenCode user (cliPath set) migrates to opencode-legacy", () => {
@@ -117,6 +124,12 @@ test("normalizeAgentSettings: keeps valid region", () => {
   assert.equal(n.direct.region, "intl");
 });
 
+test("normalizeAgentSettings: preserves OpenCode legacy mode", () => {
+  const n = normalizeAgentSettings({ mode: "opencode-legacy", direct: { providerId: "deepseek" } });
+  assert.equal(n.mode, "opencode-legacy");
+  assert.equal(n.direct.model, "deepseek-v4-flash");
+});
+
 test("normalizeAgentSettings: rejects non-string apiKey values", () => {
   const n = normalizeAgentSettings({
     mode: "direct",
@@ -133,6 +146,17 @@ test("normalizeAgentSettings: invalid providerMode falls back to provider's defa
     direct: { providerId: "zhipu-glm", providerMode: "weird" },
   });
   assert.equal(n.direct.providerMode, "coding-plan"); // zhipu-glm's default
+});
+
+test("normalizeAgentSettingsInPlace preserves nested object references", () => {
+  const raw = { mode: "direct", direct: { providerId: "zhipu-glm", providerMode: "weird" } };
+  const directRef = raw.direct;
+  const out = normalizeAgentSettingsInPlace(raw);
+
+  assert.equal(out, raw);
+  assert.equal(out.direct, directRef);
+  assert.equal(out.direct.providerId, "zhipu-glm");
+  assert.equal(out.direct.providerMode, "coding-plan");
 });
 
 // ---------------------------------------------------------------------------

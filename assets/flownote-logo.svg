@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">FLOWnote logo</title>
+  <desc id="desc">An open book with a glowing lightbulb above it.</desc>
+  <defs>
+    <radialGradient id="bulbGlow" cx="50%" cy="28%" r="42%">
+      <stop offset="0%" stop-color="#fff6b8" stop-opacity="0.95"/>
+      <stop offset="45%" stop-color="#ffd166" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#7aedff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cover" x1="30" y1="216" x2="226" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="54%" stop-color="#172033"/>
+      <stop offset="100%" stop-color="#26324a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="70" y1="72" x2="190" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7aedff"/>
+      <stop offset="100%" stop-color="#ffb86b"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#020617" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#08090d"/>
+  <circle cx="128" cy="76" r="76" fill="url(#bulbGlow)"/>
+  <g filter="url(#softShadow)">
+    <path d="M42 206V88c28-18 58-18 86 0v118c-28-18-58-18-86 0z" fill="url(#cover)" stroke="url(#accent)" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M214 206V88c-28-18-58-18-86 0v118c28-18 58-18 86 0z" fill="url(#cover)" stroke="url(#accent)" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M128 88v118" fill="none" stroke="#dbeafe" stroke-width="8" stroke-linecap="round"/>
+    <path d="M72 126h32M72 154h35M152 126h32M149 154h35" fill="none" stroke="#dbeafe" stroke-width="7" stroke-linecap="round" opacity="0.72"/>
+  </g>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M103 53c0-13.8 11.2-25 25-25s25 11.2 25 25c0 12.5-6.5 20-13.5 27.3-3.8 3.8-6.5 7.5-6.5 12.7h-10c0-5.2-2.7-8.9-6.5-12.7C109.5 73 103 65.5 103 53z" fill="#fff6b8" stroke="#ffd166" stroke-width="8"/>
+    <path d="M118 104h20M121 118h14" stroke="#ffd166" stroke-width="8"/>
+    <path d="M128 10v10M92 22l7 7M164 22l-7 7M76 53h10M170 53h10" stroke="#fff1a8" stroke-width="8"/>
+  </g>
+</svg>

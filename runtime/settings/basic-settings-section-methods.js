@@ -1,6 +1,7 @@
 const { Setting, Notice, Platform = {} } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { bindDropdownChange } = require("./component-value-utils");
 const {
   LINK_RESOLVER_DEFAULTS,
   normalizeLinkResolver,
@@ -82,288 +83,349 @@ class BasicSettingsSectionMethods {
     const { containerEl } = this;
     containerEl.empty();
     if (typeof this.setHeading === "function") this.setHeading();
-    containerEl.createEl("p", {
-      text: t(
-        "settings.basic.intro",
-        "常用情况下只需要确认连接状态和 Provider 登录。其余高级项一般保持默认即可。",
-      ),
+    containerEl.addClass("oc-settings-root");
+
+    // Detect current mode so we can show only the relevant config.
+    const agent = (this.plugin.settings && this.plugin.settings.agentProvider) || {};
+    const mode = agent.mode === "opencode-legacy" ? "opencode-legacy" : "direct";
+
+    // ===== CORE GROUPS (always visible) =====
+
+    // --- Group: 界面语言 ---
+    this.renderSettingsGroup(containerEl, {
+      heading: t("settings.language.name", "界面语言"),
+      render: (group) => {
+        new Setting(group)
+          .setName(t("settings.language.name", "界面语言"))
+          .setDesc(t("settings.language.desc",
+            "默认跟随设备语言。切换后界面即时刷新；命令名与 Ribbon 提示重载后生效。"))
+          .addDropdown((dropdown) => {
+            dropdown
+              .addOption("auto", t("settings.language.optionAuto", "跟随系统（推荐）"))
+              .addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"))
+              .addOption("en", t("settings.language.optionEn", "English"))
+              .setValue(String(this.plugin.settings.uiLanguage || "auto"));
+            bindDropdownChange(dropdown, async (selectedLanguage) => {
+                const previousLocale = normalizeSupportedLocale(
+                  typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
+                  "en",
+                );
+                this.plugin.settings.uiLanguage = String(selectedLanguage || "auto");
+                await this.plugin.saveSettings();
+                if (typeof this.plugin.refreshLocaleUi === "function") this.plugin.refreshLocaleUi();
+                const nextLocale = normalizeSupportedLocale(
+                  typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
+                  "en",
+                );
+                this.display();
+                new Notice(t(
+                  "notices.languageAppliedReloadTip",
+                  "界面语言已更新。命令名和 Ribbon 提示将在重载插件后生效。",
+                ));
+                if (previousLocale === nextLocale) return;
+                const languageLabel = nextLocale === "zh-CN"
+                  ? t("settings.language.optionZhCN", "简体中文")
+                  : t("settings.language.optionEn", "English");
+                if (typeof this.showConfirmModal !== "function") return;
+                const shouldReinstall = await this.showConfirmModal({
+                  title: t("settings.language.reinstallPromptTitle", "重装对应语言 Skills？"),
+                  description: t(
+                    "settings.language.reinstallPromptDesc",
+                    "当前语言已切换为 {language}。是否现在重装对应语言版本的内置 Skills 与模板？",
+                    { language: languageLabel },
+                  ),
+                  submitText: t("settings.language.reinstallPromptConfirm", "立即重装"),
+                  cancelText: t("settings.language.reinstallPromptCancel", "稍后"),
+                });
+                if (!shouldReinstall) return;
+                await this.reinstallBundledContentWithPrompt(null, {
+                  locale: nextLocale,
+                  replaceAll: true,
+                  skipConflictPrompt: true,
+                });
+              });
+          });
+      },
     });
 
-    new Setting(containerEl)
-      .setName(t("settings.language.name", "界面语言"))
-      .setDesc(t(
-        "settings.language.desc",
-        "默认跟随设备语言。切换后界面即时刷新；命令名与 Ribbon 提示重载后生效。",
-      ))
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOption("auto", t("settings.language.optionAuto", "跟随系统（推荐）"))
-          .addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"))
-          .addOption("en", t("settings.language.optionEn", "English"))
-          .setValue(String(this.plugin.settings.uiLanguage || "auto"))
-          .onChange(async (value) => {
-            const previousLocale = normalizeSupportedLocale(
-              typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
-              "en",
-            );
-            this.plugin.settings.uiLanguage = String(value || "auto");
-            await this.plugin.saveSettings();
-            if (typeof this.plugin.refreshLocaleUi === "function") this.plugin.refreshLocaleUi();
-            const nextLocale = normalizeSupportedLocale(
-              typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
-              "en",
-            );
-            this.display();
-            new Notice(t(
-              "notices.languageAppliedReloadTip",
-              "界面语言已更新。命令名和 Ribbon 提示将在重载插件后生效。",
-            ));
-            if (previousLocale === nextLocale) return;
-            const languageLabel = nextLocale === "zh-CN"
-              ? t("settings.language.optionZhCN", "简体中文")
-              : t("settings.language.optionEn", "English");
-            if (typeof this.showConfirmModal !== "function") return;
-            const shouldReinstall = await this.showConfirmModal({
-              title: t("settings.language.reinstallPromptTitle", "重装对应语言 Skills？"),
-              description: t(
-                "settings.language.reinstallPromptDesc",
-                "当前语言已切换为 {language}。是否现在重装对应语言版本的内置 Skills 与模板？",
-                { language: languageLabel },
-              ),
-              submitText: t("settings.language.reinstallPromptConfirm", "立即重装"),
-              cancelText: t("settings.language.reinstallPromptCancel", "稍后"),
-            });
-            if (!shouldReinstall) return;
-            await this.reinstallBundledContentWithPrompt(null, {
-              locale: nextLocale,
-              replaceAll: true,
-              skipConflictPrompt: true,
-            });
-          });
-      });
-
-    // New agent provider section (Direct mode + OpenCode-legacy toggle).
-    // Sits between language and the OpenCode-specific settings so users
-    // see the direct-API path first; OpenCode CLI / Provider auth fall
-    // below it for users who pick the legacy mode.
-    if (typeof this.renderAgentProviderSection === "function") {
-      this.renderAgentProviderSection(containerEl);
-    }
-
-    const isWindows = isWindowsUiPlatform();
-    const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
-    const launchStrategyForUi = launchStrategyValue === "native" ? "native" : "auto";
-    new Setting(containerEl)
-      .setName(t("settings.basic.cliPathName", "FLOWnote CLI 路径（可选）"))
-      .setDesc(t(
-        "settings.basic.cliPathDesc",
-        "通常留空。插件会自动探测。Windows 请先在本机安装 Node.js，再执行 npm install -g opencode-ai。必要时优先填写 opencode.exe 或 cli.js（不要填 opencode.cmd，也不要使用 WSL）。",
-      ))
-      .addText((text) => {
-        text
-          .setPlaceholder("/Users/xxx/.opencode/bin/opencode")
-          .setValue(this.plugin.settings.cliPath)
-          .onChange(async (v) => {
-            this.plugin.settings.cliPath = v.trim();
-            await this.plugin.saveSettings();
-          });
-      });
-
-    new Setting(containerEl)
-      .setName(t("settings.basic.launchStrategyName", "连接启动方式"))
-      .setDesc(
-        isWindows
-          ? t(
-            "settings.basic.launchStrategyDescWindows",
-            "自动（推荐）：自动检测并记忆成功的本机连接方式。手动模式仅使用 Windows 本机安装；不再支持 WSL。",
-          )
-          : t(
-            "settings.basic.launchStrategyDesc",
-            "自动（推荐）：优先使用上次成功方式；失败时自动回退到其他方式。",
-          ),
-      )
-      .addDropdown((d) => {
-        d.addOption("auto", t("settings.basic.launchAuto", "自动（推荐）"));
-        if (isWindows) {
-          d.addOption("native", t("settings.basic.launchNativeWindows", "Windows 本机安装"));
-        } else {
-          d.addOption("native", t("settings.basic.launchNativeMac", "Mac 本机安装"));
+    // --- Group: AI 服务（运行方式 + provider 配置 + opencode provider auth） ---
+    // The renderAgentProviderSection already builds its own internal
+    // header + content. We wrap it inside a styled group container so it
+    // visually matches the rest, but skip our own group-heading because
+    // the section renders its own.
+    this.renderSettingsGroup(containerEl, {
+      heading: t("settings.agent.heading", "AI 服务"),
+      intro: t("settings.agent.intro",
+        "选择运行方式与服务商。新用户默认使用内置 AI；从旧版本升级会保留 OpenCode 桥接，避免原有工作流中断。"),
+      suppressInnerHeading: true,
+      render: (group) => {
+        if (typeof this.renderAgentProviderSection === "function") {
+          // Pass the group as containerEl. The section method internally
+          // already builds setName / addDropdown etc, which will inherit
+          // our group CSS.
+          this.renderAgentProviderSection(group);
         }
-        d.setValue(launchStrategyForUi).onChange(async (v) => {
-          this.plugin.settings.launchStrategy = v;
-          await this.plugin.saveSettings();
-          this.display();
-        });
+        // OpenCode-only provider auth (login per provider) — only show
+        // when the user has actually chosen the legacy bridge.
+        if (mode === "opencode-legacy" && !Platform.isMobile
+          && typeof this.renderProviderAuthSection === "function") {
+          this.renderProviderAuthSection(group);
+        }
+      },
+    });
+
+    // --- Collapsible: AI 高级（可选） — only in direct mode ---
+    if (mode === "direct" && typeof this.renderAgentProviderAdvanced === "function") {
+      this.renderCollapsibleGroup(containerEl, {
+        heading: t("settings.agent.advancedHeading", "AI 高级（可选）"),
+        openByDefault: false,
+        render: (group) => { this.renderAgentProviderAdvanced(group); },
       });
+    }
 
-    new Setting(containerEl)
-      .setName(t("settings.basic.sendWithEnterName", "Enter 发送消息"))
-      .setDesc(t("settings.basic.sendWithEnterDesc", "开启后按 Enter 直接发送，Shift+Enter 换行。关闭时使用 Ctrl/Cmd+Enter 发送。"))
-      .addToggle((toggle) => {
-        toggle.setValue(Boolean(this.plugin.settings.sendWithEnter)).onChange(async (v) => {
-          this.plugin.settings.sendWithEnter = v;
-          await this.plugin.saveSettings();
-        });
-      });
+    // --- Group: 笔记位置 ---
+    this.renderSettingsGroup(containerEl, {
+      heading: t("settings.notePaths.heading", "笔记位置"),
+      render: (group) => { this.renderNotePathsSection(group, t); },
+    });
 
-    new Setting(containerEl)
-      .setName(t("settings.basic.skillInjectModeName", "技能注入方式"))
-      .setDesc(t("settings.basic.skillInjectModeDesc", "当你使用 /skill 指令时，插件如何把技能内容传给模型。"))
-      .addDropdown((d) => {
-        d.addOption("summary", t("settings.basic.skillInjectModeSummary", "摘要注入（推荐）"))
-          .addOption("full", t("settings.basic.skillInjectModeFull", "全文注入（更完整但更重）"))
-          .addOption("off", t("settings.basic.skillInjectModeOff", "关闭注入（只发送用户输入）"))
-          .setValue(this.plugin.settings.skillInjectMode)
-          .onChange(async (v) => {
-            this.plugin.settings.skillInjectMode = v;
-            await this.plugin.saveSettings();
-          });
-      });
-
-    this.renderProviderAuthSection(containerEl);
-
-    new Setting(containerEl)
-      .setName(t("settings.basic.advancedHeading", "高级设置"))
-      .setHeading();
-
-    new Setting(containerEl)
-      .setName(t("settings.basic.skillsDirName", "内置 Skills 安装目录"))
-      .setDesc(t(
-        "settings.basic.skillsDirDesc",
-        "默认 .opencode/skills。插件会自动安装/更新内置 skills，你也可以在该目录新增或修改 skills；斜杠命令会直接读取此目录。",
-      ))
-      .addText((text) => {
-        text.setValue(this.plugin.settings.skillsDir).onChange(async (v) => {
-          this.plugin.settings.skillsDir = v.trim() || ".opencode/skills";
-          await this.plugin.saveSettings();
-          await this.plugin.reloadSkills();
-          // Also drop the direct-agent skill cache so the next turn
-          // picks up the new directory.
-          this.plugin.__flownoteSkillCache = null;
-        });
-      });
-
-    // --- Skill management section -----------------------------------------
+    // --- Collapsible: 技能管理 ---
     if (typeof this.renderSkillManagementSection === "function") {
-      this.renderSkillManagementSection(containerEl);
+      this.renderCollapsibleGroup(containerEl, {
+        heading: t("settings.skills.heading", "技能管理"),
+        openByDefault: false,
+        render: (group) => { this.renderSkillManagementSection(group); },
+      });
     }
 
-    new Setting(containerEl)
-      .setName(t("settings.basic.reinstallSkillsName", "重新安装内置 Skills 与模板"))
-      .setDesc(t(
-        "settings.basic.reinstallSkillsDesc",
-        "按当前界面语言安装/更新内置 skills，并将 Meta/模板 同步到各 skill 资源目录。遇到同名冲突会询问替换或忽略。",
-      ))
-      .addButton((b) => {
-        b.setButtonText(t("settings.basic.reinstallSkillsNow", "立即重装")).onClick(async () => {
-          await this.reinstallBundledContentWithPrompt(b, {
-            replaceAll: true,
-            skipConflictPrompt: true,
-          });
-        });
+    // --- Collapsible: 模板管理 ---
+    if (typeof this.renderTemplateManagementSection === "function") {
+      this.renderCollapsibleGroup(containerEl, {
+        heading: t("settings.templates.heading", "模板管理"),
+        openByDefault: false,
+        render: (group) => { this.renderTemplateManagementSection(group); },
       });
+    }
 
-    new Setting(containerEl)
-      .setName(t("settings.basic.resetTemplateBaselineName", "重置模板基线"))
-      .setDesc(t(
-        "settings.basic.resetTemplateBaselineDesc",
-        "仅当你需要恢复默认模板时使用。会把内置模板写回 Meta/模板（冲突可逐项替换或忽略）。",
-      ))
-      .addButton((b) => {
-        b.setButtonText(t("settings.basic.resetTemplateBaselineNow", "重置模板")).onClick(async () => {
-          b.setDisabled(true);
-          b.setButtonText(t("settings.basic.resetTemplateBaselineBusy", "重置中..."));
-          try {
-            const resetResult = await this.plugin.resetTemplateBaseline({
-              resolveConflict: (conflict) => this.promptBundledConflictResolution(conflict),
-              defaultConflictAction: "skip",
+    // --- Collapsible: 移动端快速捕获 ---
+    if (typeof this.renderMobileCaptureSection === "function") {
+      this.renderCollapsibleGroup(containerEl, {
+        heading: t("settings.mobileCapture.heading", "移动端快速捕获"),
+        openByDefault: false,
+        render: (group) => { this.renderMobileCaptureSection(group); },
+      });
+    }
+
+    // ===== COLLAPSIBLE SECTIONS (advanced, default closed) =====
+
+    // --- Collapsible: OpenCode 桥接配置 (only in legacy mode) ---
+    if (mode === "opencode-legacy" && !Platform.isMobile) {
+      this.renderCollapsibleGroup(containerEl, {
+        heading: t("settings.opencode.heading", "OpenCode 桥接配置"),
+        intro: t("settings.opencode.intro",
+          "选择「OpenCode 桥接」运行方式才需要配置。CLI 路径留空可让插件自动探测。"),
+        openByDefault: false,
+        render: (group) => {
+          const isWindows = isWindowsUiPlatform();
+          const launchStrategyValue = String(this.plugin.settings.launchStrategy || "auto");
+          const launchStrategyForUi = launchStrategyValue === "native" ? "native" : "auto";
+
+          new Setting(group)
+            .setName(t("settings.basic.cliPathName", "FLOWnote CLI 路径（可选）"))
+            .setDesc(t("settings.basic.cliPathDesc",
+              "通常留空。插件会自动探测。Windows 请先安装 Node.js，再 npm install -g opencode-ai。"))
+            .addText((text) => {
+              text.setPlaceholder("/Users/xxx/.opencode/bin/opencode")
+                .setValue(this.plugin.settings.cliPath)
+                .onChange(async (v) => {
+                  this.plugin.settings.cliPath = v.trim();
+                  await this.plugin.saveSettings();
+                });
             });
-            if (resetResult.cancelled) {
-              new Notice(t(
-                "settings.basic.resetTemplateBaselineCanceled",
-                "已取消模板重置。已处理 {synced}/{total}。",
-                resetResult,
-              ));
-            } else if (!resetResult.errors.length) {
-              new Notice(t(
-                "settings.basic.resetTemplateBaselineSuccess",
-                "模板重置完成：{synced}/{total}，目录 {metaRoot}",
-                resetResult,
-              ));
-            } else {
-              const msg = resetResult.errors[0];
-              new Notice(t("settings.basic.resetTemplateBaselineFailed", "模板重置失败：{message}", { message: msg }));
-            }
-          } catch (e) {
-            new Notice(t(
-              "settings.basic.resetTemplateBaselineFailed",
-              "模板重置失败：{message}",
-              { message: e instanceof Error ? e.message : String(e) },
-            ));
-          } finally {
-            b.setDisabled(false);
-            b.setButtonText(t("settings.basic.resetTemplateBaselineNow", "重置模板"));
-          }
-        });
-      });
 
-    new Setting(containerEl)
-      .setName(t("settings.basic.diagnosticsName", "连接诊断"))
-      .setDesc(t("settings.basic.diagnosticsDesc", "检测 FLOWnote 可执行文件与连接状态。"))
-      .addButton((b) => {
-        b.setButtonText(t("settings.basic.diagnosticsRun", "运行诊断")).onClick(async () => {
-          b.setDisabled(true);
-          b.setButtonText(t("settings.basic.diagnosticsBusy", "测试中..."));
-          try {
-            const r = await this.plugin.diagnosticsService.run();
-            if (r.connection.ok) new Notice(t("settings.basic.diagnosticsOk", "连接正常 ({mode})", r.connection));
-            else new Notice(t("settings.basic.diagnosticsFailed", "连接失败: {error}", r.connection));
-          } catch (e) {
-            new Notice(e instanceof Error ? e.message : String(e));
-          } finally {
-            b.setDisabled(false);
-            b.setButtonText(t("settings.basic.diagnosticsRun", "运行诊断"));
-          }
-        });
-      });
-
-    if (this.plugin.settings.launchStrategy === "auto") {
-      const remembered = typeof this.plugin.getPreferredLaunchProfile === "function"
-        ? this.plugin.getPreferredLaunchProfile()
-        : null;
-      const rememberedText = remembered
-        ? t("settings.basic.autoMemoryRememberedNative", "已记忆：本机 {command}", {
-          command: remembered.command || "opencode",
-        })
-        : t("settings.basic.autoMemoryNone", "当前未记忆成功连接方式。");
-
-      new Setting(containerEl)
-        .setName(t("settings.basic.autoMemoryName", "自动连接记忆"))
-        .setDesc(t("settings.basic.autoMemoryDesc", "{rememberedText} 成功连接后会自动更新。", { rememberedText }))
-        .addButton((b) => {
-          b.setButtonText(t("settings.basic.autoMemoryReset", "重置记忆")).onClick(async () => {
-            b.setDisabled(true);
-            try {
-              if (typeof this.plugin.clearRememberedLaunchProfile === "function") {
-                await this.plugin.clearRememberedLaunchProfile();
+          new Setting(group)
+            .setName(t("settings.basic.launchStrategyName", "连接启动方式"))
+            .setDesc(isWindows
+              ? t("settings.basic.launchStrategyDescWindows",
+                "自动（推荐）：自动检测并记忆成功的本机连接方式。")
+              : t("settings.basic.launchStrategyDesc",
+                "自动（推荐）：优先使用上次成功方式；失败时自动回退。"))
+            .addDropdown((d) => {
+              d.addOption("auto", t("settings.basic.launchAuto", "自动（推荐）"));
+              if (isWindows) {
+                d.addOption("native", t("settings.basic.launchNativeWindows", "Windows 本机安装"));
+              } else {
+                d.addOption("native", t("settings.basic.launchNativeMac", "Mac 本机安装"));
               }
-              new Notice(t("settings.basic.autoMemoryResetDone", "已清除记忆的连接方式。"));
-              this.display();
-            } catch (e) {
-              new Notice(t(
-                "settings.basic.autoMemoryResetFailed",
-                "重置失败: {message}",
-                { message: e instanceof Error ? e.message : String(e) },
-              ));
-            } finally {
-              b.setDisabled(false);
-            }
-          });
-        });
+              d.setValue(launchStrategyForUi);
+              bindDropdownChange(d, async (launchStrategy) => {
+                this.plugin.settings.launchStrategy = launchStrategy;
+                await this.plugin.saveSettings();
+                this.display();
+              });
+            });
+
+          new Setting(group)
+            .setName(t("settings.basic.diagnosticsName", "连接诊断"))
+            .setDesc(t("settings.basic.diagnosticsDesc", "检测 FLOWnote 可执行文件与连接状态。"))
+            .addButton((b) => {
+              b.setButtonText(t("settings.basic.diagnosticsRun", "运行诊断")).onClick(async () => {
+                b.setDisabled(true);
+                b.setButtonText(t("settings.basic.diagnosticsBusy", "测试中..."));
+                try {
+                  const r = await this.plugin.diagnosticsService.run();
+                  if (r.connection.ok) new Notice(t("settings.basic.diagnosticsOk", "连接正常 ({mode})", r.connection));
+                  else new Notice(t("settings.basic.diagnosticsFailed", "连接失败: {error}", r.connection));
+                } catch (e) {
+                  new Notice(e instanceof Error ? e.message : String(e));
+                } finally {
+                  b.setDisabled(false);
+                  b.setButtonText(t("settings.basic.diagnosticsRun", "运行诊断"));
+                }
+              });
+            });
+
+          if (this.plugin.settings.launchStrategy === "auto") {
+            const remembered = typeof this.plugin.getPreferredLaunchProfile === "function"
+              ? this.plugin.getPreferredLaunchProfile() : null;
+            const rememberedText = remembered
+              ? t("settings.basic.autoMemoryRememberedNative", "已记忆：本机 {command}",
+                { command: remembered.command || "opencode" })
+              : t("settings.basic.autoMemoryNone", "当前未记忆成功连接方式。");
+            new Setting(group)
+              .setName(t("settings.basic.autoMemoryName", "自动连接记忆"))
+              .setDesc(t("settings.basic.autoMemoryDesc", "{rememberedText} 成功连接后会自动更新。", { rememberedText }))
+              .addButton((b) => {
+                b.setButtonText(t("settings.basic.autoMemoryReset", "重置记忆")).onClick(async () => {
+                  b.setDisabled(true);
+                  try {
+                    if (typeof this.plugin.clearRememberedLaunchProfile === "function") {
+                      await this.plugin.clearRememberedLaunchProfile();
+                    }
+                    new Notice(t("settings.basic.autoMemoryResetDone", "已清除记忆的连接方式。"));
+                    this.display();
+                  } catch (e) {
+                    new Notice(t("settings.basic.autoMemoryResetFailed", "重置失败: {message}",
+                      { message: e instanceof Error ? e.message : String(e) }));
+                  } finally {
+                    b.setDisabled(false);
+                  }
+                });
+              });
+          }
+        },
+      });
     }
 
-    // --- Mobile Capture Settings (visible on all platforms for pre-configuration) ---
-    this.renderMobileCaptureSection(containerEl);
+    // --- Collapsible: 高级设置 (default closed) ---
+    this.renderCollapsibleGroup(containerEl, {
+      heading: t("settings.basic.advancedHeading", "高级设置"),
+      intro: t("settings.basic.advancedIntro",
+        "高级选项。一般保持默认即可——除非你需要重装内置内容、改 skills 路径，或排查问题。"),
+      openByDefault: false,
+      render: (group) => {
+        if (!Platform.isMobile) {
+          new Setting(group)
+            .setName(t("settings.basic.sendWithEnterName", "Enter 发送消息"))
+            .setDesc(t("settings.basic.sendWithEnterDesc", "开启后按 Enter 直接发送，Shift+Enter 换行。"))
+            .addToggle((toggle) => {
+              toggle.setValue(Boolean(this.plugin.settings.sendWithEnter)).onChange(async (v) => {
+                this.plugin.settings.sendWithEnter = v;
+                await this.plugin.saveSettings();
+              });
+            });
+
+          new Setting(group)
+            .setName(t("settings.basic.skillsDirName", "内置 Skills 安装目录"))
+            .setDesc(t("settings.basic.skillsDirDesc",
+              "默认 .flownote/skills。插件会自动安装/更新内置 skills。"))
+            .addText((text) => {
+              text.setValue(this.plugin.settings.skillsDir).onChange(async (v) => {
+                this.plugin.settings.skillsDir = v.trim() || ".flownote/skills";
+                await this.plugin.saveSettings();
+                if (typeof this.plugin.reloadSkills === "function") await this.plugin.reloadSkills();
+                this.plugin.__flownoteSkillCache = null;
+              });
+            });
+
+          new Setting(group)
+            .setName(t("settings.basic.reinstallSkillsName", "重新安装内置 Skills 与模板"))
+            .setDesc(t("settings.basic.reinstallSkillsDesc",
+              "按当前界面语言安装/更新内置 skills，并同步模板。"))
+            .addButton((b) => {
+              b.setButtonText(t("settings.basic.reinstallSkillsNow", "立即重装")).onClick(async () => {
+                await this.reinstallBundledContentWithPrompt(b, {
+                  replaceAll: true, skipConflictPrompt: true,
+                });
+              });
+            });
+
+          new Setting(group)
+            .setName(t("settings.basic.resetTemplateBaselineName", "重置模板基线"))
+            .setDesc(t("settings.basic.resetTemplateBaselineDesc",
+              "仅当你需要恢复默认模板时使用。"))
+            .addButton((b) => {
+              b.setButtonText(t("settings.basic.resetTemplateBaselineNow", "重置模板")).onClick(async () => {
+                b.setDisabled(true);
+                b.setButtonText(t("settings.basic.resetTemplateBaselineBusy", "重置中..."));
+                try {
+                  const resetResult = await this.plugin.resetTemplateBaseline({
+                    resolveConflict: (conflict) => this.promptBundledConflictResolution(conflict),
+                    defaultConflictAction: "skip",
+                  });
+                  if (resetResult.cancelled) {
+                    new Notice(t("settings.basic.resetTemplateBaselineCanceled",
+                      "已取消模板重置。已处理 {synced}/{total}。", resetResult));
+                  } else if (!resetResult.errors.length) {
+                    new Notice(t("settings.basic.resetTemplateBaselineSuccess",
+                      "模板重置完成：{synced}/{total}", resetResult));
+                  } else {
+                    new Notice(t("settings.basic.resetTemplateBaselineFailed",
+                      "模板重置失败：{message}", { message: resetResult.errors[0] }));
+                  }
+                } catch (e) {
+                  new Notice(t("settings.basic.resetTemplateBaselineFailed",
+                    "模板重置失败：{message}",
+                    { message: e instanceof Error ? e.message : String(e) }));
+                } finally {
+                  b.setDisabled(false);
+                  b.setButtonText(t("settings.basic.resetTemplateBaselineNow", "重置模板"));
+                }
+              });
+            });
+        }
+      },
+    });
+  }
+
+  /**
+   * Render a styled group of settings: bold h3 heading + ONE bordered
+   * container holding setting-items separated by horizontal dividers.
+   * Per-setting descriptions live inline via native setDesc(); we no
+   * longer emit a framed "intro callout" at the top of each group.
+   *
+   * @param {HTMLElement} parent
+   * @param {{ heading: string, render: (group: HTMLElement) => void }} opts
+   */
+  renderSettingsGroup(parent, opts) {
+    const wrap = parent.createDiv({ cls: "oc-settings-section" });
+    const heading = wrap.createDiv({ cls: "oc-settings-section-heading" });
+    heading.createEl("h3", { text: String(opts.heading || "") });
+    const group = wrap.createDiv({ cls: "oc-settings-group" });
+    if (typeof opts.render === "function") opts.render(group);
+  }
+
+  /**
+   * Same shape as renderSettingsGroup but wrapped in a <details>
+   * element so the user can collapse/expand. Default closed.
+   */
+  renderCollapsibleGroup(parent, opts) {
+    const wrap = parent.createEl("details", { cls: "oc-settings-collapsible" });
+    if (opts.openByDefault) wrap.open = true;
+    const summary = wrap.createEl("summary", { cls: "oc-settings-collapsible-summary" });
+    summary.createDiv({ cls: "oc-settings-collapsible-summary-text", text: String(opts.heading || "") });
+    const group = wrap.createDiv({ cls: "oc-settings-group" });
+    if (typeof opts.render === "function") opts.render(group);
   }
 
   async reinstallBundledContentWithPrompt(buttonEl, options = {}) {
@@ -502,14 +564,6 @@ class BasicSettingsSectionMethods {
       return; // mobile module not available
     }
 
-    new Setting(containerEl)
-      .setName(t("settings.mobileCapture.heading", "移动端快速捕获"))
-      .setHeading();
-    containerEl.createEl("p", {
-      text: t("settings.mobileCapture.intro", "在桌面端预先配置移动端捕获设置。同步到移动端后即可使用。"),
-      cls: "setting-item-description",
-    });
-
     const mc = this.plugin.settings.mobileCapture;
     const locale = typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en";
     mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
@@ -523,8 +577,9 @@ class BasicSettingsSectionMethods {
         for (const [id, preset] of Object.entries(PROVIDER_PRESETS)) {
           d.addOption(id, getAiProviderDisplayName(id, preset.name, t));
         }
-        d.setValue(mc.provider).onChange(async (v) => {
-          mc.provider = v;
+        d.setValue(mc.provider);
+        bindDropdownChange(d, async (providerId) => {
+          mc.provider = providerId;
           await this.plugin.saveSettings();
           this.display();
         });
@@ -615,8 +670,9 @@ class BasicSettingsSectionMethods {
           const provider = getResolverProviderPreset(id);
           d.addOption(id, t(`settings.mobileCapture.resolverProvider.${id}.name`, provider.name));
         }
-        d.setValue(resolverProvider.id).onChange(async (v) => {
-          lr.provider = normalizeResolverProviderId(v);
+        d.setValue(resolverProvider.id);
+        bindDropdownChange(d, async (providerId) => {
+          lr.provider = normalizeResolverProviderId(providerId);
           await this.plugin.saveSettings();
           this.display();
         });
@@ -742,6 +798,56 @@ class BasicSettingsSectionMethods {
           }
         });
       });
+  }
+
+  renderNotePathsSection(containerEl, t) {
+    const { DEFAULT_NOTE_PATHS } = require("../settings-utils");
+    if (!this.plugin.settings.notePaths) {
+      this.plugin.settings.notePaths = { ...DEFAULT_NOTE_PATHS };
+    }
+    const paths = this.plugin.settings.notePaths;
+
+    const fields = [
+      ["dailyNotes",      "每日笔记", "Daily notes"],
+      ["weeklyReviews",   "周记 / 周回顾", "Weekly review"],
+      ["monthlyReviews",  "月记 / 月报", "Monthly review"],
+      ["yearlyReviews",   "年记 / 年报", "Yearly review"],
+      ["permanentNotes",  "永久笔记", "Permanent notes"],
+      ["topicNotes",      "主题笔记（📍）", "Topic notes (📍)"],
+      ["literatureNotes", "文献笔记（《》）", "Literature notes (《》)"],
+      ["domainPages",     "领域页所在层（🌱）", "Domain pages layer (🌱)"],
+      ["activeProjects",  "进行中项目", "Active projects"],
+      ["archive",         "归档", "Archive"],
+    ];
+
+    const locale = typeof this.plugin.getEffectiveLocale === "function"
+      ? this.plugin.getEffectiveLocale()
+      : "zh-CN";
+
+    for (const [key, zhLabel, enLabel] of fields) {
+      const label = locale === "en" ? enLabel : zhLabel;
+      const defaultValue = DEFAULT_NOTE_PATHS[key];
+      new Setting(containerEl)
+        .setName(label)
+        .setDesc(t(
+          "settings.notePaths.fieldDesc",
+          "默认：{default}",
+          { default: defaultValue },
+        ))
+        .addText((text) => {
+          text
+            .setPlaceholder(defaultValue)
+            .setValue(paths[key] && paths[key] !== defaultValue ? paths[key] : "")
+            .onChange(async (raw) => {
+              const v = String(raw || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
+              paths[key] = v || defaultValue;
+              await this.plugin.saveSettings();
+              // Invalidate the agent's cached system prompt so the next
+              // turn picks up the new path immediately.
+              this.plugin.__flownoteSkillCache = null;
+            });
+        });
+    }
   }
 
 }

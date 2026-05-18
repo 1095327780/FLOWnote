@@ -383,6 +383,141 @@ test("runAgentLoop denies tools when checkPermissions asks but no askFn is confi
   assert.match(finish.content, /no askFn/);
 });
 
+test("runAgentLoop auto-allows low-risk asks in dangerous-only permission mode", async () => {
+  const provider = mockProvider({
+    turns: [
+      [
+        ev.messageStart(),
+        ev.toolUseStart(0, "tu-w", "vault_write"),
+        ev.toolUseJson(0, "{\"path\":\"a.md\",\"mode\":\"append\"}"),
+        ev.blockStop(0),
+        ev.messageDelta("tool_use"),
+        ev.messageStop(),
+      ],
+      [
+        ev.messageStart(),
+        ev.textBlockStart(0),
+        ev.textDelta(0, "done"),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+    ],
+  });
+  const registry = registryWith(
+    makeWritingTool(
+      "vault_write",
+      async () => "written",
+      { checkPermissions: async () => ({ behavior: "ask", summary: "append a.md" }) },
+    ),
+  );
+  let asked = false;
+  const events = await collect(runAgentLoop({
+    provider,
+    registry,
+    messages: [{ role: "user", content: [{ type: "text", text: "append" }] }],
+    ctx: { toolPermissionMode: "ask-dangerous", grants: {} },
+    onPermissionAsk: async () => {
+      asked = true;
+      return { behavior: "deny" };
+    },
+  }));
+  const finish = events.find((e) => e.type === "tool_finish");
+  assert.equal(asked, false);
+  assert.equal(finish.isError, false);
+});
+
+test("runAgentLoop still asks for dangerous tools in dangerous-only permission mode", async () => {
+  const provider = mockProvider({
+    turns: [
+      [
+        ev.messageStart(),
+        ev.toolUseStart(0, "tu-w", "vault_write"),
+        ev.toolUseJson(0, "{\"path\":\"a.md\",\"mode\":\"overwrite\"}"),
+        ev.blockStop(0),
+        ev.messageDelta("tool_use"),
+        ev.messageStop(),
+      ],
+      [
+        ev.messageStart(),
+        ev.textBlockStart(0),
+        ev.textDelta(0, "done"),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+    ],
+  });
+  const registry = registryWith(
+    buildTool({
+      name: "vault_write",
+      description: "write",
+      inputSchema: { type: "object" },
+      isReadOnly: () => false,
+      isDestructive: (input) => input && input.mode === "overwrite",
+      checkPermissions: async () => ({ behavior: "ask", summary: "overwrite a.md" }),
+      async *execute() { yield { type: "result", content: "written" }; },
+    }),
+  );
+  const events = await collect(runAgentLoop({
+    provider,
+    registry,
+    messages: [{ role: "user", content: [{ type: "text", text: "overwrite" }] }],
+    ctx: { toolPermissionMode: "ask-dangerous", grants: {} },
+  }));
+  const finish = events.find((e) => e.type === "tool_finish");
+  assert.equal(finish.isError, true);
+  assert.match(finish.content, /no askFn/);
+});
+
+test("runAgentLoop auto-allows dangerous tools in full-auto permission mode", async () => {
+  const provider = mockProvider({
+    turns: [
+      [
+        ev.messageStart(),
+        ev.toolUseStart(0, "tu-w", "vault_write"),
+        ev.toolUseJson(0, "{\"path\":\"a.md\",\"mode\":\"overwrite\"}"),
+        ev.blockStop(0),
+        ev.messageDelta("tool_use"),
+        ev.messageStop(),
+      ],
+      [
+        ev.messageStart(),
+        ev.textBlockStart(0),
+        ev.textDelta(0, "done"),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+    ],
+  });
+  const registry = registryWith(
+    buildTool({
+      name: "vault_write",
+      description: "write",
+      inputSchema: { type: "object" },
+      isReadOnly: () => false,
+      isDestructive: () => true,
+      checkPermissions: async () => ({ behavior: "ask", summary: "overwrite a.md" }),
+      async *execute() { yield { type: "result", content: "written" }; },
+    }),
+  );
+  let asked = false;
+  const events = await collect(runAgentLoop({
+    provider,
+    registry,
+    messages: [{ role: "user", content: [{ type: "text", text: "overwrite" }] }],
+    ctx: { toolPermissionMode: "auto", grants: {} },
+    onPermissionAsk: async () => {
+      asked = true;
+      return { behavior: "deny" };
+    },
+  }));
+  const finish = events.find((e) => e.type === "tool_finish");
+  assert.equal(asked, false);
+  assert.equal(finish.isError, false);
+});
+
 // ---------------------------------------------------------------------------
 // runAgentLoop — two read-only tools in one turn (parallel execution)
 // ---------------------------------------------------------------------------

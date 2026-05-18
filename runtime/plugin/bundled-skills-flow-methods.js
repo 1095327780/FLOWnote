@@ -1,5 +1,14 @@
-const fs = require("fs");
-const path = require("path");
+// Node-only deps stubbed on mobile (require returns `{}`, doesn't throw).
+let fs = {};
+let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+try {
+  const real = require("fs");
+  if (real && typeof real.existsSync === "function") fs = real;
+} catch { /* mobile */ }
+try {
+  const real = require("path");
+  if (real && typeof real.join === "function") path = real;
+} catch { /* mobile */ }
 const {
   DEFAULT_META_TEMPLATES_DIR,
   createCancelledError,

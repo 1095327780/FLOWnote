@@ -823,8 +823,14 @@ function collectToolLocalDiffEntries(block, view) {
 
 function renderToolPart(container, block, messagePending, message) {
   const status = this.resolveDisplayBlockStatus(block, messagePending);
-  const toolName = this.toolDisplayName(block) || tFromContext(this, "view.block.tool", "tool");
-  const normalizedToolName = String((block && block.tool) || toolName || "tool").trim().toLowerCase();
+  const rawToolName = this.toolDisplayName(block) || tFromContext(this, "view.block.tool", "tool");
+  const normalizedToolName = String((block && block.tool) || rawToolName || "tool").trim().toLowerCase();
+  // Localize the displayed tool name (e.g. `vault_read` → `读取笔记` / `Read note`).
+  // Falls back to the raw id if no translation exists.
+  const localizedToolName = normalizedToolName
+    ? tFromContext(this, `view.tools.${normalizedToolName}`, rawToolName)
+    : rawToolName;
+  const toolName = localizedToolName;
   let summaryText = inferToolSummary(block, normalizedToolName || toolName);
   const questionItems = normalizedToolName === "question"
     ? this.extractQuestionItemsFromBlock(block)

@@ -1,4 +1,4 @@
-const { Notice, setIcon } = require("obsidian");
+const { Notice, setIcon, Platform = {} } = require("obsidian");
 const { tr } = require("./shared-utils");
 const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 
@@ -74,6 +74,23 @@ function renderHeader(header) {
   if (!this.historyMenuDocumentBound) {
     this.historyMenuDocumentBound = true;
     this.registerDomEvent(document, "click", () => this.closeHistoryMenu());
+  }
+
+  // On mobile, the standalone settings (gear) button lives in the
+  // toolbar row below — which we hide on phones to declutter. Inline
+  // a third action button here so the user has [+] [history] [gear]
+  // together in one row, matching the spec.
+  if (Platform && Platform.isMobile) {
+    const settingsBtn = this.buildIconButton(
+      actions,
+      "settings",
+      tr(this, "view.settings", "Settings"),
+      () => {
+        if (typeof this.openSettings === "function") this.openSettings();
+      },
+      "oc-header-btn",
+    );
+    settingsBtn.setAttr("type", "button");
   }
 
   this.refreshHistoryMenu();

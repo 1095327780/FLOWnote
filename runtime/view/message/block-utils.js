@@ -457,6 +457,12 @@ function inferToolSummary(block, toolName) {
     return truncateSummaryText(input.url || input.uri || "", 72);
   }
 
+  if (normalizedTool === "web_request") {
+    const method = String(input.method || "GET").toUpperCase();
+    const url = input.url || input.uri || "";
+    return truncateSummaryText(`${method} ${url}`.trim(), 72);
+  }
+
   if (normalizedTool === "ls") {
     return truncateSummaryText(fileNameOnly(input.path || "."), 72);
   }
@@ -734,6 +740,7 @@ function visibleAssistantBlocks(rawBlocks) {
   const blocks = Array.isArray(rawBlocks) ? rawBlocks : [];
   return blocks.filter((block) => {
     if (!block || typeof block !== "object") return false;
+    if (block.hidden === true || block.visible === false) return false;
     const type = String(block.type || "").trim().toLowerCase();
     if (!type) return false;
     if (type === "step-start" || type === "step-finish") return false;
