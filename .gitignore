@@ -11,5 +11,6 @@ release/
 .cursor/
 .idea/
 .vscode/
+AGENTS.md
 *.bak
 *.tmp
