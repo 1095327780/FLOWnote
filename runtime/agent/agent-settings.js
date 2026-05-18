@@ -76,20 +76,22 @@ function defaultAgentSettings() {
  *
  * - If `pluginSettings.agentProvider` already exists, normalize it
  *   (filling in any missing fields with defaults) and return.
- * - Otherwise, choose `mode` based on whether the user appears to have
- *   an OpenCode setup already (cliPath, or any OpenCode auth metadata):
- *     - has OpenCode config       → mode = 'opencode-legacy'
- *     - fresh / no OpenCode config → mode = 'direct'
+ * - Otherwise, choose `mode` based on the migration context:
+ *     - persisted pre-agentProvider data → mode = 'opencode-legacy'
+ *     - has OpenCode config              → mode = 'opencode-legacy'
+ *     - fresh install                    → mode = 'direct'
  *
  * @param {Object} pluginSettings
+ * @param {{existingInstall?: boolean}} [options]
  * @returns {Object} the (possibly modified) settings object — same reference
  */
-function migrateAgentSettings(pluginSettings) {
+function migrateAgentSettings(pluginSettings, options = {}) {
   if (!pluginSettings || typeof pluginSettings !== "object") {
     return { agentProvider: defaultAgentSettings() };
   }
   if (!pluginSettings.agentProvider) {
-    const hasOpenCodeFootprint = looksLikeExistingOpenCodeUser(pluginSettings);
+    const hasOpenCodeFootprint = Boolean(options && options.existingInstall)
+      || looksLikeExistingOpenCodeUser(pluginSettings);
     pluginSettings.agentProvider = defaultAgentSettings();
     if (hasOpenCodeFootprint) {
       pluginSettings.agentProvider.mode = "opencode-legacy";
@@ -161,6 +163,36 @@ function normalizeAgentSettings(raw) {
   return out;
 }
 
+function replaceObjectInPlace(target, source) {
+  if (!target || typeof target !== "object" || Array.isArray(target)) return source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return source;
+  for (const key of Object.keys(target)) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) delete target[key];
+  }
+  for (const [key, value] of Object.entries(source)) {
+    const existing = target[key];
+    if (
+      existing
+      && typeof existing === "object"
+      && !Array.isArray(existing)
+      && value
+      && typeof value === "object"
+      && !Array.isArray(value)
+    ) {
+      replaceObjectInPlace(existing, value);
+    } else {
+      target[key] = Array.isArray(value) ? value.slice() : value;
+    }
+  }
+  return target;
+}
+
+function normalizeAgentSettingsInPlace(raw) {
+  const normalized = normalizeAgentSettings(raw);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return normalized;
+  return replaceObjectInPlace(raw, normalized);
+}
+
 /**
  * Read the API key stored for the currently-selected provider.
  *
@@ -215,6 +247,7 @@ module.exports = {
   defaultAgentSettings,
   migrateAgentSettings,
   normalizeAgentSettings,
+  normalizeAgentSettingsInPlace,
   getActiveApiKey,
   setApiKeyFor,
   switchActiveProvider,

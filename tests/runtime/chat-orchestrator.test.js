@@ -269,3 +269,91 @@ test("runSendPrompt should keep explicit skill command for native command routin
     fixture.restore();
   }
 });
+
+test("runSendPrompt should create an OpenCode session when legacy mode is active on a local session", async () => {
+  const fixture = loadRunSendPromptWithMockObsidian();
+  const runtimeState = {
+    sessions: [{ id: "local-existing", title: "本地会话", updatedAt: 0 }],
+    activeSessionId: "local-existing",
+    messagesBySession: { "local-existing": [] },
+  };
+
+  const sessionStore = createSessionStore(runtimeState);
+  let sentSessionId = "";
+  let createdTitle = "";
+
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { agentProvider: { mode: "opencode-legacy" }, defaultModel: "" },
+      skillService: null,
+      opencodeClient: {
+        async sendMessage(options) {
+          sentSessionId = String(options && options.sessionId ? options.sessionId : "");
+          return { text: "legacy final", reasoning: "", meta: "", blocks: [] };
+        },
+      },
+      async createSession(title) {
+        createdTitle = String(title || "");
+        const session = { id: "remote-1", title: createdTitle || "新会话", updatedAt: 1 };
+        runtimeState.sessions.unshift(session);
+        runtimeState.messagesBySession[session.id] = [];
+        return session;
+      },
+      async persistState() {},
+      markModelUnavailable() {
+        return { hidden: false };
+      },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "",
+    autoScrollEnabled: true,
+    silentAbortBudget: 0,
+    currentAbort: null,
+    linkedContextFiles: [],
+
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return []; },
+    clearLinkedContextFiles() {},
+
+    render() {},
+    renderMessages() {},
+    renderSidebar() {},
+    refreshHistoryMenu() {},
+    scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {},
+    setBusy() {},
+    setRuntimeStatus() {},
+
+    findMessageRow() { return null; },
+    hasReasoningBlock() { return false; },
+    renderAssistantBlocks() {},
+    removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {},
+    renderInlineQuestionPanel() {},
+    showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; },
+    removePendingQuestionRequest() {},
+    hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {},
+    handleToastEvent() {},
+    isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "hello");
+
+    assert.equal(createdTitle, "本地会话");
+    assert.equal(runtimeState.activeSessionId, "remote-1");
+    assert.equal(sentSessionId, "remote-1");
+    assert.equal(runtimeState.messagesBySession["local-existing"].length, 0);
+    assert.equal(runtimeState.messagesBySession["remote-1"].length, 2);
+    assert.equal(runtimeState.messagesBySession["remote-1"][1].text, "legacy final");
+  } finally {
+    fixture.restore();
+  }
+});

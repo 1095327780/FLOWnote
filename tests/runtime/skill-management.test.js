@@ -6,6 +6,11 @@ const {
   readSkill,
   saveSkill,
   deleteSkill,
+  importSkillsFromFileList,
+  discoverSkillImportsFromFileList,
+  listSkillManagementEntries,
+  listSkillSecretRefs,
+  extractSkillSecretRefsFromText,
   validateSlug,
   renderSkillMarkdown,
 } = require("../../runtime/settings/skill-management");
@@ -14,14 +19,17 @@ const {
 function makeAdapter(initial = {}) {
   const files = new Map();
   const folders = new Set();
-  for (const [p, content] of Object.entries(initial)) {
-    files.set(p, content);
+  function markParentFolders(p) {
     let parts = p.split("/");
     parts.pop();
     while (parts.length > 0) {
       folders.add(parts.join("/"));
       parts.pop();
     }
+  }
+  for (const [p, content] of Object.entries(initial)) {
+    files.set(p, content);
+    markParentFolders(p);
   }
   return {
     _files: files,
@@ -51,12 +59,11 @@ function makeAdapter(initial = {}) {
     },
     async write(p, data) {
       files.set(p, data);
-      let parts = p.split("/");
-      parts.pop();
-      while (parts.length > 0) {
-        folders.add(parts.join("/"));
-        parts.pop();
-      }
+      markParentFolders(p);
+    },
+    async writeBinary(p, data) {
+      files.set(p, data);
+      markParentFolders(p);
     },
     async mkdir(p) { folders.add(p); },
     async remove(p) { files.delete(p); },
@@ -68,6 +75,24 @@ function makePlugin(adapter, skillsDir = ".flownote/skills") {
   return {
     app: { vault: { adapter } },
     settings: { skillsDir },
+  };
+}
+
+function makeImportFile(path, content, options = {}) {
+  const isBinary = !!options.binary;
+  return {
+    name: path.split("/").pop(),
+    webkitRelativePath: path,
+    type: options.type || (isBinary ? "application/octet-stream" : "text/markdown"),
+    async text() {
+      if (typeof content === "string") return content;
+      return Buffer.from(content).toString("utf8");
+    },
+    async arrayBuffer() {
+      if (content instanceof ArrayBuffer) return content;
+      const buffer = Buffer.isBuffer(content) ? content : Buffer.from(String(content));
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    },
   };
 }
 
@@ -159,6 +184,41 @@ test("listSkills returns [] when skillsDir doesn't exist", async () => {
   assert.deepEqual(out, []);
 });
 
+test("listSkillManagementEntries scans supplemental roots and marks non-primary skills read-only", async () => {
+  const adapter = makeAdapter({
+    "skills/ah/SKILL.md": `---\nname: ah\ndescription: Builtin\n---\nbody`,
+    "skills/weread-skills/SKILL.md": `---\nname: 微信读书\ndescription: WeRead\n---\nbody`,
+  });
+  const plugin = makePlugin(adapter, ".flownote/skills");
+  const out = await listSkillManagementEntries(plugin);
+  const weread = out.find((s) => s.slug === "weread-skills");
+  assert.ok(weread);
+  assert.equal(weread.readOnly, true);
+  assert.equal(weread.sourceRoot, "skills");
+  assert.equal(out.some((s) => s.slug === "ah"), true);
+});
+
+test("listSkillManagementEntries falls back to embedded skills when vault roots are empty", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter, ".flownote/skills");
+  const out = await listSkillManagementEntries(plugin);
+  assert.equal(out.length > 0, true);
+  assert.equal(out.some((s) => s.slug === "ah" && s.embedded && s.readOnly), true);
+});
+
+test("listSkillSecretRefs detects env-style API key placeholders across skill roots", async () => {
+  const adapter = makeAdapter({
+    ".flownote/skills/weread-skills/SKILL.md":
+      `---\nname: weread\ndescription: WeRead\n---\nUse Authorization: Bearer $WEREAD_API_KEY.`,
+    ".claude/skills/other/SKILL.md":
+      `---\nname: other\ndescription: Other\n---\nCall with \${OTHER_TOKEN}.`,
+  });
+  const plugin = makePlugin(adapter, ".flownote/skills");
+  const refs = await listSkillSecretRefs(plugin);
+  assert.deepEqual(refs, ["OTHER_TOKEN", "WEREAD_API_KEY"]);
+  assert.deepEqual(extractSkillSecretRefsFromText("$WEREAD_API_KEY $WEREAD_API_KEY $1"), ["WEREAD_API_KEY"]);
+});
+
 // ---------------------------------------------------------------------------
 // readSkill
 // ---------------------------------------------------------------------------
@@ -219,6 +279,7 @@ test("saveSkill overwriting via existingSlug keeps the same path", async () => {
 test("saveSkill rename moves content + deletes old folder", async () => {
   const adapter = makeAdapter({
     ".flownote/skills/old/SKILL.md": `---\nname: old\ndescription: d\n---\nbody`,
+    ".flownote/skills/old/references/context.md": "context",
   });
   const plugin = makePlugin(adapter);
   const r = await saveSkill(plugin,
@@ -227,7 +288,9 @@ test("saveSkill rename moves content + deletes old folder", async () => {
   );
   assert.equal(r.renamed, true);
   assert.equal(adapter._files.has(".flownote/skills/renamed/SKILL.md"), true);
+  assert.equal(adapter._files.get(".flownote/skills/renamed/references/context.md"), "context");
   assert.equal(adapter._files.has(".flownote/skills/old/SKILL.md"), false);
+  assert.equal(adapter._files.has(".flownote/skills/old/references/context.md"), false);
 });
 
 test("saveSkill refuses creation when target slug already exists", async () => {
@@ -283,4 +346,92 @@ test("deleteSkill returns false when the folder doesn't exist", async () => {
   const plugin = makePlugin(adapter);
   const ok = await deleteSkill(plugin, "no-such-skill");
   assert.equal(ok, false);
+});
+
+// ---------------------------------------------------------------------------
+// importSkillsFromFileList
+// ---------------------------------------------------------------------------
+
+test("discoverSkillImportsFromFileList detects a selected single skill folder", () => {
+  const plan = discoverSkillImportsFromFileList([
+    makeImportFile("wechat-reader/SKILL.md", "---\nname: WeRead\ndescription: d\n---"),
+    makeImportFile("wechat-reader/references/api.md", "ref"),
+  ]);
+  assert.equal(plan.errors.length, 0);
+  assert.equal(plan.imports.length, 1);
+  assert.equal(plan.imports[0].slug, "wechat-reader");
+  assert.deepEqual(
+    plan.imports[0].files.map((f) => f.relativePath).sort(),
+    ["SKILL.md", "references/api.md"],
+  );
+});
+
+test("importSkillsFromFileList imports multiple complete skill folders", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter);
+  const binary = Uint8Array.from([1, 2, 3]).buffer;
+  const result = await importSkillsFromFileList(plugin, [
+    makeImportFile("external-skills/weread/SKILL.md", "---\nname: WeRead\ndescription: d\n---\nbody"),
+    makeImportFile("external-skills/weread/references/api.md", "api docs"),
+    makeImportFile("external-skills/weread/assets/logo.png", binary, { binary: true, type: "image/png" }),
+    makeImportFile("external-skills/ah-note/SKILL.md", "---\nname: AH Note\ndescription: d\n---"),
+    makeImportFile("external-skills/.DS_Store", "junk"),
+  ]);
+
+  assert.equal(result.imported, 2);
+  assert.equal(result.skipped, 0);
+  assert.equal(result.mirrored, 2);
+  assert.equal(result.files, 4);
+  assert.equal(adapter._files.get(".flownote/skills/weread/SKILL.md").includes("WeRead"), true);
+  assert.equal(adapter._files.get(".flownote/skills/weread/references/api.md"), "api docs");
+  assert.equal(adapter._files.get(".flownote/skills/weread/assets/logo.png"), binary);
+  assert.equal(adapter._files.get("skills/weread/SKILL.md").includes("WeRead"), true);
+  assert.equal(adapter._files.get("skills/weread/references/api.md"), "api docs");
+  assert.equal(adapter._files.has(".flownote/skills/.DS_Store"), false);
+  assert.equal(adapter._files.has(".flownote/skills/ah-note/SKILL.md"), true);
+});
+
+test("importSkillsFromFileList imports a wrapper folder such as .claude/skills", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter);
+  const result = await importSkillsFromFileList(plugin, [
+    makeImportFile(".claude/settings.json", "{}"),
+    makeImportFile(".claude/skills/weread/SKILL.md", "---\nname: WeRead\ndescription: d\n---"),
+    makeImportFile(".claude/skills/weread/scripts/sync.js", "console.log('sync')"),
+  ]);
+
+  assert.equal(result.imported, 1);
+  assert.equal(result.mirrored, 1);
+  assert.equal(adapter._files.has(".flownote/skills/weread/SKILL.md"), true);
+  assert.equal(adapter._files.has("skills/weread/SKILL.md"), true);
+  assert.equal(adapter._files.get(".flownote/skills/weread/scripts/sync.js"), "console.log('sync')");
+  assert.equal(adapter._files.get("skills/weread/scripts/sync.js"), "console.log('sync')");
+  assert.equal(adapter._files.has(".flownote/skills/weread/settings.json"), false);
+});
+
+test("importSkillsFromFileList skips existing skill folders without overwriting", async () => {
+  const adapter = makeAdapter({
+    ".flownote/skills/weread/SKILL.md": "---\nname: old\ndescription: old\n---",
+  });
+  const plugin = makePlugin(adapter);
+  const result = await importSkillsFromFileList(plugin, [
+    makeImportFile("bundle/weread/SKILL.md", "---\nname: new\ndescription: new\n---"),
+  ]);
+
+  assert.equal(result.imported, 0);
+  assert.equal(result.skipped, 1);
+  assert.match(result.skippedSkills[0].reason, /已存在/);
+  assert.match(adapter._files.get(".flownote/skills/weread/SKILL.md"), /name: old/);
+});
+
+test("importSkillsFromFileList reports folders with no SKILL.md", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter);
+  const result = await importSkillsFromFileList(plugin, [
+    makeImportFile("not-a-skill/README.md", "hello"),
+  ]);
+
+  assert.equal(result.imported, 0);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /SKILL\.md/);
 });

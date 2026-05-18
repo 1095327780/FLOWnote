@@ -5,6 +5,7 @@
 // of a long file it cares about.
 
 const { buildTool } = require("../tool-registry");
+const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
   "Read the contents of a note from the user's Obsidian vault. " +
@@ -120,7 +121,7 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
         sliced = lines.slice(start, end).join("\n");
       }
 
-      if (Buffer.byteLength(sliced, "utf8") > byteCap) {
+      if (byteLengthUtf8(sliced) > byteCap) {
         const truncated = sliced.slice(0, byteCap);
         yield {
           type: "result",

@@ -1,4 +1,4 @@
-const { Notice } = require("obsidian");
+const { Notice, Platform = {} } = require("obsidian");
 const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils");
 const { domUtils } = require("./dom-utils");
 const { tFromContext } = require("../../i18n-runtime");
@@ -9,6 +9,90 @@ const {
   applyCopyGlyph,
   showCopyFeedback,
 } = domUtils;
+
+// Empty-state suggestion cards mapped onto the user's highest-value
+// flows. Order is by frequency-of-use, not alphabetical.
+// Each entry has a category color that tints the card's bottom border.
+const SUGGEST_CARDS = [
+  { cmd: "/ah-note",    title: "今日聚焦",      hint: "开启今日的日记 + 任务", emoji: "🌅", accent: "var(--m-accent)" },
+  { cmd: "/ah-card",    title: "新建永久笔记",  hint: "把灵感做成卡片",        emoji: "📝", accent: "var(--m-accent-warm)" },
+  { cmd: "/ah-capture", title: "速记一段",      hint: "倒进收件箱再整理",      emoji: "💡", accent: "var(--m-accent-lime)" },
+  { cmd: "/ah-read",    title: "记录文献",      hint: "B 站 / 书 / 文章",       emoji: "📚", accent: "var(--m-accent-violet)" },
+  { cmd: "/ah-review",  title: "本周回顾",      hint: "回看本周的笔记节奏",    emoji: "🔁", accent: "var(--m-accent-warm)" },
+  { cmd: "/ah",         title: "总入口",        hint: "不确定？让 AI 路由",     emoji: "🌳", accent: "var(--m-accent)" },
+];
+
+function insertSuggestionCommand(viewCtx, card) {
+  const inputEl = viewCtx.elements && viewCtx.elements.input;
+  if (!inputEl) return;
+  inputEl.value = `${card.cmd} `;
+  inputEl.focus();
+  inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+  if (typeof viewCtx.syncLinkedContextPickerFromInputMention === "function") {
+    viewCtx.syncLinkedContextPickerFromInputMention();
+  }
+}
+
+function renderSuggestionCards(viewCtx, wrap, isMobile) {
+  const grid = wrap.createDiv({
+    cls: isMobile ? "oc-mobile-suggest-grid" : "oc-suggest-grid",
+  });
+  for (const card of SUGGEST_CARDS) {
+    const item = grid.createEl("button", {
+      cls: isMobile ? "oc-mobile-suggest-card" : "oc-suggest-card",
+      attr: { type: "button" },
+    });
+    item.style.setProperty("--card-accent", card.accent);
+    item.createDiv({
+      cls: isMobile ? "oc-mobile-suggest-emoji" : "oc-suggest-emoji",
+      text: card.emoji,
+    });
+    item.createDiv({
+      cls: isMobile ? "oc-mobile-suggest-cmd" : "oc-suggest-cmd",
+      text: card.cmd,
+    });
+    item.createDiv({
+      cls: isMobile ? "oc-mobile-suggest-title" : "oc-suggest-title",
+      text: card.title,
+    });
+    item.createDiv({
+      cls: isMobile ? "oc-mobile-suggest-hint" : "oc-suggest-hint",
+      text: card.hint,
+    });
+    item.addEventListener("click", () => insertSuggestionCommand(viewCtx, card));
+  }
+}
+
+function renderDesktopWelcome(viewCtx, container) {
+  const welcome = container.createDiv({ cls: "oc-welcome" });
+  welcome.createDiv({
+    cls: "oc-welcome-greeting",
+    text: tFromContext(viewCtx, "view.welcome.greeting", "What would you like to organize today?"),
+  });
+  welcome.createDiv({
+    cls: "oc-empty",
+    text: tFromContext(viewCtx, "view.welcome.empty", "Send a message, or type / to pick a skill command."),
+  });
+  renderSuggestionCards(viewCtx, welcome, false);
+}
+
+/**
+ * Render the mobile-only welcome screen. A small greeting plus a 2x3
+ * grid of category-tinted skill cards. Tapping a card inserts the
+ * slash command into the composer and focuses it.
+ */
+function renderMobileWelcome(viewCtx, container) {
+  const wrap = container.createDiv({ cls: "oc-welcome" });
+  wrap.createDiv({
+    cls: "oc-welcome-greeting",
+    text: tFromContext(viewCtx, "view.welcome.mobileGreeting", "你想做点什么？"),
+  });
+  wrap.createDiv({
+    cls: "oc-empty",
+    text: tFromContext(viewCtx, "view.welcome.mobileHint", "选一张卡片快速开始，或在下面直接说话。"),
+  });
+  renderSuggestionCards(viewCtx, wrap, true);
+}
 
 const MAX_RENDER_MARKDOWN_CHARS = 24000;
 const MAX_RENDER_REASONING_CHARS = 16000;
@@ -45,15 +129,11 @@ function renderMessages(options = {}) {
   const messages = this.plugin.sessionStore.getActiveMessages();
   this.pruneQuestionAnswerStates(messages);
   if (!messages.length) {
-    const welcome = container.createDiv({ cls: "oc-welcome" });
-    welcome.createDiv({
-      cls: "oc-welcome-greeting",
-      text: tFromContext(this, "view.welcome.greeting", "What would you like to organize today?"),
-    });
-    welcome.createDiv({
-      cls: "oc-empty",
-      text: tFromContext(this, "view.welcome.empty", "Send a message, or type / to pick a skill command."),
-    });
+    if (Platform.isMobile) {
+      renderMobileWelcome(this, container);
+    } else {
+      renderDesktopWelcome(this, container);
+    }
     this.renderInlineQuestionPanel(messages);
     if (shouldStickToBottom) {
       this.scheduleScrollMessagesToBottom(true);

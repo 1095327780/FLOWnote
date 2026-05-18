@@ -10,7 +10,10 @@ const TOOL_ICON_MAP = {
   grep: "search-code",
   web_search: "globe",
   web_fetch: "globe",
+  web_request: "send",
   skill: "sparkles",
+  skill_invoke: "sparkles",
+  skill_resource_read: "book-open",
   question: "circle-help",
   todo_write: "list-checks",
 };

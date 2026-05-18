@@ -5,9 +5,12 @@ const {
   runDirectAgentTurn,
   buildAnthropicHistory,
   buildDefaultToolRegistry,
+  ensureSkillRegistry,
+  resolveSkillRoots,
 } = require("../../../runtime/chat/direct-agent-runner");
 const { ToolRegistry, buildTool } = require("../../../runtime/agent/tool-registry");
 const { SkillRegistry } = require("../../../runtime/agent/skill-registry");
+const { blockUtilsMethods } = require("../../../runtime/view/message/block-utils");
 const {
   defaultAgentSettings,
   setApiKeyFor,
@@ -217,6 +220,69 @@ test("runDirectAgentTurn surfaces tool_start / tool_finish through onBlocks", as
   assert.equal(toolBlock.output, "file x.md");
 });
 
+test("runDirectAgentTurn marks expected missing memory reads as hidden UI noise", async () => {
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "/ah" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  const provider = makeFakeProvider([
+    [
+      ev.msgStart(),
+      ev.toolUseStart(0, "tu-1", "vault_read"),
+      ev.toolUseJson(0, "{\"path\":\"Meta/.ai-memory/STATUS.md\"}"),
+      ev.blockStop(0),
+      ev.msgDelta("tool_use"),
+      ev.msgStop(),
+    ],
+    [
+      ev.msgStart(),
+      ev.textBlock(0),
+      ev.textDelta(0, "Empty state is fine."),
+      ev.blockStop(0),
+      ev.msgDelta("end_turn"),
+      ev.msgStop(),
+    ],
+  ]);
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+
+  const registry = new ToolRegistry();
+  registry.register(buildTool({
+    name: "vault_read",
+    description: "read",
+    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    isReadOnly: () => true,
+    isConcurrencySafe: () => true,
+    async *execute(input) {
+      yield {
+        type: "result",
+        isError: true,
+        content: `vault_read: file not found at "${input.path}".`,
+      };
+    },
+  }));
+
+  const { handlers, out } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "/ah",
+    handlers,
+    toolRegistryOverride: registry,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+  });
+
+  assert.equal(response.text, "Empty state is fine.");
+  const finalBlocks = out.blocks[out.blocks.length - 1] || [];
+  const toolBlock = finalBlocks.find((b) => b.type === "tool");
+  assert.ok(toolBlock);
+  assert.equal(toolBlock.status, "error");
+  assert.equal(toolBlock.isError, true);
+  assert.equal(toolBlock.hidden, true);
+  assert.equal(blockUtilsMethods.visibleAssistantBlocks(finalBlocks).some((b) => b.tool === "vault_read"), false);
+});
+
 // ---------------------------------------------------------------------------
 // runDirectAgentTurn — permission ask forwards to handlers.onPermissionRequest
 // ---------------------------------------------------------------------------
@@ -323,6 +389,7 @@ test("buildDefaultToolRegistry registers the minimum surface with a bare vault",
   assert.deepEqual(names, [
     "ask_user",
     "skill_invoke",
+    "skill_resource_read",
     "vault_daily",
     "vault_edit",
     "vault_list",
@@ -354,6 +421,7 @@ test("buildDefaultToolRegistry registers the full obsidian-native set when app h
   assert.deepEqual(names, [
     "ask_user",
     "skill_invoke",
+    "skill_resource_read",
     "vault_backlinks",
     "vault_create_dir",
     "vault_daily",
@@ -379,6 +447,46 @@ test("buildDefaultToolRegistry omits skill_invoke when no SkillRegistry is suppl
   };
   const registry = buildDefaultToolRegistry({ vault });
   assert.equal(registry.get("skill_invoke"), undefined);
+});
+
+test("ensureSkillRegistry loads configured root first, then common supplemental roots", async () => {
+  const plugin = {
+    settings: { skillsDir: "custom/skills" },
+    app: {
+      vault: {
+        listSkillDirs(root) {
+          const map = {
+            "custom/skills": [
+              { dirPath: "custom/skills/primary", filePath: "custom/skills/primary/SKILL.md" },
+              { dirPath: "custom/skills/dup", filePath: "custom/skills/dup/SKILL.md" },
+            ],
+            ".claude/skills": [
+              { dirPath: ".claude/skills/official", filePath: ".claude/skills/official/SKILL.md" },
+              { dirPath: ".claude/skills/dup", filePath: ".claude/skills/dup/SKILL.md" },
+            ],
+          };
+          return map[root] || [];
+        },
+        readFile: async (path) => {
+          if (path.includes("/primary/")) return "---\nname: primary\ndescription: Primary\n---\nbody";
+          if (path.includes("/official/")) return "---\nname: official\ndescription: Official\n---\nbody";
+          if (path.includes("custom/skills/dup")) return "---\nname: dup\ndescription: Custom wins\n---\nbody";
+          if (path.includes(".claude/skills/dup")) return "---\nname: dup\ndescription: Official dup\n---\nbody";
+          throw new Error("missing");
+        },
+      },
+    },
+  };
+  assert.deepEqual(resolveSkillRoots(plugin).slice(0, 4), [
+    "custom/skills",
+    ".flownote/skills",
+    ".opencode/skills",
+    ".claude/skills",
+  ]);
+  const registry = await ensureSkillRegistry(plugin);
+  assert.equal(registry.get("primary").description, "Primary");
+  assert.equal(registry.get("official").description, "Official");
+  assert.equal(registry.get("dup").description, "Custom wins");
 });
 
 // ---------------------------------------------------------------------------

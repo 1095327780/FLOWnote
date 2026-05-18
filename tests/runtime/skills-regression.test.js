@@ -37,9 +37,13 @@ const KNOWN_TOOLS = new Set([
   "vault_backlinks",
   "vault_tasks",
   "vault_tags",
+  // Network
+  "web_fetch",
+  "web_request",
   // Meta
   "ask_user",
   "skill_invoke",
+  "skill_resource_read",
 ]);
 
 function listSkillDirs() {
@@ -108,8 +112,8 @@ for (const skill of skills) {
     for (const tool of tools) {
       if (!tool) continue;
       // Helper skills are referenced by skill-name not tool-name; skip
-      // anything that isn't a vault_* / skill_invoke / ask_user pattern.
-      if (!/^(vault_|skill_|ask_)/.test(tool)) continue;
+      // anything that isn't a native tool-name pattern.
+      if (!/^(vault_|skill_|ask_|web_)/.test(tool)) continue;
       assert.ok(
         KNOWN_TOOLS.has(tool),
         `${skill.slug}: allowed-tools includes "${tool}" but no such tool is registered`,

@@ -1,6 +1,7 @@
 const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const { runDirectAgentTurn } = require("./direct-agent-runner");
+const { resolvePermissionRequestDecision } = require("../agent/permission-policy");
 
 function tr(view, key, fallback, params = {}) {
   return tFromContext(view, key, fallback, params);
@@ -23,6 +24,35 @@ function collectUserLinkedContextFiles(view, hideUserMessage) {
     normalized.push(next);
   });
   return normalized;
+}
+
+function getAgentMode(view) {
+  const settings = view && view.plugin && view.plugin.settings;
+  const agentProvider = settings && settings.agentProvider;
+  return agentProvider && agentProvider.mode === "direct" ? "direct" : "opencode-legacy";
+}
+
+function isLocalSessionId(sessionId) {
+  return /^local-[a-z0-9]/i.test(String(sessionId || "").trim());
+}
+
+function getSessionTitle(view, sessionId) {
+  const store = view && view.plugin && view.plugin.sessionStore;
+  const st = store && typeof store.state === "function" ? store.state() : null;
+  const sessions = st && Array.isArray(st.sessions) ? st.sessions : [];
+  const found = sessions.find((session) => session && String(session.id || "") === String(sessionId || ""));
+  return String((found && found.title) || "").trim();
+}
+
+async function ensureCompatibleSessionForAgentMode(view, sessionId, agentMode) {
+  if (agentMode !== "opencode-legacy" || !isLocalSessionId(sessionId)) return sessionId;
+  const title = getSessionTitle(view, sessionId);
+  const session = await view.plugin.createSession(title || "");
+  const nextSessionId = String((session && session.id) || "").trim();
+  if (!nextSessionId) return sessionId;
+  view.plugin.sessionStore.setActiveSession(nextSessionId);
+  if (typeof view.render === "function") view.render();
+  return nextSessionId;
 }
 
 function mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedContextFiles = []) {
@@ -246,6 +276,13 @@ function createTransportHandlers(view, sessionId, draftId) {
     },
 
     onPermissionRequest: async (permission) => {
+      const mode = view && view.plugin && view.plugin.settings
+        ? view.plugin.settings.toolPermissionMode
+        : "";
+      const policyDecision = resolvePermissionRequestDecision(mode, permission || {});
+      if (policyDecision && policyDecision.behavior === "allow") {
+        return "always";
+      }
       view.setRuntimeStatus(tr(view, "view.permission.waiting", "Waiting for permission confirmation..."), "info");
       const decision = await view.showPermissionRequestModal(permission || {});
       if (!decision) return "reject";
@@ -425,6 +462,7 @@ async function runSendPrompt(view, userText, options = {}) {
 
   const st = view.plugin.sessionStore.state();
   let sessionId = forceSessionId || st.activeSessionId;
+  const agentMode = getAgentMode(view);
   if (forceSessionId && st.activeSessionId !== forceSessionId) {
     view.plugin.sessionStore.setActiveSession(forceSessionId);
     view.render();
@@ -436,6 +474,7 @@ async function runSendPrompt(view, userText, options = {}) {
     view.plugin.sessionStore.setActiveSession(sessionId);
     view.render();
   }
+  sessionId = await ensureCompatibleSessionForAgentMode(view, sessionId, agentMode);
 
   const linkedContextFiles = collectUserLinkedContextFiles(view, hideUserMessage);
   const { draftId } = mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedContextFiles);
@@ -469,17 +508,30 @@ async function runSendPrompt(view, userText, options = {}) {
       }
       prompt = commandArgs ? `${skillCommand} ${commandArgs}` : skillCommand;
     } else {
-      prompt = view.plugin.skillService.buildInjectedPrompt(
-        skillMatch.skill,
-        view.plugin.settings.skillInjectMode,
-        skillMatch.promptText || userText,
-      );
+      const rawPrompt = String(skillMatch && skillMatch.promptText ? skillMatch.promptText : userText);
+      const skillService = view.plugin && view.plugin.skillService;
+      const skillForInject = skillMatch && skillMatch.skill;
+      // skillService is null on mobile (legacy fs-backed loader is desktop
+      // only). When it's missing OR there's no matched skill, just send
+      // the raw user prompt — the agent-side SkillRegistry handles skill
+      // discovery via vault.adapter during the turn.
+      if (skillService && typeof skillService.buildInjectedPrompt === "function" && skillForInject) {
+        // Skill injection is always full-content. (The old "summary /
+        // full / off" knob has been retired — summary mode tended to
+        // produce incomplete results and "off" defeats the purpose.)
+        prompt = skillService.buildInjectedPrompt(
+          skillForInject,
+          "full",
+          rawPrompt,
+        );
+      } else {
+        prompt = rawPrompt;
+      }
       if (typeof view.composePromptWithLinkedFiles === "function") {
         prompt = await view.composePromptWithLinkedFiles(prompt, { linkedPaths: linkedContextFiles });
       }
     }
 
-    const agentMode = view.plugin.settings.agentProvider && view.plugin.settings.agentProvider.mode;
     const handlers = createTransportHandlers(view, sessionId, draftId);
 
     let response;

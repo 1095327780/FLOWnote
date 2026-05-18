@@ -159,6 +159,36 @@ test("buildLaunchAttempts should run node script via node runtime", () => {
   assert.equal(attempts.some((item) => item.command === "/tmp/opencode-cli.js"), false);
 });
 
+test("buildLaunchAttempts should forward an allowlisted child environment", () => {
+  const previousPath = process.env.PATH;
+  const previousKey = process.env.DEEPSEEK_API_KEY;
+  const previousPrivate = process.env.FLOWNOTE_SCORECARD_SECRET;
+  try {
+    process.env.PATH = "/scorecard/test/bin";
+    process.env.DEEPSEEK_API_KEY = "test-api-key";
+    process.env.FLOWNOTE_SCORECARD_SECRET = "should-not-forward";
+
+    const transport = createTransport();
+    const attempts = transport.buildLaunchAttempts(
+      { path: "/tmp/opencode-cli.js", kind: "node-script" },
+      "/vault/.opencode-runtime",
+    );
+
+    const env = attempts[0] && attempts[0].options && attempts[0].options.env;
+    assert.equal(env.PATH, "/scorecard/test/bin");
+    assert.equal(env.DEEPSEEK_API_KEY, "test-api-key");
+    assert.equal(env.OPENCODE_HOME, "/vault/.opencode-runtime");
+    assert.equal(env.FLOWNOTE_SCORECARD_SECRET, undefined);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = previousKey;
+    if (previousPrivate === undefined) delete process.env.FLOWNOTE_SCORECARD_SECRET;
+    else process.env.FLOWNOTE_SCORECARD_SECRET = previousPrivate;
+  }
+});
+
 test("buildLaunchProfileFromAttempt should skip non-rememberable attempts", () => {
   const transport = createTransport();
   const profile = transport.buildLaunchProfileFromAttempt({

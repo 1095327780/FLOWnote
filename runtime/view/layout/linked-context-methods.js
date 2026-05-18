@@ -200,20 +200,28 @@ function listSlashCommandEntries() {
       // ignore refresh error and keep current cache
     }
   }
-  const skills = skillService && typeof skillService.getSkills === "function"
+  let skills = skillService && typeof skillService.getSkills === "function"
     ? skillService.getSkills()
     : [];
+  // Mobile fallback: the legacy fs-backed SkillService is desktop-only.
+  // The mobile bootstrap pre-warms `plugin.__flownoteMobileSkillList`
+  // by reading the skills folder via vault.adapter; surface that here so
+  // slash-command suggestions still populate on phone/tablet.
+  if ((!skills || !skills.length)
+    && this.plugin && Array.isArray(this.plugin.__flownoteMobileSkillList)) {
+    skills = this.plugin.__flownoteMobileSkillList;
+  }
   skills
     .slice()
     .sort((a, b) => String(a && a.id ? a.id : "").localeCompare(String(b && b.id ? b.id : "")))
     .forEach((skill) => {
-      const id = String(skill && skill.id ? skill.id : "").trim();
+      const id = String(skill && skill.id ? skill.id : skill && skill.slug ? skill.slug : "").trim();
       if (!id) return;
       const command = `/${id}`;
       const name = String(skill && skill.name ? skill.name : id).trim() || id;
       const description = typeof this.getSkillPrimaryDescription === "function"
         ? String(this.getSkillPrimaryDescription(skill) || "")
-        : "";
+        : String(skill && skill.description ? skill.description : "");
       pushEntry({
         type: "skill",
         command,

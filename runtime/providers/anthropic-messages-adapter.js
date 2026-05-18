@@ -15,6 +15,7 @@
 // `requestUrl`. Tests pass a fake.
 
 const { parseSseStream } = require("./sse-parser");
+const { streamingFetch } = require("./streaming-fetch");
 const { resolveBaseUrl } = require("./registry");
 
 const DEFAULT_VERSION_HEADER = "anthropic-version: 2026-01-01";
@@ -183,7 +184,31 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
     const wantsStream = userConfig.stream !== false;
     const body = JSON.stringify({ ...buildRequestBody(input, spec), stream: wantsStream });
 
-    const response = await getRequest()({ url, method: "POST", headers, body });
+    // Streaming path: fetch() so we read response body as a
+    // ReadableStream (requestUrl buffers the whole thing). Anthropic's
+    // API rejects browser-origin requests by default — opt-in via the
+    // `anthropic-dangerous-direct-browser-access` header. This is the
+    // official "I know what I'm doing, this is a plugin not a public
+    // web app" escape hatch they document. CORS / network failures
+    // fall back to the buffered requestUrl path so the chat still
+    // completes (without live streaming).
+    let response;
+    if (wantsStream && !doRequest) {
+      const streamingHeaders = {
+        ...headers,
+        "anthropic-dangerous-direct-browser-access": "true",
+      };
+      try {
+        response = await streamingFetch({
+          url, method: "POST", headers: streamingHeaders, body,
+          signal: input && input.signal,
+        });
+      } catch (e) {
+        response = await getRequest()({ url, method: "POST", headers, body });
+      }
+    } else {
+      response = await getRequest()({ url, method: "POST", headers, body });
+    }
     const status = response && typeof response.status === "number" ? response.status : 0;
     if (status < 200 || status >= 300) {
       const text = response && typeof response.text === "function"

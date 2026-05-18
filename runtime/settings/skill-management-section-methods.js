@@ -6,9 +6,11 @@
 const { Setting, Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const {
-  listSkills,
+  listSkillManagementEntries,
   saveSkill,
   deleteSkill,
+  importSkillsFromFileList,
+  listSkillSecretRefs,
 } = require("./skill-management");
 const { SkillEditorModal } = require("../modals");
 
@@ -28,30 +30,83 @@ async function renderSkillManagementSection(containerEl) {
   const plugin = this.plugin;
   if (!plugin) return;
 
-  // Section heading + intro.
-  new Setting(containerEl)
-    .setName(tr(this, "settings.skills.heading", "技能管理"))
-    .setHeading();
-
-  containerEl.createDiv({
-    cls: "oc-skill-mgmt-intro",
-    text: tr(
-      this,
-      "settings.skills.intro",
-      "管理 .flownote/skills 下的技能文件。编辑会直接写入对应 SKILL.md。改动会即时反映到 AI 的可调用技能列表。",
-    ),
-  });
-
   // "新建技能" button + skill list, both inside a host div so we can
   // re-render after CRUD without rebuilding the rest of the settings tab.
   const host = containerEl.createDiv({ cls: "oc-skill-mgmt-host" });
   const renderListLocal = async () => {
     host.empty();
+    host.createDiv({
+      cls: "oc-skill-mgmt-intro",
+      text: tr(
+        this,
+        "settings.skills.intro",
+        "编辑器只修改技能根目录里的 SKILL.md；如果技能带 references、assets、scripts 等资源，请用「导入文件夹」保留完整目录。",
+      ),
+    });
     const headerRow = host.createDiv({ cls: "oc-skill-mgmt-header" });
+    const importInput = headerRow.createEl("input", {
+      cls: "oc-skill-mgmt-import-input",
+      attr: { type: "file" },
+    });
+    importInput.multiple = true;
+    importInput.setAttribute("webkitdirectory", "");
+    importInput.setAttribute("directory", "");
+    const importBtn = headerRow.createEl("button", {
+      text: tr(this, "settings.skills.importFolder", "导入文件夹"),
+    });
     const addBtn = headerRow.createEl("button", {
       cls: "mod-cta",
       text: tr(this, "settings.skills.add", "+ 新建技能"),
     });
+
+    importBtn.addEventListener("click", () => {
+      if (!("webkitdirectory" in importInput) && !("directory" in importInput)) {
+        new Notice(tr(
+          this,
+          "settings.skills.importUnsupported",
+          "当前平台不支持直接选择文件夹。请在桌面端 Obsidian 使用「导入文件夹」，或手动复制到 Skills 安装目录。",
+        ));
+        return;
+      }
+      importInput.value = "";
+      importInput.click();
+    });
+
+    importInput.addEventListener("change", async () => {
+      const files = Array.from(importInput.files || []);
+      importInput.value = "";
+      if (files.length === 0) return;
+      importBtn.disabled = true;
+      importBtn.setText(tr(this, "settings.skills.importing", "导入中..."));
+      try {
+        const result = await importSkillsFromFileList(plugin, files);
+        const firstError = result.errors && result.errors.length > 0 ? result.errors[0] : "";
+        if (result.imported === 0 && result.skipped === 0 && firstError) {
+          new Notice(tr(this, "settings.skills.importFailed", "导入失败：{msg}", { msg: firstError }));
+        } else {
+          new Notice(tr(
+            this,
+            "settings.skills.importDone",
+            "已导入 {imported} 个技能（{files} 个文件），跳过 {skipped} 个。{errors}",
+            {
+              imported: result.imported,
+              files: result.files,
+              skipped: result.skipped,
+              errors: firstError ? `提示：${firstError}` : "",
+            },
+          ));
+        }
+        await renderListLocal();
+      } catch (e) {
+        new Notice(tr(this, "settings.skills.importFailed", "导入失败：{msg}", {
+          msg: e instanceof Error ? e.message : String(e),
+        }));
+      } finally {
+        importBtn.disabled = false;
+        importBtn.setText(tr(this, "settings.skills.importFolder", "导入文件夹"));
+      }
+    });
+
     addBtn.addEventListener("click", async () => {
       const draft = await openSkillEditor(this, null);
       if (!draft) return;
@@ -66,9 +121,19 @@ async function renderSkillManagementSection(containerEl) {
       }
     });
 
+    let secretRefs = [];
+    try {
+      secretRefs = await listSkillSecretRefs(plugin);
+    } catch (_e) {
+      secretRefs = [];
+    }
+    if (secretRefs.length > 0) {
+      renderSkillSecretSettings(this, host, secretRefs);
+    }
+
     let skills;
     try {
-      skills = await listSkills(plugin);
+      skills = await listSkillManagementEntries(plugin);
     } catch (e) {
       host.createDiv({
         cls: "oc-skill-mgmt-error",
@@ -95,17 +160,31 @@ async function renderSkillManagementSection(containerEl) {
       name.setText(skill.name);
       const slug = main.createDiv({ cls: "oc-skill-mgmt-slug" });
       slug.setText(`/${skill.slug}`);
+      const source = main.createDiv({ cls: "oc-skill-mgmt-source" });
+      if (skill.embedded) {
+        source.setText(tr(this, "settings.skills.sourceEmbedded", "来源：内置回退（只读）"));
+      } else if (skill.readOnly) {
+        source.setText(tr(this, "settings.skills.sourceReadonly", "来源：{dir}（只读）", { dir: skill.dirPath }));
+      } else {
+        source.setText(tr(this, "settings.skills.sourceInstalled", "来源：{dir}", { dir: skill.dirPath }));
+      }
       const desc = main.createDiv({ cls: "oc-skill-mgmt-desc" });
       desc.setText(truncate(skill.description, PREVIEW_DESC_LEN));
 
       const actions = row.createDiv({ cls: "oc-skill-mgmt-actions" });
-      const editBtn = actions.createEl("button", { text: tr(this, "settings.skills.edit", "编辑") });
+      const editBtn = actions.createEl("button", { text: tr(this, "settings.skills.edit", "编辑 SKILL.md") });
       const delBtn = actions.createEl("button", {
         cls: "mod-warning",
         text: tr(this, "settings.skills.delete", "删除"),
       });
+      if (skill.readOnly) {
+        editBtn.disabled = true;
+        delBtn.disabled = true;
+        editBtn.setText(tr(this, "settings.skills.readonly", "只读"));
+      }
 
       editBtn.addEventListener("click", async () => {
+        if (skill.readOnly) return;
         const draft = await openSkillEditor(this, skill);
         if (!draft) return;
         try {
@@ -120,6 +199,7 @@ async function renderSkillManagementSection(containerEl) {
       });
 
       delBtn.addEventListener("click", async () => {
+        if (skill.readOnly) return;
         const ok = window.confirm(tr(this,
           "settings.skills.deleteConfirm",
           "确认删除技能 \"{name}\" 吗？这会删除整个 {dir} 文件夹（包含技能正文、references 等），无法撤销。",
@@ -140,6 +220,41 @@ async function renderSkillManagementSection(containerEl) {
   };
 
   await renderListLocal();
+}
+
+function renderSkillSecretSettings(ctx, host, secretRefs) {
+  const plugin = ctx.plugin;
+  const box = host.createDiv({ cls: "oc-skill-secret-host" });
+  box.createDiv({
+    cls: "oc-skill-secret-intro",
+    text: tr(
+      ctx,
+      "settings.skills.secretsIntro",
+      "已安装的技能需要以下密钥。模型只会使用 $KEY 占位符，真实密钥会在工具执行时由插件替换。",
+    ),
+  });
+  for (const name of secretRefs) {
+    const desc = name === "WEREAD_API_KEY"
+      ? tr(ctx, "settings.skills.secretWereadDesc", "微信读书官方 Skill 调用 API 时使用；建议填入 wrk- 开头的官方密钥。")
+      : tr(ctx, "settings.skills.secretGenericDesc", "第三方 Skill 调用 API 时使用。");
+    new Setting(box)
+      .setName(name)
+      .setDesc(desc)
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text.setPlaceholder(name === "WEREAD_API_KEY" ? "wrk-..." : "");
+        text.setValue((plugin.settings.skillSecrets && plugin.settings.skillSecrets[name]) || "");
+        text.onChange(async (value) => {
+          if (!plugin.settings.skillSecrets || typeof plugin.settings.skillSecrets !== "object") {
+            plugin.settings.skillSecrets = {};
+          }
+          const next = String(value || "").trim();
+          if (next) plugin.settings.skillSecrets[name] = next;
+          else delete plugin.settings.skillSecrets[name];
+          await plugin.saveSettings();
+        });
+      });
+  }
 }
 
 function openSkillEditor(ctx, skill) {

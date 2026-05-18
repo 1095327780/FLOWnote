@@ -1,6 +1,7 @@
 const { PluginSettingTab, Setting, Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const { normalizeUiLanguage } = require("../i18n-locale-utils");
+const { bindDropdownChange } = require("../settings/component-value-utils");
 const {
   LINK_RESOLVER_PROVIDER_IDS,
   LINK_RESOLVER_DEFAULTS,
@@ -46,13 +47,13 @@ class MobileSettingsTab extends PluginSettingTab {
         d.addOption("auto", t("settings.language.optionAuto", "Follow system (recommended)"));
         d.addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"));
         d.addOption("en", t("settings.language.optionEn", "English"));
-        d.setValue(normalizeUiLanguage(this.plugin.settings.uiLanguage))
-          .onChange(async (value) => {
-            this.plugin.settings.uiLanguage = normalizeUiLanguage(value);
-            await this.plugin.saveSettings();
-            this.display();
-            new Notice(t("notices.languageAppliedReloadTip", "Language updated. Command names and ribbon tooltip update after reload."));
-          });
+        d.setValue(normalizeUiLanguage(this.plugin.settings.uiLanguage));
+        bindDropdownChange(d, async (value) => {
+          this.plugin.settings.uiLanguage = normalizeUiLanguage(value);
+          await this.plugin.saveSettings();
+          this.display();
+          new Notice(t("notices.languageAppliedReloadTip", "Language updated. Command names and ribbon tooltip update after reload."));
+        });
       });
 
     // Agent provider section — same UI on desktop and mobile.
@@ -76,8 +77,9 @@ class MobileSettingsTab extends PluginSettingTab {
         for (const [id, p] of Object.entries(PROVIDER_PRESETS)) {
           d.addOption(id, getAiProviderDisplayName(id, p.name, locale));
         }
-        d.setValue(mc.provider).onChange(async (v) => {
-          mc.provider = v;
+        d.setValue(mc.provider);
+        bindDropdownChange(d, async (providerId) => {
+          mc.provider = providerId;
           await this.plugin.saveSettings();
           this.display();
         });
@@ -174,8 +176,9 @@ class MobileSettingsTab extends PluginSettingTab {
           const provider = getResolverProviderPreset(id);
           d.addOption(id, t(`settings.mobileCapture.resolverProvider.${id}.name`, provider.name));
         }
-        d.setValue(resolverProvider.id).onChange(async (v) => {
-          lr.provider = normalizeResolverProviderId(v);
+        d.setValue(resolverProvider.id);
+        bindDropdownChange(d, async (providerId) => {
+          lr.provider = normalizeResolverProviderId(providerId);
           await this.plugin.saveSettings();
           this.display();
         });

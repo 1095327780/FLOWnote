@@ -5,11 +5,13 @@ const {
   loadSkills,
   parseFrontmatter,
   parseArgumentNames,
+  parseToolList,
   substituteArguments,
   formatSkillListing,
   SkillRegistry,
 } = require("../../../runtime/agent/skill-registry");
 const { createSkillInvokeTool } = require("../../../runtime/agent/tools/skill-invoke");
+const { createSkillResourceReadTool } = require("../../../runtime/agent/tools/skill-resource-read");
 
 // ----- parseFrontmatter -----
 
@@ -47,6 +49,39 @@ test("parseArgumentNames accepts list or comma-string", () => {
   assert.deepEqual(parseArgumentNames(undefined), []);
 });
 
+test("parseFrontmatter accepts YAML-style lists and compatibility aliases", () => {
+  const raw = [
+    "---",
+    "name: official-skill",
+    "description: |",
+    "  First line",
+    "  second line",
+    "allowed_tools:",
+    "  - Read",
+    "  - Bash(git diff:*)",
+    "when-to-use: Use when testing official skills",
+    "file-path-patterns: [books/*.md, inbox/*.md]",
+    "aliases: [official, oskill]",
+    "---",
+    "Body",
+  ].join("\n");
+  const { frontmatter, body } = parseFrontmatter(raw);
+  assert.equal(frontmatter.description, "First line\nsecond line");
+  assert.deepEqual(frontmatter.allowed_tools, ["Read", "Bash(git diff:*)"]);
+  assert.equal(frontmatter["when-to-use"], "Use when testing official skills");
+  assert.deepEqual(frontmatter["file-path-patterns"], ["books/*.md", "inbox/*.md"]);
+  assert.deepEqual(frontmatter.aliases, ["official", "oskill"]);
+  assert.equal(body, "Body");
+});
+
+test("parseToolList keeps Bash patterns intact", () => {
+  assert.deepEqual(parseToolList("Bash(git diff:*), Read Grep"), [
+    "Bash(git diff:*)",
+    "Read",
+    "Grep",
+  ]);
+});
+
 // ----- substituteArguments -----
 
 test("substituteArguments replaces $ARGUMENTS, $1, and ${name}", () => {
@@ -65,7 +100,7 @@ test("substituteArguments leaves placeholders alone when args are empty", () => 
 
 // ----- loadSkills -----
 
-function fakeVault(skills) {
+function fakeVault(skills = {}) {
   // skills: { [dirPath]: <skill md text> }
   const dirs = Object.keys(skills);
   return {
@@ -88,6 +123,35 @@ test("loadSkills returns sorted manifests with parsed metadata", async () => {
   assert.deepEqual(manifests.map((m) => m.name), ["ah-card", "ah-note"]);
   assert.equal(manifests[0].body, "body-of-ah-card");
   assert.equal(manifests[1].description, "Daily note");
+});
+
+test("loadSkills tracks skill resources and frontmatter aliases", async () => {
+  const vault = {
+    listSkillDirs: () => [
+      {
+        dirPath: ".flownote/skills/wechat",
+        filePath: ".flownote/skills/wechat/SKILL.md",
+        resourcePaths: ["references/API.md", "assets/sample.md", "../bad.md", "SKILL.md"],
+      },
+    ],
+    readFile: async () => [
+      "---",
+      "name: 微信读书",
+      "description: WeRead official skill",
+      "allowed_tools:",
+      "  - Read",
+      "  - WebFetch",
+      "aliases: [weread]",
+      "---",
+      "body",
+    ].join("\n"),
+  };
+  const reg = new SkillRegistry(await loadSkills({ rootPath: ".flownote/skills", vault }));
+  const skill = reg.get("wechat");
+  assert.equal(skill.name, "微信读书");
+  assert.deepEqual(skill.allowedTools, ["Read", "WebFetch"]);
+  assert.deepEqual(skill.resourcePaths, ["assets/sample.md", "references/API.md"]);
+  assert.equal(reg.get("weread"), skill);
 });
 
 test("loadSkills falls back to dirname when name frontmatter is missing", async () => {
@@ -186,8 +250,64 @@ test("skill_invoke returns the skill body with $ARGUMENTS substituted", async ()
   const r = lastResult(await collect(tool, { skill: "say-hi", args: "World friend" }));
   assert.ok(!r.isError);
   assert.match(r.content, /Skill: say-hi/);
+  assert.match(r.content, /FLOWnote skill compatibility/);
   assert.match(r.content, /Hello World friend!/);
   assert.match(r.content, /See World/);
+});
+
+test("skill_invoke advertises skill resources", async () => {
+  const reg = new SkillRegistry([
+    {
+      name: "rich",
+      description: "Rich skill",
+      body: "See references/guide.md",
+      dirPath: ".flownote/skills/rich",
+      resourcePaths: ["references/guide.md"],
+    },
+  ]);
+  const tool = createSkillInvokeTool({ skillRegistry: reg });
+  const r = lastResult(await collect(tool, { skill: "rich" }));
+  assert.match(r.content, /skill_resource_read/);
+  assert.match(r.content, /references\/guide\.md/);
+});
+
+test("skill_resource_read reads vault-backed resources", async () => {
+  const reg = new SkillRegistry([
+    {
+      name: "rich",
+      description: "Rich skill",
+      body: "",
+      dirPath: ".flownote/skills/rich",
+      resourcePaths: ["references/guide.md"],
+    },
+  ]);
+  const vault = fakeVault({
+    ".flownote/skills/rich": "---\nname: rich\ndescription: Rich\n---\n",
+    ".flownote/skills/rich/references/guide.md": "guide",
+  });
+  const tool = createSkillResourceReadTool({ skillRegistry: reg, vault });
+  const r = lastResult(await collect(tool, { skill: "rich", path: "references/guide.md" }));
+  assert.ok(!r.isError);
+  assert.match(r.content, /Skill resource: rich\/references\/guide\.md/);
+  assert.match(r.content, /guide/);
+});
+
+test("skill_resource_read reads embedded resources and rejects traversal", async () => {
+  const reg = new SkillRegistry([
+    {
+      name: "embedded",
+      description: "Embedded",
+      body: "",
+      dirPath: "<embedded>/embedded",
+      resourcePaths: ["references/guide.md"],
+      embeddedResourceFiles: { "references/guide.md": "embedded guide" },
+    },
+  ]);
+  const tool = createSkillResourceReadTool({ skillRegistry: reg, vault: fakeVault() });
+  assert.equal((await tool.validate({ skill: "embedded", path: "../x.md" })).ok, false);
+  const r = lastResult(await collect(tool, { skill: "embedded", path: "references/guide.md" }));
+  assert.ok(!r.isError);
+  assert.match(r.content, /embedded guide/);
 });
 
 test("skill_invoke surfaces an error when the skill is unknown", async () => {

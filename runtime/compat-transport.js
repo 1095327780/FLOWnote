@@ -1,7 +1,29 @@
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const { spawn, execFileSync } = require("child_process");
+// Node-only deps. Mobile's `require(...)` returns `{}` for these, doesn't
+// throw — sniff for the real methods before adopting.
+let fs = {};
+let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+let os = { platform: () => "unknown", homedir: () => "" };
+let spawn = () => { throw new Error("child_process unavailable on this platform"); };
+let execFileSync = () => { throw new Error("child_process unavailable on this platform"); };
+try {
+  const real = require("fs");
+  if (real && typeof real.existsSync === "function") fs = real;
+} catch { /* mobile */ }
+try {
+  const real = require("path");
+  if (real && typeof real.join === "function") path = real;
+} catch { /* mobile */ }
+try {
+  const real = require("os");
+  if (real && typeof real.platform === "function") os = real;
+} catch { /* mobile */ }
+try {
+  const cp = require("child_process");
+  if (cp && typeof cp.spawn === "function") {
+    spawn = cp.spawn;
+    execFileSync = cp.execFileSync;
+  }
+} catch { /* mobile */ }
 const { rt } = (() => {
   try {
     return require("./runtime-locale-state");

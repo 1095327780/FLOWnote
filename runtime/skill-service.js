@@ -1,5 +1,22 @@
-const fs = require("fs");
-const path = require("path");
+// Node-only deps — legacy SkillService is fs-backed and desktop-only.
+// Mobile's `require(...)` returns `{}` (not throw), so sniff before adopting.
+let fs = {};
+let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+try {
+  const real = require("fs");
+  if (real && typeof real.existsSync === "function") fs = real;
+} catch { /* mobile */ }
+try {
+  const real = require("path");
+  if (real && typeof real.join === "function") path = real;
+} catch { /* mobile */ }
+
+const SUPPLEMENTAL_SKILL_DIRS = [
+  ".flownote/skills",
+  ".opencode/skills",
+  ".claude/skills",
+  "skills",
+];
 
 function parseFrontmatter(md) {
   const m = md.match(/^---\n([\s\S]*?)\n---\n?/);
@@ -91,37 +108,53 @@ class SkillService {
   }
 
   loadSkills() {
-    const root = path.join(this.vaultPath, this.settings.skillsDir);
-    if (!fs.existsSync(root)) {
-      this.cache = [];
-      return this.cache;
-    }
-
-    const entries = fs.readdirSync(root, { withFileTypes: true });
     const skills = [];
+    const seenIds = new Set();
 
-    for (const e of entries) {
-      if (!e || String(e.name || "").startsWith(".")) continue;
-      if (!e.isDirectory()) continue;
-      const file = path.join(root, e.name, "SKILL.md");
-      if (!fs.existsSync(file)) continue;
+    for (const rootRel of this.resolveSkillDirs()) {
+      const root = path.join(this.vaultPath, rootRel);
+      if (!fs.existsSync(root)) continue;
 
-      const raw = fs.readFileSync(file, "utf8");
-      const parsed = parseFrontmatter(raw);
-      skills.push({
-        id: e.name,
-        name: parsed.attrs.name || e.name,
-        description: parsed.attrs.description || "",
-        metadata: parsed.attrs,
-        content: raw,
-        summary: summarizeBody(parsed.body),
-        path: file,
-      });
+      const entries = fs.readdirSync(root, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e || String(e.name || "").startsWith(".")) continue;
+        if (!e.isDirectory()) continue;
+        if (seenIds.has(e.name)) continue;
+        const file = path.join(root, e.name, "SKILL.md");
+        if (!fs.existsSync(file)) continue;
+
+        const raw = fs.readFileSync(file, "utf8");
+        const parsed = parseFrontmatter(raw);
+        skills.push({
+          id: e.name,
+          name: parsed.attrs.name || e.name,
+          description: parsed.attrs.description || "",
+          metadata: parsed.attrs,
+          content: raw,
+          summary: summarizeBody(parsed.body),
+          path: file,
+        });
+        seenIds.add(e.name);
+      }
     }
 
     skills.sort((a, b) => a.name.localeCompare(b.name));
     this.cache = skills;
     return skills;
+  }
+
+  resolveSkillDirs() {
+    const primary = this.settings && typeof this.settings.skillsDir === "string"
+      ? this.settings.skillsDir
+      : "";
+    const seen = new Set();
+    return [primary, ...SUPPLEMENTAL_SKILL_DIRS]
+      .map((item) => String(item || "").replace(/\\/g, "/").replace(/\/+$/, "").trim())
+      .filter((item) => {
+        if (!item || seen.has(item)) return false;
+        seen.add(item);
+        return true;
+      });
   }
 
   getSkills() {

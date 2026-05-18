@@ -16,6 +16,10 @@
 // canned event stream and a ToolRegistry pre-populated with fakes.
 
 const DEFAULT_MAX_TURNS = 20;
+const {
+  normalizeToolPermissionMode,
+  resolvePermissionDecision,
+} = require("./permission-policy");
 // 16384 fits comfortably within every supported provider's per-response
 // output cap (DeepSeek V4: 384K, Claude: 64K, GLM/Kimi/MiniMax all 8K+),
 // while being roomy enough for vault_write turns that have to emit the
@@ -71,6 +75,7 @@ async function* runAgentLoop(args) {
   const model = (provider.userConfig && provider.userConfig.model) || (provider.spec && provider.spec.defaultModel);
   const toolSpecs = registry.toApiSpecs();
   const askFn = typeof onPermissionAsk === "function" ? onPermissionAsk : null;
+  if (ctx) ctx.toolPermissionMode = normalizeToolPermissionMode(ctx.toolPermissionMode);
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const input = {
@@ -85,11 +90,26 @@ async function* runAgentLoop(args) {
     if (typeof temperature === "number") input.temperature = temperature;
     if (signal) input.signal = signal;
 
-    const streamResult = await consumeStream(provider.createMessage(input), function* (ev) {
+    // CRITICAL: live-stream events through the generator instead of
+    // awaiting consumeStream's full completion. Previously this awaited
+    // the whole turn and then `yield`'d every UI event in one burst,
+    // which collapsed any provider-side streaming into "show all text
+    // after the model finishes". We now interleave: each provider chunk
+    // yields its UI event immediately, while consumeStreamGenerator
+    // accumulates state in the background. The final state comes back
+    // through a sentinel `{ kind: "final", state }` event.
+    let streamResult = null;
+    for await (const item of consumeStreamGenerator(provider.createMessage(input), function* (ev) {
       yield { type: "stream", event: ev };
-    });
-    // Forward all events that consumeStream emitted while it ran.
-    for (const ev of streamResult.uiEvents) yield ev;
+    })) {
+      if (!item) continue;
+      if (item.kind === "ui") {
+        yield item.event;
+      } else if (item.kind === "final") {
+        streamResult = item.state;
+      }
+    }
+    if (!streamResult) streamResult = { assistantContent: [], toolUses: [], stopReason: null, fatalError: null, uiEvents: [] };
 
     if (streamResult.fatalError) {
       yield { type: "error", error: streamResult.fatalError };
@@ -166,21 +186,33 @@ async function* runAgentLoop(args) {
  * @param {(ev: Object) => Iterable<Object>} uiAdapter
  * @returns {Promise<{ assistantContent: Array, toolUses: Array, stopReason: string | null, fatalError: Object | null, uiEvents: Array }>}
  */
-async function consumeStream(stream, uiAdapter) {
+/**
+ * Live streaming variant of consumeStream.
+ *
+ * Async-generator version that yields UI events as they arrive from the
+ * provider, instead of accumulating them and returning everything at the
+ * end. The final state is delivered through one trailing sentinel:
+ *   { kind: "ui",    event: <translated UI event> }   (zero or more)
+ *   { kind: "final", state: { assistantContent, toolUses, stopReason,
+ *                             fatalError, uiEvents: [] } }   (exactly one, at end)
+ *
+ * The old `consumeStream` is now a thin drain-and-return wrapper around
+ * this so existing tests don't need to change.
+ *
+ * @param {AsyncIterable<Object>} stream
+ * @param {(ev: Object) => Iterable<Object>} uiAdapter
+ */
+async function* consumeStreamGenerator(stream, uiAdapter) {
   /** @type {Array<any>} */
   const slots = [];
   /** @type {Array<{ partialJson: string }>} */
   const toolUseBuffers = [];
-  /** @type {string | null} */
   let stopReason = null;
-  /** @type {Object | null} */
   let fatalError = null;
-  /** @type {Array<Object>} */
-  const uiEvents = [];
 
   for await (const ev of stream) {
     if (uiAdapter) {
-      for (const out of uiAdapter(ev)) uiEvents.push(out);
+      for (const out of uiAdapter(ev)) yield { kind: "ui", event: out };
     }
 
     if (!ev || typeof ev !== "object") continue;
@@ -218,11 +250,8 @@ async function consumeStream(stream, uiAdapter) {
       if (slot.type === "tool_use") {
         const buf = toolUseBuffers[ev.index];
         if (buf && buf.partialJson) {
-          try {
-            slot.input = JSON.parse(buf.partialJson);
-          } catch {
-            slot.input = {};
-          }
+          try { slot.input = JSON.parse(buf.partialJson); }
+          catch { slot.input = {}; }
         } else if (slot.input === undefined) {
           slot.input = {};
         }
@@ -238,7 +267,6 @@ async function consumeStream(stream, uiAdapter) {
 
   const assistantContent = slots.filter(Boolean).map((b) => {
     if (b.type === "tool_use") {
-      // Anthropic shape doesn't include partialJson — drop any helpers we added.
       const { type, id, name, input } = b;
       return { type, id, name, input };
     }
@@ -246,7 +274,27 @@ async function consumeStream(stream, uiAdapter) {
   });
   const toolUses = assistantContent.filter((b) => b.type === "tool_use");
 
-  return { assistantContent, toolUses, stopReason, fatalError, uiEvents };
+  yield {
+    kind: "final",
+    state: { assistantContent, toolUses, stopReason, fatalError, uiEvents: [] },
+  };
+}
+
+/**
+ * Back-compat: drain the live generator, accumulating UI events into an
+ * array. Tests use this shape — `await consumeStream(stream)` returns
+ * `{ assistantContent, toolUses, stopReason, fatalError, uiEvents }`.
+ */
+async function consumeStream(stream, uiAdapter) {
+  const uiEvents = [];
+  let state = null;
+  for await (const item of consumeStreamGenerator(stream, uiAdapter)) {
+    if (!item) continue;
+    if (item.kind === "ui") uiEvents.push(item.event);
+    else if (item.kind === "final") state = item.state;
+  }
+  if (!state) state = { assistantContent: [], toolUses: [], stopReason: null, fatalError: null };
+  return { ...state, uiEvents };
 }
 
 /**
@@ -292,20 +340,30 @@ async function runToolUse(tu, registry, ctx, askFn) {
       return result;
     }
     if (p && p.behavior === "ask") {
-      if (!askFn) {
-        result.isError = true;
-        result.content = `Permission required for ${tu.name}, but no askFn configured.`;
-        return result;
-      }
-      const decision = await askFn({ tool: tu.name, input: tu.input, ...p });
-      if (!decision || decision.behavior !== "allow") {
-        result.isError = true;
-        result.content = `User denied ${tu.name}.`;
-        return result;
-      }
-      if (decision.persist === "session") {
-        if (!ctx.grants) ctx.grants = {};
-        ctx.grants[`${tu.name}:*`] = "session";
+      const policyDecision = resolvePermissionDecision({
+        mode: ctx && ctx.toolPermissionMode,
+        tool,
+        input: tu.input,
+        permission: p,
+      });
+      if (policyDecision && policyDecision.behavior === "allow") {
+        if (ctx && ctx.grants) ctx.grants[`${tu.name}:*`] = "session";
+      } else {
+        if (!askFn) {
+          result.isError = true;
+          result.content = `Permission required for ${tu.name}, but no askFn configured.`;
+          return result;
+        }
+        const decision = await askFn({ tool: tu.name, input: tu.input, ...p });
+        if (!decision || decision.behavior !== "allow") {
+          result.isError = true;
+          result.content = `User denied ${tu.name}.`;
+          return result;
+        }
+        if (decision.persist === "session") {
+          if (!ctx.grants) ctx.grants = {};
+          ctx.grants[`${tu.name}:*`] = "session";
+        }
       }
     }
   } catch (e) {

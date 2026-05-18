@@ -24,15 +24,37 @@ const { createVaultTagsTool } = require("../agent/tools/vault-tags");
 const { createVaultMoveTool } = require("../agent/tools/vault-move");
 const { createVaultCreateDirTool } = require("../agent/tools/vault-create-dir");
 const { createVaultGetActiveFileTool } = require("../agent/tools/vault-get-active-file");
+const { createWebFetchTool } = require("../agent/tools/web-fetch");
+const { createWebRequestTool } = require("../agent/tools/web-request");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
-const { loadSkills, formatSkillListing, SkillRegistry } = require("../agent/skill-registry");
+const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
+const { loadSkills, formatSkillListing, SkillRegistry, parseFrontmatter, buildSkillManifest, normalizeResourcePaths } = require("../agent/skill-registry");
+
+// Embedded bundled-skills index — used as a fallback when the user's
+// vault doesn't have skill folders synced yet. The plugin bundle has
+// every shipping skill compiled in; on iOS Obsidian Sync filters
+// dotfolders by default so `.flownote/skills/` is often absent on the
+// mobile device even though it exists on desktop.
+const embeddedBundledSkillsModule = (() => {
+  try { return require("../generated/bundled-skills-embedded"); } catch { return {}; }
+})();
+const EMBEDDED_BUNDLED_SKILLS_FILES =
+  embeddedBundledSkillsModule && embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
+    ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
+    : {};
 const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
+const SUPPLEMENTAL_SKILL_ROOTS = [
+  ".flownote/skills",
+  ".opencode/skills",
+  ".claude/skills",
+  "skills",
+];
 
 // Local-timezone YYYY-MM-DD. Local — not UTC — because the user's "today"
 // is whatever calendar date their wall clock shows. Used to anchor the
@@ -89,10 +111,22 @@ const BASE_SYSTEM_PROMPT = [
   "                      laying out a new directory structure (e.g. a fresh project folder).",
   "  • vault_get_active_file — return the note currently open in the editor (path + basename +",
   "                      parent folder). Use when the user says \"this note\" / \"add to here\".",
+  "  • web_fetch       — fetch a URL and return its readable text. WORKS without any API key —",
+  "                      Obsidian's requestUrl is the native HTTP client. Use this whenever the user",
+  "                      pastes a link and asks you to summarize / quote / extract content from it.",
+  "                      Do NOT claim you cannot access the web — you can, through web_fetch.",
+  "  • web_request     — send HTTP API requests with method, headers, and JSON body. Use this for",
+  "                      API-backed skills that need POST / Authorization, such as WeRead. Use",
+  "                      secret placeholders like `$WEREAD_API_KEY`; FLOWnote substitutes them from",
+  "                      Settings -> Skill management at execution time. If a secret is missing,",
+  "                      ask the user to fill it there; do not ask for shell export commands.",
   "  • ask_user        — ask the user a multiple-choice question when truly ambiguous. Don't",
   "                      abuse this — most ambiguity can be resolved with vault_list / vault_search.",
   "  • skill_invoke    — load a vault skill's instructions so you can follow them. See \"Available",
   "                      skills\" below. Pass `skill` (name) and optional `args` (string).",
+  "  • skill_resource_read — read a file inside an invoked skill folder, such as references/*.md",
+  "                      or assets/*.md. Use this when third-party skills point to relative",
+  "                      resources. Use vault_read for normal vault notes.",
   "",
   "Core rules:",
   "  1. ALWAYS call the tools to do file operations. Don't describe what you would write — actually call the tool.",
@@ -122,7 +156,20 @@ const BASE_SYSTEM_PROMPT = [
   "    obsidian backlinks         → vault_backlinks",
   "    obsidian tasks             → vault_tasks",
   "    obsidian tags              → vault_tags",
-  "  Same idea for any reference to Bash / Read / Write tools — they don't exist here; use the vault_* tools above.",
+  "  Claude Code tool compatibility:",
+  "    Read / FileRead         → vault_read for vault notes; skill_resource_read for skill-relative resources",
+  "    Write / FileWrite       → vault_write",
+  "    Edit / MultiEdit        → vault_edit",
+  "    LS / Glob               → vault_list",
+  "    Grep                    → vault_search",
+  "    WebFetch                → web_fetch for readable pages; web_request for API POST/custom headers",
+  "    curl / HTTP API calls   → web_request",
+  "    AskUserQuestion         → ask_user",
+  "    Skill                   → skill_invoke",
+  "    Bash / shell / scripts  → not available in Obsidian direct mode or mobile; read the",
+  "                              referenced resource/script and use native vault_* / web_fetch / web_request",
+  "                              equivalents. If no equivalent exists, explain that the step",
+  "                              requires the desktop OpenCode bridge or external tooling.",
   "",
   "Vault navigation (read this BEFORE searching):",
   "",
@@ -175,11 +222,70 @@ function buildSystemPrompt(skillManifests, opts) {
   if (ctxLines.length > 0) {
     parts.push(`Context:\n${ctxLines.join("\n\n")}`);
   }
+  // Note path overrides — the user has configured which folders each
+  // note kind lives in. The bundled SKILL.md files reference defaults
+  // like `01-捕获层/每日笔记/` inline; this block tells the model to
+  // treat those as DEFAULTS and prefer the user's configured paths.
+  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths);
+  if (notePathBlock) parts.push(notePathBlock);
+
   const listing = formatSkillListing(skillManifests);
   if (listing) {
     parts.push(`Available skills (call via skill_invoke):\n${listing}`);
   }
   return parts.join("\n\n");
+}
+
+// Default folder layout the bundled skills hardcode. When the user
+// overrides any of these in `settings.notePaths`, we surface the
+// override to the model in a "Note path overrides" block of the system
+// prompt — the model is instructed to use the override whenever a skill
+// references the default path.
+const DEFAULT_NOTE_PATH_LAYOUT = {
+  dailyNotes:       "01-捕获层/每日笔记",
+  weeklyReviews:    "01-捕获层/周记",
+  monthlyReviews:   "01-捕获层/月记",
+  yearlyReviews:    "01-捕获层/年记",
+  permanentNotes:   "02-培养层/永久笔记",
+  topicNotes:       "02-培养层/主题笔记",
+  literatureNotes:  "02-培养层/文献笔记",
+  domainPages:      "03-连接层",
+  activeProjects:   "04-创造层/项目",
+  archive:          "04-创造层/归档",
+};
+const NOTE_PATH_LABELS = {
+  dailyNotes:       "Daily notes 每日笔记",
+  weeklyReviews:    "Weekly reviews 周记",
+  monthlyReviews:   "Monthly reviews 月记",
+  yearlyReviews:    "Yearly reviews 年记",
+  permanentNotes:   "Permanent notes 永久笔记",
+  topicNotes:       "Topic notes 主题笔记 (📍)",
+  literatureNotes:  "Literature notes 文献笔记 (《》)",
+  domainPages:      "Domain pages 领域页 (🌱)",
+  activeProjects:   "Active projects 项目",
+  archive:          "Archive 归档",
+};
+
+function formatNotePathOverrides(notePaths) {
+  const live = (notePaths && typeof notePaths === "object") ? notePaths : {};
+  // Always emit the full table so the model has a single source of
+  // truth, even if every value matches the default — it's only ~10
+  // lines and dramatically reduces "AI guessed the wrong path" cases.
+  const lines = [
+    "Note path conventions (USE THESE EXACT FOLDERS when reading or writing the listed note kinds; OVERRIDE any path mentioned inside a skill body):",
+  ];
+  for (const key of Object.keys(DEFAULT_NOTE_PATH_LAYOUT)) {
+    const dflt = DEFAULT_NOTE_PATH_LAYOUT[key];
+    const v = String((live[key] || "")).replace(/\\/g, "/").replace(/\/+$/, "").trim() || dflt;
+    const label = NOTE_PATH_LABELS[key] || key;
+    const tag = v !== dflt ? "  (user-customized)" : "";
+    lines.push(`  - ${label}: ${v}${tag}`);
+  }
+  lines.push(
+    "",
+    "When a skill body contains a hardcoded path like \"01-捕获层/每日笔记/\" or \"02-培养层/永久笔记/\", that path is the DEFAULT. If the table above lists a different value for that note kind, use the table's value. Never invent a new folder.",
+  );
+  return lines.join("\n");
 }
 
 /**
@@ -224,14 +330,15 @@ function buildAnthropicHistory(storedMessages, draftId) {
 /**
  * Build the tool registry the agent loop runs with. M2 ships the full
  * tool surface: vault_read, vault_list, vault_search, vault_edit,
- * vault_write, ask_user, skill_invoke.
+ * vault_write, web_fetch, web_request, ask_user, skill_invoke, skill_resource_read.
  *
  * @param {Object} app  Obsidian App
  * @param {Function} [normalizePath]
  * @param {SkillRegistry} [skillRegistry]   omit to skip skill_invoke registration
+ * @param {Object} [plugin]                 plugin settings for skill secrets
  * @returns {ToolRegistry}
  */
-function buildDefaultToolRegistry(app, normalizePath, skillRegistry) {
+function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin) {
   const registry = new ToolRegistry();
   if (app && app.vault) {
     registry.register(createVaultReadTool({ vault: app.vault, normalizePath }));
@@ -268,19 +375,34 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry) {
       registry.register(createVaultGetActiveFileTool({ app }));
     }
   }
+  // web_fetch — Obsidian's requestUrl bypasses CORS on desktop and uses
+  // the platform HTTP client on mobile. No third-party API key required.
+  try {
+    const obsidian = require("obsidian");
+    if (obsidian && typeof obsidian.requestUrl === "function") {
+      registry.register(createWebFetchTool({ requestUrl: obsidian.requestUrl }));
+      registry.register(createWebRequestTool({
+        requestUrl: obsidian.requestUrl,
+        getSecrets: () => (plugin && plugin.settings && plugin.settings.skillSecrets) || {},
+      }));
+    }
+  } catch (_e) {
+    // obsidian module unavailable (test harness etc) — skip silently.
+  }
   registry.register(createAskUserTool());
   if (skillRegistry && typeof skillRegistry.list === "function") {
     registry.register(createSkillInvokeTool({ skillRegistry }));
+    if (app && app.vault) {
+      registry.register(createSkillResourceReadTool({ skillRegistry, vault: app.vault }));
+    }
   }
   return registry;
 }
 
 /**
- * Resolve where SKILL.md files live. We share the path with the legacy
- * SkillService (slash-command path) so the user never has to configure
- * the directory twice. Order:
- *   1. plugin.settings.skillsDir      (legacy + slash-command source of truth)
- *   2. DEFAULT_SKILL_ROOT             (.opencode/skills — back-compat default)
+ * Resolve where SKILL.md files live. The configured path stays first so a
+ * user override wins, then we supplement with common Claude/OpenCode/FLOWnote
+ * locations. This is intentionally vault-relative so it works on mobile.
  *
  * @param {Object} plugin
  * @returns {string}
@@ -291,6 +413,21 @@ function resolveSkillRoot(plugin) {
     if (trimmed) return trimmed;
   }
   return DEFAULT_SKILL_ROOT;
+}
+
+function resolveSkillRoots(plugin) {
+  const roots = [];
+  const primary = resolveSkillRoot(plugin);
+  if (primary) roots.push(primary);
+  roots.push(...SUPPLEMENTAL_SKILL_ROOTS);
+  const seen = new Set();
+  return roots
+    .map((root) => String(root || "").replace(/\\/g, "/").replace(/\/+$/, "").trim())
+    .filter((root) => {
+      if (!root || seen.has(root)) return false;
+      seen.add(root);
+      return true;
+    });
 }
 
 /**
@@ -305,25 +442,110 @@ async function ensureSkillRegistry(plugin) {
   if (!plugin || !plugin.app || !plugin.app.vault) {
     return new SkillRegistry([]);
   }
-  const skillRoot = resolveSkillRoot(plugin);
+  const skillRoots = resolveSkillRoots(plugin);
+  const cacheKey = skillRoots.join("\n");
 
-  // Cache key: skill root string. Re-load if the user points elsewhere.
-  if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === skillRoot) {
+  // Cache key: ordered skill roots. Re-load if the user points elsewhere.
+  if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === cacheKey) {
     return plugin.__flownoteSkillCache.registry;
   }
 
   let manifests = [];
-  try {
-    manifests = await loadSkills({ rootPath: skillRoot, vault: plugin.app.vault });
-  } catch (e) {
-    manifests = [];
-    if (typeof plugin.log === "function") {
-      plugin.log(`[direct-agent] skill load failed for ${skillRoot}: ${e && e.message ? e.message : e}`);
+  const seenSkillKeys = new Set();
+  for (const skillRoot of skillRoots) {
+    let loaded = [];
+    try {
+      loaded = await loadSkills({ rootPath: skillRoot, vault: plugin.app.vault });
+    } catch (e) {
+      loaded = [];
+      if (typeof plugin.log === "function") {
+        plugin.log(`[direct-agent] skill load failed for ${skillRoot}: ${e && e.message ? e.message : e}`);
+      }
+    }
+    for (const manifest of loaded) {
+      const keys = skillIdentityKeys(manifest);
+      if (keys.some((key) => seenSkillKeys.has(key))) continue;
+      manifests.push(manifest);
+      for (const key of keys) seenSkillKeys.add(key);
     }
   }
+  // Merge in any embedded skills the vault scan missed. We don't
+  // replace the vault version when present (the user may have customized
+  // it on disk), but we backfill anything missing.
+  //
+  // Why this matters specifically: on iOS, Obsidian Sync sometimes
+  // skips individual files inside a synced dotfolder — e.g. the 2-char
+  // `ah/` directory gets dropped while `ah-card/`, `ah-archive/` etc
+  // sync correctly. Without this merge the user types `/ah`, the agent
+  // doesn't see `ah` in its registry, and skill_invoke fails.
+  let injectedFromEmbed = 0;
+  for (const embedded of buildEmbeddedSkillManifests()) {
+    if (!embedded || !embedded.name) continue;
+    const keys = skillIdentityKeys(embedded);
+    if (keys.some((key) => seenSkillKeys.has(key))) continue;
+    manifests.push(embedded);
+    for (const key of keys) seenSkillKeys.add(key);
+    injectedFromEmbed += 1;
+  }
+  if (injectedFromEmbed > 0 && typeof plugin.log === "function") {
+    plugin.log(`[direct-agent] vault skill scan missing ${injectedFromEmbed} skill(s); backfilled from embedded bundle`);
+  }
   const registry = new SkillRegistry(manifests);
-  plugin.__flownoteSkillCache = { root: skillRoot, registry };
+  plugin.__flownoteSkillCache = { root: cacheKey, registry };
   return registry;
+}
+
+function skillIdentityKeys(manifest) {
+  const keys = [];
+  for (const value of [
+    manifest && manifest.name,
+    manifest && manifest.slug,
+    ...((manifest && manifest.aliases) || []),
+  ]) {
+    const key = String(value || "").trim().replace(/^\/+/, "");
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Build skill manifests from the embedded bundled-skills index. Same
+ * shape that `loadSkills` returns, so SkillRegistry / skill_invoke can
+ * consume either without caring where the body came from.
+ */
+function buildEmbeddedSkillManifests() {
+  const resourcesBySlug = {};
+  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
+    const slash = filePath.indexOf("/");
+    if (slash === -1) continue;
+    const slug = filePath.slice(0, slash);
+    const rel = filePath.slice(slash + 1);
+    if (!slug || !rel || rel === "SKILL.md") continue;
+    if (!resourcesBySlug[slug]) resourcesBySlug[slug] = {};
+    resourcesBySlug[slug][rel] = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
+  }
+  const out = [];
+  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
+    if (!filePath.endsWith("/SKILL.md")) continue;
+    const slug = filePath.split("/")[0];
+    if (!slug) continue;
+    const raw = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
+    const { frontmatter, body } = parseFrontmatter(raw);
+    const embeddedResourceFiles = resourcesBySlug[slug] || {};
+    out.push(buildSkillManifest({
+      frontmatter,
+      body,
+      // dirPath is informational only; embedded skills don't live in the
+      // vault. We use a sentinel prefix so vault_read / vault_edit don't
+      // accidentally try to treat it as a real path.
+      dirPath: `<embedded>/${slug}`,
+      filePath: `<embedded>/${slug}/SKILL.md`,
+      resourcePaths: normalizeResourcePaths(Object.keys(embeddedResourceFiles)),
+      embeddedResourceFiles,
+    }));
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
 }
 
 /** Discard the cached SkillRegistry so the next turn reloads from disk. */
@@ -413,11 +635,44 @@ function summarizeToolInput(toolName, input) {
     const skill = typeof input.skill === "string" ? input.skill : "";
     return input.args ? `${skill} ${input.args}` : skill;
   }
+  if (toolName === "skill_resource_read") {
+    const skill = typeof input.skill === "string" ? input.skill : "";
+    const path = typeof input.path === "string" ? input.path : "";
+    return skill && path ? `${skill}/${path}` : path || skill;
+  }
   if (toolName === "ask_user") {
     const qs = Array.isArray(input.questions) ? input.questions : [];
     return qs.length ? `${qs.length} question(s): ${qs[0].header || qs[0].question || ""}` : "";
   }
+  if (toolName === "web_fetch") {
+    return typeof input.url === "string" ? input.url : "";
+  }
+  if (toolName === "web_request") {
+    const method = typeof input.method === "string" && input.method ? input.method.toUpperCase() : "GET";
+    return typeof input.url === "string" ? `${method} ${input.url}` : method;
+  }
   try { return JSON.stringify(input).slice(0, 120); } catch { return ""; }
+}
+
+function normalizeToolPath(value) {
+  return String(value || "")
+    .replace(/\\+/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .trim();
+}
+
+function isInternalMemoryReadProbe(toolName, input) {
+  if (String(toolName || "").trim().toLowerCase() !== "vault_read") return false;
+  const path = normalizeToolPath(input && input.path);
+  return path === "Meta/.ai-memory/STATUS.md" || path.startsWith("Meta/.ai-memory/");
+}
+
+function isExpectedInternalToolNoise(tu) {
+  if (!tu || !isInternalMemoryReadProbe(tu.name, tu.input)) return false;
+  if (!tu.isError) return true;
+  return /^vault_read:\s+file not found at /i.test(String(tu.output || "").trim());
 }
 
 function renderBlocks(state) {
@@ -429,6 +684,7 @@ function renderBlocks(state) {
     const status = toRendererStatus(tu.status, tu.isError);
     const summary = summarizeToolInput(tu.name, tu.input);
     const outputText = typeof tu.output === "string" ? tu.output : "";
+    const hidden = isExpectedInternalToolNoise(tu);
     blocks.push({
       type: "tool",
       tool: tu.name,
@@ -438,6 +694,8 @@ function renderBlocks(state) {
       input: tu.input,
       output: outputText,
       isError: !!tu.isError,
+      hidden,
+      internal: hidden,
       durationMs: tu.durationMs,
     });
   }
@@ -488,13 +746,14 @@ async function runDirectAgentTurn({
     normalizePath = undefined;
   }
   const skillRegistry = skillRegistryOverride || (await ensureSkillRegistry(plugin));
-  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry);
+  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry, plugin);
   const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
     ? String(view.app.vault.getName() || "")
     : "";
+  const notePaths = (plugin.settings && plugin.settings.notePaths) || null;
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    { todayLabel: describeToday(), vaultName },
+    { todayLabel: describeToday(), vaultName, notePaths },
   );
 
   // ---------------------------------------------------------------------
@@ -615,7 +874,13 @@ async function runDirectAgentTurn({
     messages: history,
     maxTokensPerTurn,
     signal,
-    ctx: { app: view.app, grants: {}, askUserFn, fileStateCache },
+    ctx: {
+      app: view.app,
+      grants: {},
+      askUserFn,
+      fileStateCache,
+      toolPermissionMode: plugin.settings && plugin.settings.toolPermissionMode,
+    },
     onPermissionAsk,
   })) {
     if (!ev) continue;
@@ -770,4 +1035,6 @@ module.exports = {
   getLocalISODate,
   describeToday,
   DEFAULT_SKILL_ROOT,
+  SUPPLEMENTAL_SKILL_ROOTS,
+  resolveSkillRoots,
 };

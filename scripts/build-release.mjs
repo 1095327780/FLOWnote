@@ -148,6 +148,9 @@ async function main() {
     sourcemap: false,
     legalComments: "none",
     logLevel: "info",
+    loader: {
+      ".DS_Store": "empty",
+    },
   });
 
   await copyAsset("manifest.json");

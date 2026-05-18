@@ -291,12 +291,9 @@ body.theme-dark .oc-surface {
 .oc-side-toggle,
 .oc-side-add {
   appearance: none;
-    background: none;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    margin: 0;
-    padding: 0;
+  font: inherit;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
   width: 24px;
   height: 24px;
@@ -464,12 +461,9 @@ body.theme-dark .oc-surface {
 
 .oc-session-item-action {
   appearance: none;
-    background: none;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    margin: 0;
-    padding: 0;
+  font: inherit;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
   width: 22px;
   height: 22px;
@@ -874,6 +868,93 @@ body.theme-dark .oc-surface {
   letter-spacing: -0.01em;
 }
 
+.oc-suggest-grid {
+  width: min(780px, 100%);
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.oc-suggest-card {
+  position: relative;
+  min-height: 112px;
+  padding: 13px 12px 12px;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--background-secondary) 94%, var(--card-accent, var(--text-accent)) 6%) 0%,
+      var(--background-primary) 100%);
+  color: var(--text-normal);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: transform 0.14s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.oc-suggest-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--card-accent, var(--text-accent));
+  opacity: 0.78;
+}
+
+.oc-suggest-card:hover,
+.oc-suggest-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--card-accent, var(--text-accent)) 45%, var(--oc-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-accent, var(--text-accent)) 16%, transparent),
+              0 8px 24px rgba(0, 0, 0, 0.08);
+  outline: none;
+}
+
+.oc-suggest-emoji {
+  font-size: 21px;
+  line-height: 1;
+}
+
+.oc-suggest-cmd {
+  font-family: var(--font-monospace, monospace);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--card-accent, var(--text-accent));
+}
+
+.oc-suggest-title {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.28;
+  color: var(--text-normal);
+}
+
+.oc-suggest-hint {
+  font-size: 12px;
+  line-height: 1.38;
+  color: var(--text-muted);
+}
+
+@media (max-width: 860px) {
+  .oc-suggest-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .oc-suggest-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .oc-empty,
 .oc-hint {
   font-size: 12px;
@@ -1038,12 +1119,9 @@ body.theme-dark .oc-surface {
 
 .oc-text-copy-btn {
   appearance: none;
-    background: none;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    margin: 0;
-    padding: 0;
+  font: inherit;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
   position: absolute;
   top: 4px;
@@ -1181,12 +1259,9 @@ body.theme-dark .oc-surface {
 
 .oc-inline-action {
   appearance: none;
-    background: none;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    margin: 0;
-    padding: 0;
+  font: inherit;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--oc-border) 72%, transparent);
   background: color-mix(in srgb, var(--background-primary) 86%, transparent);
@@ -1552,6 +1627,21 @@ body.theme-dark .oc-surface {
 .oc-patch-file-link:hover {
   color: var(--text-accent);
   text-decoration: underline;
+}
+
+.oc-vault-path-link {
+  color: var(--text-accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.oc-vault-path-link:hover {
+  text-decoration: underline;
+}
+
+.oc-message-content a.oc-vault-path-link code {
+  color: var(--text-accent);
+  border-color: color-mix(in srgb, var(--text-accent) 28%, var(--background-modifier-border));
 }
 
 .oc-patch-file-stats {
@@ -1934,12 +2024,9 @@ padding: 3px 7px;
 
 .oc-nav-btn {
   appearance: none;
-    background: none;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    margin: 0;
-    padding: 0;
+  font: inherit;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
   width: 30px;
   height: 30px;
@@ -2338,6 +2425,12 @@ padding: 3px 7px;
   box-shadow: var(--oc-shadow-soft);
   z-index: 120;
   overflow: hidden;
+  /* Cap total height to half the viewport so the picker can never grow
+   * past the chat header when the leaf is narrow (split view, small
+   * Obsidian window). Without this the absolutely-positioned popup
+   * extends above the visible area and the search input gets hidden
+   * behind the toolbar. */
+  max-height: min(330px, 50vh);
 }
 
 .oc-context-file-picker-search {
@@ -2346,7 +2439,7 @@ padding: 3px 7px;
 }
 
 .oc-context-file-picker-list {
-  max-height: 280px;
+  max-height: min(280px, calc(50vh - 56px));
   overflow-y: auto;
   padding-bottom: 4px;
 }
@@ -2718,6 +2811,7 @@ padding: 3px 7px;
 .oc-prompt-modal,
 .oc-diagnostics-modal,
 .oc-skill-modal,
+.oc-release-modal,
 .oc-ask-modal {
   display: flex;
   flex-direction: column;
@@ -2734,8 +2828,99 @@ padding: 3px 7px;
 .oc-prompt-modal h2,
 .oc-diagnostics-modal h2,
 .oc-skill-modal h2,
+.oc-release-modal h2,
 .oc-ask-modal h2 {
   margin: 0;
+}
+
+.oc-release-modal {
+  max-width: min(720px, calc(100vw - 40px));
+  max-height: min(760px, calc(100vh - 80px));
+  overflow-y: auto;
+}
+
+.oc-release-subtitle {
+  color: var(--text-normal);
+  line-height: 1.55;
+}
+
+.oc-release-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.oc-release-mode-card {
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--oc-surface-muted);
+}
+
+.oc-release-mode-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.oc-release-mode-title {
+  font-weight: 650;
+  color: var(--text-normal);
+}
+
+.oc-release-mode-badge {
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: var(--background-modifier-border);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.oc-release-mode-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.oc-release-mode-card li {
+  margin: 5px 0;
+  line-height: 1.45;
+}
+
+.oc-release-switch-hint {
+  padding: 9px 10px;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  background: var(--oc-surface);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.oc-release-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .oc-release-modal {
+    max-width: calc(100vw - 24px);
+  }
+
+  .oc-release-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-release-actions {
+    flex-direction: column;
+  }
+
+  .oc-release-actions button {
+    width: 100%;
+  }
 }
 
 .oc-ask-question {
@@ -2811,6 +2996,11 @@ padding: 3px 7px;
 .oc-skill-mgmt-header {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.oc-skill-mgmt-import-input {
+  display: none;
 }
 .oc-skill-mgmt-empty,
 .oc-skill-mgmt-error {
@@ -2853,12 +3043,22 @@ padding: 3px 7px;
   font-family: var(--font-monospace, monospace);
   color: var(--text-muted);
 }
+.oc-skill-mgmt-source {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .oc-skill-mgmt-desc {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.oc-permission-risk-warning {
+  color: var(--text-warning, #b45309);
 }
 .oc-skill-mgmt-actions {
   display: flex;
@@ -2925,6 +3125,119 @@ padding: 3px 7px;
 .oc-skill-empty {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* Template management UI */
+.oc-template-mgmt-intro {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.oc-template-mgmt-host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oc-template-mgmt-empty,
+.oc-template-mgmt-error {
+  padding: 14px;
+  border: 1px dashed var(--oc-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.oc-template-mgmt-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--oc-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.oc-template-mgmt-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--oc-border);
+  align-items: center;
+}
+.oc-template-mgmt-row:last-child {
+  border-bottom: none;
+}
+.oc-template-mgmt-row-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.oc-template-mgmt-name {
+  font-weight: 600;
+}
+.oc-template-mgmt-path {
+  font-size: 11px;
+  font-family: var(--font-monospace, monospace);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oc-template-mgmt-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.oc-template-mgmt-status.is-custom {
+  color: var(--text-accent);
+  font-weight: 600;
+}
+.oc-template-mgmt-status.is-default {
+  color: var(--text-faint);
+}
+.oc-template-mgmt-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Template editor modal */
+.oc-template-editor-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--oc-border);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--oc-surface-raised);
+  box-shadow: var(--oc-shadow-soft);
+  min-width: 600px;
+}
+.oc-template-editor-modal h2 { margin: 0; }
+.oc-template-editor-subtitle {
+  font-size: 11px;
+  font-family: var(--font-monospace, monospace);
+  color: var(--text-muted);
+}
+.oc-template-editor-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+.oc-template-editor-body {
+  width: 100%;
+  font-family: var(--font-monospace, monospace);
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid var(--oc-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+.oc-template-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .oc-model-search,
@@ -3468,4 +3781,1508 @@ padding: 3px 7px;
 .is-mobile .modal.oc-capture-top-mode .oc-capture-input {
   min-height: 110px;
   max-height: min(28vh, 240px);
+}
+
+/* ================================================================
+ * FLOWnote Mobile — standalone design system (v2).
+ *
+ * Decoupled from the desktop view. Everything under `.is-mobile` is
+ * built from scratch on a dark + neon palette with monospace +
+ * geometric sans typography. The DOM is the same as desktop (we re-skin
+ * existing classes) but the visual feel is its own.
+ *
+ * Design tokens are scoped to `.is-mobile .oc-root` so they don't leak
+ * into Obsidian's tab chrome.
+ *
+ * Layered structure:
+ *   .oc-root            — viewport-sized container with kb padding
+ *     .oc-shell         — flex column
+ *       .oc-header      — glass header strip (action chips only)
+ *       .oc-body / .oc-main
+ *         .oc-toolbar   — kept off-screen; replaced by header chips
+ *         .oc-messages-wrapper
+ *           .oc-messages
+ *             .oc-welcome  — empty state with skill suggestion cards
+ *             .oc-message  — assistant / user
+ *         .oc-context-footer  — hidden on mobile
+ *         .oc-composer
+ *           .oc-input-wrapper
+ *             [textarea, model chip, attach, send]
+ *
+ * ================================================================ */
+
+/* ---- Design tokens (scoped to mobile root) ---- */
+.is-mobile .oc-root.oc-surface {
+  --m-bg:          #08090d;
+  --m-surface-1:  #11141b;
+  --m-surface-2:  #181c25;
+  --m-surface-3:  #222732;
+  --m-border:     #232a36;
+  --m-border-soft: rgba(255, 255, 255, 0.06);
+  --m-text:       #e8ecf2;
+  --m-text-dim:   #8e98aa;
+  --m-text-faint: #5b6478;
+  --m-accent:        #7aedff; /* primary cyan */
+  --m-accent-strong: #4dd8ff;
+  --m-accent-warm:   #ffb86b; /* skills */
+  --m-accent-violet: #c0a8ff; /* tools */
+  --m-accent-coral:  #ff8a8a; /* errors */
+  --m-accent-lime:   #aef25c; /* success */
+  --m-glow-primary:  0 0 24px rgba(122, 237, 255, 0.32);
+  --m-glow-warm:     0 0 18px rgba(255, 184, 107, 0.28);
+  --m-radius-pill:   999px;
+  --m-radius-card:   16px;
+  --m-radius-input:  22px;
+  --m-font-mono:     "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --m-font-display:  "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
+  --m-font-body:     -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+}
+
+/* ---- Root + shell: dark canvas, full available height, kb-aware ---- */
+.is-mobile .oc-root.oc-surface {
+  padding: 0;
+  background: var(--m-bg);
+  color: var(--m-text);
+  font-family: var(--m-font-body);
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* Ambient mesh gradient — subtle, behind everything */
+  background-image:
+    radial-gradient(60% 40% at 20% 0%, rgba(122, 237, 255, 0.045) 0%, transparent 60%),
+    radial-gradient(50% 35% at 100% 100%, rgba(192, 168, 255, 0.04) 0%, transparent 60%);
+  background-attachment: scroll;
+  /* keyboard closed → clear Obsidian's bottom navbar + iPhone home
+   *                   indicator. keyboard open → leaf auto-shrinks so 0. */
+  padding-bottom: calc(var(--mobile-navbar-height, 56px) + env(safe-area-inset-bottom, 0px));
+  transition: padding-bottom 0.12s ease-out;
+}
+.is-mobile .oc-root.oc-surface.is-kb-open {
+  padding-bottom: 0;
+}
+.is-mobile .oc-shell {
+  height: 100%;
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---- Header: hide the verbose desktop brand; keep action chips ---- */
+.is-mobile .oc-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--m-border-soft);
+  margin: 0;
+  flex: 0 0 auto;
+  min-height: 44px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.018), transparent),
+    color-mix(in srgb, var(--m-surface-1) 92%, transparent);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  display: flex;
+  align-items: center;
+}
+.is-mobile .oc-brand {
+  /* Whole brand row hidden — Obsidian's tab title already shows "FLOWnote". */
+  display: none;
+}
+.is-mobile .oc-header-actions {
+  margin-left: auto;
+  gap: 6px;
+}
+.is-mobile .oc-header-actions .oc-icon-btn,
+.is-mobile .oc-header-actions .oc-header-btn {
+  min-width: 36px;
+  min-height: 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid var(--m-border);
+  background: var(--m-surface-2);
+  color: var(--m-text-dim);
+  transition: transform 0.12s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.is-mobile .oc-header-actions .oc-icon-btn:hover,
+.is-mobile .oc-header-actions .oc-icon-btn:active,
+.is-mobile .oc-header-actions .oc-header-btn:hover,
+.is-mobile .oc-header-actions .oc-header-btn:active {
+  color: var(--m-accent);
+  border-color: color-mix(in srgb, var(--m-accent) 40%, var(--m-border));
+  transform: translateY(-1px);
+}
+.is-mobile .oc-header-actions svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---- Toolbar row: the desktop's "[orange dot] [wide gear]" strip is
+ *      entirely hidden on mobile. The settings gear has been inlined
+ *      into the header next to [+] and [history] (see header-methods.js).
+ *      The connection-status dot stays as a tiny indicator that we
+ *      reposition into the header's left edge via the next block. */
+.is-mobile .oc-toolbar {
+  display: none;
+}
+
+/* Pull the connection indicator (dot + popover) out of the now-hidden
+ * toolbar and attach it as a tiny status pip in the header. The popover
+ * is still positioned absolute, anchored to the indicator. */
+.is-mobile .oc-header .oc-connection-indicator,
+.is-mobile .oc-connection-indicator {
+  padding: 0;
+  min-height: 0;
+}
+.is-mobile .oc-connection-dot {
+  width: 8px;
+  height: 8px;
+  margin: 0 6px 0 4px;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* ---- Main / body: borderless flat column ---- */
+.is-mobile .oc-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+}
+.is-mobile .oc-main {
+  flex: 1 1 auto;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.is-mobile .oc-messages-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.is-mobile .oc-messages,
+.is-mobile .oc-message-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 14px 12px;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
+}
+.is-mobile .oc-messages::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ---- Empty state: hero greeting + skill suggestion grid ---- */
+.is-mobile .oc-welcome {
+  padding: 18px 4px 4px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.is-mobile .oc-welcome-greeting {
+  font-family: var(--m-font-display);
+  font-size: clamp(22px, 6.4vw, 28px);
+  line-height: 1.18;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 6px 4px 0;
+  background: linear-gradient(120deg, var(--m-text) 0%, var(--m-accent) 55%, var(--m-accent-warm) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* Webkit transparent gradient text */
+  -webkit-text-fill-color: transparent;
+}
+.is-mobile .oc-welcome .oc-empty {
+  font-size: 13px;
+  color: var(--m-text-dim);
+  margin: 0 4px 6px;
+  font-family: var(--m-font-body);
+}
+/* Suggestion wall — populated by mobile-empty-state.js when no messages. */
+.is-mobile .oc-mobile-suggest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 2px 0;
+}
+.is-mobile .oc-mobile-suggest-card {
+  position: relative;
+  border-radius: var(--m-radius-card);
+  background: linear-gradient(160deg, var(--m-surface-2), var(--m-surface-1));
+  border: 1px solid var(--m-border);
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 112px; /* +1/5 from the original 88px so 4 lines breathe */
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.18s ease;
+}
+.is-mobile .oc-mobile-suggest-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--card-accent, var(--m-accent));
+  opacity: 0.65;
+  transition: opacity 0.15s ease, height 0.15s ease;
+}
+.is-mobile .oc-mobile-suggest-card:active {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--card-accent, var(--m-accent)) 45%, var(--m-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-accent, var(--m-accent)) 22%, transparent),
+              0 6px 22px rgba(0, 0, 0, 0.35);
+}
+.is-mobile .oc-mobile-suggest-card:active::before {
+  height: 3px;
+  opacity: 1;
+}
+.is-mobile .oc-mobile-suggest-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+.is-mobile .oc-mobile-suggest-cmd {
+  font-family: var(--m-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--card-accent, var(--m-accent));
+  text-transform: lowercase;
+  font-weight: 600;
+}
+.is-mobile .oc-mobile-suggest-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--m-text);
+  line-height: 1.3;
+}
+.is-mobile .oc-mobile-suggest-hint {
+  font-size: 11px;
+  color: var(--m-text-faint);
+  line-height: 1.35;
+  margin-top: 1px;
+}
+
+/* ---- Messages ---- */
+.is-mobile .oc-message {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  max-width: 100%;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--m-text);
+}
+.is-mobile .oc-message + .oc-message {
+  margin-top: 6px;
+}
+
+/* User bubble: glassy cyan-tinted pill on the right */
+.is-mobile .oc-message-user {
+  align-self: flex-end;
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: 18px 18px 6px 18px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--m-accent) 22%, var(--m-surface-2)) 0%,
+    color-mix(in srgb, var(--m-accent) 12%, var(--m-surface-1)) 100%);
+  border: 1px solid color-mix(in srgb, var(--m-accent) 28%, var(--m-border));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), 0 0 0 1px color-mix(in srgb, var(--m-accent) 8%, transparent);
+  color: var(--m-text);
+}
+.is-mobile .oc-message-user .oc-msg-head {
+  display: none;
+}
+
+/* Assistant: borderless, full-width — feels like reading a doc */
+.is-mobile .oc-message-assistant {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 2px 2px 6px;
+  background: transparent;
+  border: none;
+}
+.is-mobile .oc-message-assistant .oc-msg-head {
+  display: flex;
+  margin: 0 0 4px;
+  align-items: center;
+  gap: 6px;
+}
+.is-mobile .oc-message-assistant .oc-msg-role {
+  font-family: var(--m-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--m-accent);
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--m-accent) 12%, var(--m-surface-2));
+  border-radius: var(--m-radius-pill);
+  border: 1px solid color-mix(in srgb, var(--m-accent) 22%, var(--m-border));
+}
+
+.is-mobile .oc-message-system {
+  background: color-mix(in srgb, var(--m-accent-coral) 14%, var(--m-surface-1));
+  border: 1px solid color-mix(in srgb, var(--m-accent-coral) 32%, var(--m-border));
+  border-radius: 14px;
+  padding: 10px 12px;
+  align-self: stretch;
+}
+
+/* Message body typography */
+.is-mobile .oc-message-content {
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--m-text);
+}
+.is-mobile .oc-message-content h1,
+.is-mobile .oc-message-content h2,
+.is-mobile .oc-message-content h3 {
+  font-family: var(--m-font-display);
+  letter-spacing: -0.01em;
+  color: var(--m-accent);
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+.is-mobile .oc-message-content h1 { font-size: 19px; }
+.is-mobile .oc-message-content h2 { font-size: 17px; }
+.is-mobile .oc-message-content h3 { font-size: 15px; }
+.is-mobile .oc-message-content code,
+.is-mobile .oc-message-content kbd {
+  font-family: var(--m-font-mono);
+  font-size: 12.5px;
+  background: var(--m-surface-2);
+  border: 1px solid var(--m-border);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+.is-mobile .oc-message-content pre {
+  background: var(--m-surface-1);
+  border: 1px solid var(--m-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.is-mobile .oc-message-content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+/* Linked context chip inside message */
+.is-mobile .oc-message-context-files {
+  margin-top: 8px;
+  background: color-mix(in srgb, var(--m-surface-2) 88%, var(--m-accent) 12%);
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--m-accent) 18%, var(--m-border));
+  padding: 8px 10px;
+}
+.is-mobile .oc-message-context-list {
+  font-size: 12px;
+  font-family: var(--m-font-mono);
+}
+
+/* Hide the floating scroll chevrons — touch flick is enough */
+.is-mobile .oc-nav-sidebar,
+.is-mobile .oc-nav-btn-top,
+.is-mobile .oc-nav-btn-bottom {
+  display: none !important;
+}
+
+/* Hide "Current session: …" context footer — session label belongs in the
+ * history menu, not as a permanent strip on a small screen. */
+.is-mobile .oc-context-footer {
+  display: none;
+}
+
+/* ---- Composer: full-bleed sleek pill ---- */
+.is-mobile .oc-composer {
+  flex: 0 0 auto;
+  padding: 8px 12px 12px;
+  margin: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.18) 60%);
+  border-top: 1px solid var(--m-border-soft);
+}
+.is-mobile .oc-input-container {
+  padding: 0;
+}
+.is-mobile .oc-input-wrapper {
+  min-height: 0;
+  padding: 8px 10px 8px;
+  border-radius: var(--m-radius-input);
+  background: linear-gradient(180deg, var(--m-surface-2), var(--m-surface-1));
+  border: 1px solid var(--m-border);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.36);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  gap: 6px;
+}
+.is-mobile .oc-input-wrapper:focus-within {
+  border-color: color-mix(in srgb, var(--m-accent) 55%, var(--m-border));
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.36), 0 0 0 1px color-mix(in srgb, var(--m-accent) 30%, transparent);
+}
+.is-mobile .oc-composer textarea,
+.is-mobile .oc-composer .oc-input,
+.is-mobile .oc-composer-input,
+.is-mobile .oc-input-wrapper textarea {
+  font-size: 16px !important; /* prevents iOS auto-zoom on focus */
+  font-family: var(--m-font-body);
+  color: var(--m-text);
+  background: transparent;
+  border: none;
+  outline: none;
+  line-height: 1.45;
+  padding: 6px 4px 4px;
+  min-height: 38px;
+  max-height: 30vh;
+  resize: none;
+}
+.is-mobile .oc-composer textarea::placeholder {
+  color: var(--m-text-faint);
+}
+
+/* Bottom toolbar inside the input wrapper: attach | model | send */
+.is-mobile .oc-input-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 0;
+}
+.is-mobile .oc-input-toolbar-left,
+.is-mobile .oc-input-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Attach (+) button */
+.is-mobile .oc-context-link-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid var(--m-border);
+  color: var(--m-text-dim);
+}
+.is-mobile .oc-context-link-btn:hover,
+.is-mobile .oc-context-link-btn:active {
+  color: var(--m-accent);
+  border-color: color-mix(in srgb, var(--m-accent) 40%, var(--m-border));
+}
+.is-mobile .oc-context-link-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Inline model selector — render as a compact monospace chip */
+.is-mobile .oc-model-select-inline-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: var(--m-radius-pill);
+  background: var(--m-surface-3);
+  border: 1px solid var(--m-border);
+  font-family: var(--m-font-mono);
+  font-size: 11px;
+  color: var(--m-text-dim);
+  max-width: 52vw;
+}
+.is-mobile .oc-model-select-inline-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.is-mobile .oc-model-select-inline-caret {
+  color: var(--m-text-faint);
+  font-size: 10px;
+}
+.is-mobile .oc-model-select-inline {
+  /* the real <select> stays positioned over the chip, invisible */
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+/* Cancel button on mobile: shrink to icon-only ghost */
+.is-mobile .oc-cancel-btn {
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--m-text-dim);
+  border: 1px solid var(--m-border);
+}
+
+/* THE send button — circular, neon glow when input has content */
+.is-mobile .oc-send-btn {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0;
+  border-radius: var(--m-radius-pill);
+  background: linear-gradient(135deg, var(--m-accent) 0%, var(--m-accent-strong) 100%);
+  color: #06121a;
+  border: none;
+  box-shadow: var(--m-glow-primary);
+  transition: transform 0.12s ease, box-shadow 0.18s ease, filter 0.15s ease;
+}
+.is-mobile .oc-send-btn:hover,
+.is-mobile .oc-send-btn:active {
+  transform: translateY(-1px) scale(1.03);
+  filter: brightness(1.08);
+  box-shadow: 0 0 32px rgba(122, 237, 255, 0.5);
+}
+.is-mobile .oc-send-btn:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+}
+.is-mobile .oc-send-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---- History menu (session switcher) ---- */
+.is-mobile .oc-history-menu.visible {
+  width: min(86vw, 340px);
+  max-height: 60vh;
+  border-radius: 14px;
+  background: var(--m-surface-1);
+  border: 1px solid var(--m-border);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+}
+
+/* ---- Slash-command picker ---- */
+.is-mobile .oc-context-file-picker {
+  background: var(--m-surface-1);
+  border: 1px solid var(--m-border);
+  border-radius: 14px;
+  box-shadow: 0 -8px 32px rgba(0,0,0,0.45);
+  overflow: hidden;
+}
+.is-mobile .oc-context-file-picker.oc-slash-command-picker {
+  max-height: min(40vh, 320px);
+  bottom: calc(100% + 8px);
+}
+.is-mobile .oc-context-file-picker-list {
+  max-height: min(36vh, 280px);
+  padding: 4px;
+}
+.is-mobile .oc-context-file-picker-item {
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.is-mobile .oc-context-file-picker-item.is-selected,
+.is-mobile .oc-context-file-picker-item:active {
+  background: color-mix(in srgb, var(--m-accent) 15%, var(--m-surface-2));
+}
+.is-mobile .oc-slash-command-item-command {
+  font-family: var(--m-font-mono);
+  font-size: 12.5px;
+  color: var(--m-accent-warm);
+  letter-spacing: 0.01em;
+  font-weight: 600;
+  min-width: max-content;
+}
+.is-mobile .oc-slash-command-item-meta {
+  font-size: 11.5px;
+  color: var(--m-text-dim);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Pickr: keyboard up state ---- */
+.is-mobile .oc-root.is-kb-open .oc-messages,
+.is-mobile .oc-root.is-kb-open .oc-message-list {
+  padding-bottom: 6px;
+}
+
+/* ---- Pulse animation kept consistent across mobile/desktop ---- */
+@keyframes oc-pulse-m {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.32; }
+}
+.is-mobile .oc-message.is-pending .oc-message-content:empty::after {
+  content: "▍";
+  color: var(--m-accent);
+  animation: oc-pulse-m 0.9s ease-in-out infinite;
+}
+
+/* ================================================================
+ * Mobile light mode.
+ *
+ * Obsidian toggles `body.theme-light` / `body.theme-dark`. The mobile
+ * design system above is built for dark; here we override the tokens
+ * (and a few hardcoded shadow tints) for light. Component CSS is
+ * untouched — every color reference goes through a token, so the
+ * cascade naturally applies the right palette.
+ *
+ * Palette goals:
+ *   - Surface stack stays clearly differentiated even on a bright
+ *     screen (bg → surface-1 → surface-2 → surface-3 has visible steps).
+ *   - Text contrast ≥ 7:1 for body, ≥ 4.5:1 for dim helper text.
+ *   - Accents shift to slightly darker / more saturated variants so
+ *     they read well against white surfaces and don't look "washed".
+ *   - Glow effects become soft drop-shadows (large neon glows on white
+ *     bleed harshly and feel toy-like).
+ * ================================================================ */
+
+body.theme-light .is-mobile .oc-root.oc-surface {
+  --m-bg:           #f5f6f9;
+  --m-surface-1:    #ffffff;
+  --m-surface-2:    #eff1f6;
+  --m-surface-3:    #e3e6ed;
+  --m-border:       #d4d8e0;
+  --m-border-soft:  rgba(0, 0, 0, 0.08);
+  --m-text:         #1a1d24;
+  --m-text-dim:     #4a5366;
+  --m-text-faint:   #828b9b;
+  --m-accent:        #0071e3;
+  --m-accent-strong: #0058b3;
+  --m-accent-warm:   #d97706;
+  --m-accent-violet: #7c3aed;
+  --m-accent-coral:  #dc2626;
+  --m-accent-lime:   #16a34a;
+  --m-glow-primary:  0 6px 18px rgba(0, 113, 227, 0.20);
+  --m-glow-warm:     0 6px 16px rgba(217, 119, 6, 0.18);
+
+  /* Lighter ambient mesh — keep depth but don't tint the whole page. */
+  background-image:
+    radial-gradient(60% 40% at 18% 0%, rgba(0, 113, 227, 0.04) 0%, transparent 60%),
+    radial-gradient(50% 35% at 100% 100%, rgba(124, 58, 237, 0.035) 0%, transparent 60%);
+}
+
+/* Header glass: solid off-white. The base rule uses translucent + backdrop-filter
+ * which on mobile lets the dark Obsidian shell show through; force solid white
+ * with !important so it always reads correctly on bright screens. */
+body.theme-light .is-mobile .oc-header {
+  background: #ffffff !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.96)) !important;
+  border-bottom-color: var(--m-border) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--m-text) !important;
+}
+
+/* Header / toolbar buttons: white surfaces with light borders. */
+body.theme-light .is-mobile .oc-header-actions .oc-icon-btn,
+body.theme-light .is-mobile .oc-header-actions .oc-header-btn,
+body.theme-light .is-mobile .oc-toolbar-btn {
+  background: var(--m-surface-1);
+  border-color: var(--m-border);
+  color: var(--m-text-dim);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+body.theme-light .is-mobile .oc-header-actions .oc-icon-btn:hover,
+body.theme-light .is-mobile .oc-header-actions .oc-icon-btn:active,
+body.theme-light .is-mobile .oc-header-actions .oc-header-btn:hover,
+body.theme-light .is-mobile .oc-header-actions .oc-header-btn:active,
+body.theme-light .is-mobile .oc-toolbar-btn:hover,
+body.theme-light .is-mobile .oc-toolbar-btn:active {
+  color: var(--m-accent);
+  border-color: color-mix(in srgb, var(--m-accent) 50%, var(--m-border));
+  background: color-mix(in srgb, var(--m-accent) 6%, var(--m-surface-1));
+}
+
+/* Status dot glow softens on light bg. */
+body.theme-light .is-mobile .oc-connection-dot {
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.08);
+}
+
+/* Welcome hero gradient — sweep dark-text → accent-blue → warm-amber. */
+body.theme-light .is-mobile .oc-welcome-greeting {
+  background: linear-gradient(120deg, var(--m-text) 0%, var(--m-accent) 55%, var(--m-accent-warm) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Suggestion cards: clean white cards with crisp shadow, no inner gradient. */
+body.theme-light .is-mobile .oc-mobile-suggest-card {
+  background: var(--m-surface-1);
+  border-color: var(--m-border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+body.theme-light .is-mobile .oc-mobile-suggest-card:active {
+  background: color-mix(in srgb, var(--card-accent, var(--m-accent)) 6%, var(--m-surface-1));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-accent, var(--m-accent)) 30%, transparent),
+              0 8px 22px rgba(0, 0, 0, 0.08);
+}
+
+/* User message bubble — soft blue tint instead of dark glassy.
+ * Replace the dark drop-shadow which would look heavy on white. */
+body.theme-light .is-mobile .oc-message-user {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--m-accent) 14%, var(--m-surface-1)) 0%,
+    color-mix(in srgb, var(--m-accent) 8%, var(--m-surface-1)) 100%);
+  border-color: color-mix(in srgb, var(--m-accent) 30%, var(--m-border));
+  color: var(--m-text);
+  box-shadow:
+    0 2px 6px rgba(0, 113, 227, 0.10),
+    0 0 0 1px color-mix(in srgb, var(--m-accent) 12%, transparent);
+}
+
+/* Assistant role badge — solid darker text against light tint. */
+body.theme-light .is-mobile .oc-message-assistant .oc-msg-role {
+  background: color-mix(in srgb, var(--m-accent) 14%, var(--m-surface-1));
+  border-color: color-mix(in srgb, var(--m-accent) 28%, var(--m-border));
+  color: var(--m-accent-strong);
+}
+
+/* System messages: light coral background, dark coral text. */
+body.theme-light .is-mobile .oc-message-system {
+  background: color-mix(in srgb, var(--m-accent-coral) 10%, var(--m-surface-1));
+  border-color: color-mix(in srgb, var(--m-accent-coral) 32%, var(--m-border));
+  color: color-mix(in srgb, var(--m-accent-coral) 75%, var(--m-text));
+}
+
+/* Markdown content: ensure body text is the deep charcoal, not Obsidian's
+ * default which might be inherited from theme `--text-normal` (custom themes
+ * frequently set this to a faded gray that looks washed-out on white).
+ * Force with !important and target all descendants — Obsidian's markdown
+ * renderer wraps content in elements with their own color rules. */
+body.theme-light .is-mobile .oc-message-content,
+body.theme-light .is-mobile .oc-message-content p,
+body.theme-light .is-mobile .oc-message-content li,
+body.theme-light .is-mobile .oc-message-content td,
+body.theme-light .is-mobile .oc-message-content blockquote,
+body.theme-light .is-mobile .oc-message-content .markdown-rendered,
+body.theme-light .is-mobile .oc-message-content .markdown-preview-view {
+  color: #1a1d24 !important;
+}
+body.theme-light .is-mobile .oc-message-content h1,
+body.theme-light .is-mobile .oc-message-content h2,
+body.theme-light .is-mobile .oc-message-content h3,
+body.theme-light .is-mobile .oc-message-content h4,
+body.theme-light .is-mobile .oc-message-content h5,
+body.theme-light .is-mobile .oc-message-content h6 {
+  color: var(--m-accent-strong) !important;
+}
+body.theme-light .is-mobile .oc-message-content a {
+  color: var(--m-accent) !important;
+}
+body.theme-light .is-mobile .oc-message-content a.oc-vault-path-link code {
+  color: var(--m-accent) !important;
+}
+body.theme-light .is-mobile .oc-message-content strong,
+body.theme-light .is-mobile .oc-message-content b {
+  color: #0b0d12 !important;
+}
+body.theme-light .is-mobile .oc-message-content code,
+body.theme-light .is-mobile .oc-message-content kbd {
+  background: var(--m-surface-2) !important;
+  border-color: var(--m-border) !important;
+  color: #1a1d24 !important;
+}
+body.theme-light .is-mobile .oc-message-content pre {
+  background: var(--m-surface-2) !important;
+  border-color: var(--m-border) !important;
+}
+body.theme-light .is-mobile .oc-message-content pre code {
+  color: #1a1d24 !important;
+  background: transparent !important;
+}
+
+/* Linked context chip inside a message: stronger blue tint on white. */
+body.theme-light .is-mobile .oc-message-context-files {
+  background: color-mix(in srgb, var(--m-accent) 8%, var(--m-surface-1));
+  border-color: color-mix(in srgb, var(--m-accent) 22%, var(--m-border));
+  color: var(--m-text);
+}
+
+/* Composer: solid bright bg (was previously a translucent gradient that
+ * let the dark shell bleed through). Force with !important to defeat the
+ * base mobile rule which paints a dark rgba(0,0,0,0.18) overlay. */
+body.theme-light .is-mobile .oc-composer {
+  background: var(--m-bg) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 40%) !important;
+  border-top: 1px solid var(--m-border) !important;
+}
+body.theme-light .is-mobile .oc-input-wrapper {
+  background: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid var(--m-border) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 6px 18px rgba(0, 0, 0, 0.06) !important;
+}
+body.theme-light .is-mobile .oc-input-wrapper:focus-within {
+  border-color: var(--m-accent);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 6px 18px rgba(0, 0, 0, 0.06),
+    0 0 0 1px color-mix(in srgb, var(--m-accent) 35%, transparent);
+}
+body.theme-light .is-mobile .oc-composer textarea,
+body.theme-light .is-mobile .oc-composer .oc-input,
+body.theme-light .is-mobile .oc-composer-input,
+body.theme-light .is-mobile .oc-input-wrapper textarea {
+  color: var(--m-text);
+}
+body.theme-light .is-mobile .oc-composer textarea::placeholder {
+  color: var(--m-text-faint);
+}
+
+/* Attach / model / cancel buttons */
+body.theme-light .is-mobile .oc-context-link-btn {
+  background: var(--m-surface-1);
+  border-color: var(--m-border);
+  color: var(--m-text-dim);
+}
+body.theme-light .is-mobile .oc-context-link-btn:hover,
+body.theme-light .is-mobile .oc-context-link-btn:active {
+  color: var(--m-accent);
+  border-color: var(--m-accent);
+}
+body.theme-light .is-mobile .oc-model-select-inline-wrap {
+  background: #eff1f6 !important;
+  background-image: none !important;
+  border-color: #d4d8e0 !important;
+  color: #4a5366 !important;
+  box-shadow: none !important;
+}
+body.theme-light .is-mobile .oc-model-select-inline-text {
+  color: #4a5366 !important;
+}
+body.theme-light .is-mobile .oc-model-select-inline-caret {
+  color: #828b9b !important;
+}
+body.theme-light .is-mobile .oc-model-select-inline,
+body.theme-light .is-mobile .oc-model-select-inline select {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+body.theme-light .is-mobile .oc-cancel-btn {
+  background: var(--m-surface-1);
+  border-color: var(--m-border);
+  color: var(--m-text-dim);
+}
+
+/* Send button on light bg: keep cyan accent but with brighter ink color
+ * and softer glow that doesn't bleach the screen. */
+body.theme-light .is-mobile .oc-send-btn {
+  color: #ffffff;
+  box-shadow: var(--m-glow-primary);
+}
+body.theme-light .is-mobile .oc-send-btn:hover,
+body.theme-light .is-mobile .oc-send-btn:active {
+  box-shadow: 0 8px 24px rgba(0, 113, 227, 0.32);
+}
+
+/* History menu (session switcher) */
+body.theme-light .is-mobile .oc-history-menu.visible {
+  background: var(--m-surface-1);
+  border-color: var(--m-border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* Slash-command picker */
+body.theme-light .is-mobile .oc-context-file-picker {
+  background: var(--m-surface-1);
+  border-color: var(--m-border);
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.10);
+}
+body.theme-light .is-mobile .oc-context-file-picker-item.is-selected,
+body.theme-light .is-mobile .oc-context-file-picker-item:active {
+  background: color-mix(in srgb, var(--m-accent) 10%, var(--m-surface-1));
+}
+body.theme-light .is-mobile .oc-slash-command-item-command {
+  color: var(--m-accent-warm);
+}
+body.theme-light .is-mobile .oc-slash-command-item-meta {
+  color: var(--m-text-dim);
+}
+
+/* Pulse cursor — slimmer color so the light bg doesn't get a glowing
+ * vertical bar that looks out of place. */
+body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::after {
+  color: var(--m-accent);
+}
+
+/* Root canvas in light mode: force the solid bg (the base rule paints
+ * #08090d). Without !important the ambient mesh background-image keeps
+ * the page looking dark on themes that strip the body.theme-light token
+ * overrides. */
+body.theme-light .is-mobile .oc-root.oc-surface {
+  background-color: #f5f6f9 !important;
+  color: #1a1d24 !important;
+}
+
+/* ================================================================
+ * SYSTEM LIGHT MODE OVERRIDE (OS-level signal, theme-agnostic)
+ *
+ * Many users keep Obsidian on a dark theme by habit but use the device
+ * in bright light. When that happens, the chat header/composer stay
+ * dark even though the user expects "light mode". This block forces
+ * readable light surfaces for FLOWnote's chat shell whenever the OS
+ * reports light — independent of `body.theme-light` (which may not be
+ * set if Obsidian is configured dark) and independent of `.is-mobile`.
+ *
+ * Scope is restricted to FLOWnote elements (`.oc-*`) so we don't leak
+ * into the user's notes or other plugin UIs.
+ * ================================================================ */
+@media (prefers-color-scheme: light) {
+  /* Surface canvas */
+  .oc-root.oc-surface {
+    background-color: #f5f6f9 !important;
+    background-image: none !important;
+    color: #1a1d24 !important;
+  }
+  .oc-shell {
+    background: #f5f6f9 !important;
+    background-image: linear-gradient(180deg, #ffffff 0%, #f5f6f9 100%) !important;
+  }
+
+  /* Header strip and its action buttons */
+  .oc-header {
+    background: #ffffff !important;
+    color: #1a1d24 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-bottom: 1px solid #d4d8e0 !important;
+  }
+  .oc-brand-title,
+  .oc-header-meta {
+    color: #1a1d24 !important;
+  }
+  .oc-icon-btn,
+  .oc-header-btn,
+  .oc-header-btn.oc-icon-btn {
+    background: #ffffff !important;
+    border: 1px solid #d4d8e0 !important;
+    color: #1a1d24 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+  }
+  .oc-icon-btn:hover,
+  .oc-icon-btn:active,
+  .oc-header-btn:hover,
+  .oc-header-btn:active {
+    background: #eef3fa !important;
+    border-color: #0071e3 !important;
+    color: #0071e3 !important;
+  }
+  .oc-icon-btn svg,
+  .oc-header-btn svg {
+    color: currentColor !important;
+  }
+
+  /* Composer (bottom input area) */
+  .oc-composer {
+    background: #ffffff !important;
+    background-image: none !important;
+    border-top: 1px solid #d4d8e0 !important;
+  }
+  .oc-input-wrapper {
+    background: #ffffff !important;
+    background-image: none !important;
+    border: 1px solid #d4d8e0 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 18px rgba(0, 0, 0, 0.06) !important;
+  }
+  .oc-input-wrapper:focus-within {
+    border-color: #0071e3 !important;
+    box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.4), 0 6px 18px rgba(0, 0, 0, 0.06) !important;
+  }
+  .oc-composer textarea,
+  .oc-composer .oc-input,
+  .oc-composer-input,
+  .oc-input-wrapper textarea {
+    color: #1a1d24 !important;
+    background: transparent !important;
+  }
+  .oc-composer textarea::placeholder {
+    color: #828b9b !important;
+  }
+
+  /* Send / attach buttons in the composer */
+  .oc-context-link-btn,
+  .oc-cancel-btn {
+    background: #ffffff !important;
+    border: 1px solid #d4d8e0 !important;
+    color: #4a5366 !important;
+  }
+  .is-mobile .oc-model-select-inline-wrap {
+    background: #eff1f6 !important;
+    background-image: none !important;
+    border: 1px solid #d4d8e0 !important;
+    color: #4a5366 !important;
+    box-shadow: none !important;
+  }
+  .is-mobile .oc-model-select-inline-text {
+    color: #4a5366 !important;
+  }
+  .is-mobile .oc-model-select-inline-caret {
+    color: #828b9b !important;
+  }
+  .is-mobile .oc-model-select-inline,
+  .is-mobile .oc-model-select-inline select {
+    background: transparent !important;
+    background-color: transparent !important;
+    color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+  }
+  .oc-send-btn {
+    color: #ffffff !important;
+  }
+
+  /* Assistant message body markdown — force readable dark text. The
+   * markdown renderer's default `--text-normal` may be diluted by the
+   * user's theme; override every wrapper class. */
+  .oc-message-content,
+  .oc-message-content p,
+  .oc-message-content li,
+  .oc-message-content td,
+  .oc-message-content blockquote,
+  .oc-message-content .markdown-rendered,
+  .oc-message-content .markdown-preview-view {
+    color: #1a1d24 !important;
+  }
+  .oc-message-content h1,
+  .oc-message-content h2,
+  .oc-message-content h3,
+  .oc-message-content h4,
+  .oc-message-content h5,
+  .oc-message-content h6 {
+    color: #0058b3 !important;
+  }
+  .oc-message-content a {
+    color: #0071e3 !important;
+  }
+  .oc-message-content a.oc-vault-path-link code {
+    color: #0071e3 !important;
+  }
+  .oc-message-content strong,
+  .oc-message-content b {
+    color: #0b0d12 !important;
+  }
+  .oc-message-content code,
+  .oc-message-content kbd {
+    background: #eff1f6 !important;
+    color: #1a1d24 !important;
+    border: 1px solid #d4d8e0 !important;
+  }
+  .oc-message-content pre {
+    background: #eff1f6 !important;
+    border: 1px solid #d4d8e0 !important;
+  }
+  .oc-message-content pre code {
+    background: transparent !important;
+    color: #1a1d24 !important;
+  }
+  /* User message bubble — soft blue tint on white */
+  .oc-message-user {
+    background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%) !important;
+    border: 1px solid #b4d4f0 !important;
+    color: #1a1d24 !important;
+  }
+
+  /* File picker / slash-command picker / mention picker popup. Uses
+   * `var(--background-secondary)` which Obsidian fills dark in dark
+   * theme — force readable light surface + dark text. */
+  .oc-context-file-picker,
+  .oc-slash-command-picker {
+    background: #ffffff !important;
+    border: 1px solid #d4d8e0 !important;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+    color: #1a1d24 !important;
+  }
+  .oc-context-file-picker-search {
+    background: #f5f6f9 !important;
+    border: 1px solid #d4d8e0 !important;
+    color: #1a1d24 !important;
+  }
+  .oc-context-file-picker-search::placeholder {
+    color: #828b9b !important;
+  }
+  .oc-context-file-picker-empty {
+    color: #4a5366 !important;
+  }
+  .oc-context-file-picker-item {
+    color: #1a1d24 !important;
+  }
+  .oc-context-file-picker-item-name {
+    color: #1a1d24 !important;
+  }
+  .oc-context-file-picker-item-path {
+    color: #4a5366 !important;
+  }
+  .oc-context-file-picker-item-meta {
+    color: #0058b3 !important;
+  }
+  .oc-context-file-picker-item:hover,
+  .oc-context-file-picker-item.is-selected,
+  .oc-context-file-picker-item:active {
+    background: #eef3fa !important;
+  }
+  .oc-slash-command-item-command {
+    color: #0058b3 !important;
+  }
+  .oc-slash-command-item-meta {
+    color: #4a5366 !important;
+  }
+
+  /* History dropdown (session switcher in header) */
+  .oc-history-menu {
+    background: #ffffff !important;
+    border: 1px solid #d4d8e0 !important;
+    color: #1a1d24 !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12) !important;
+  }
+
+  /* Mobile welcome screen suggestion cards — paper-tone palette so they
+   * read as readable cards on a bright canvas. Each card keeps its
+   * category-tinted bottom border (via the --card-accent custom prop
+   * set inline), but the body becomes warm off-white with charcoal
+   * text. Active state lifts the card with a soft shadow rather than
+   * the heavy dark drop-shadow from the dark-mode rule. */
+  .is-mobile .oc-mobile-suggest-card,
+  .oc-mobile-suggest-card,
+  .oc-suggest-card {
+    background: #fbfaf6 !important;
+    background-image: linear-gradient(160deg, #ffffff 0%, #f5f3ee 100%) !important;
+    border: 1px solid #e3e1d8 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.04) !important;
+    color: #1a1d24 !important;
+  }
+  .is-mobile .oc-mobile-suggest-card:active,
+  .oc-mobile-suggest-card:active,
+  .oc-suggest-card:hover,
+  .oc-suggest-card:focus-visible,
+  .oc-suggest-card:active {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--card-accent, #0071e3) 50%, #d4d8e0) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-accent, #0071e3) 25%, transparent),
+                0 10px 24px rgba(0, 0, 0, 0.08) !important;
+  }
+  .is-mobile .oc-mobile-suggest-card::before,
+  .oc-mobile-suggest-card::before,
+  .oc-suggest-card::before {
+    opacity: 0.85 !important;
+  }
+  .is-mobile .oc-mobile-suggest-cmd,
+  .oc-mobile-suggest-cmd,
+  .oc-suggest-cmd {
+    color: var(--card-accent, #0058b3) !important;
+  }
+  .is-mobile .oc-mobile-suggest-title,
+  .oc-mobile-suggest-title,
+  .oc-suggest-title {
+    color: #1a1d24 !important;
+  }
+  .is-mobile .oc-mobile-suggest-hint,
+  .oc-mobile-suggest-hint,
+  .oc-suggest-hint {
+    color: #5b6478 !important;
+  }
+  /* Welcome greeting + hint above the cards */
+  .is-mobile .oc-welcome-greeting,
+  .oc-welcome-greeting {
+    background: linear-gradient(120deg, #1a1d24 0%, #0071e3 55%, #d97706 100%) !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+  }
+  .is-mobile .oc-empty,
+  .oc-empty {
+    color: #4a5366 !important;
+  }
+
+  /* Mobile-specific overrides keep working too. */
+  body:not(.theme-dark) .is-mobile .oc-root.oc-surface {
+    --m-bg:           #f5f6f9;
+    --m-surface-1:    #ffffff;
+    --m-surface-2:    #eff1f6;
+    --m-surface-3:    #e3e6ed;
+    --m-border:       #d4d8e0;
+    --m-border-soft:  rgba(0, 0, 0, 0.08);
+    --m-text:         #1a1d24;
+    --m-text-dim:     #4a5366;
+    --m-text-faint:   #828b9b;
+    --m-accent:        #0071e3;
+    --m-accent-strong: #0058b3;
+    background-color: #f5f6f9 !important;
+    color: #1a1d24 !important;
+  }
+  body:not(.theme-dark) .is-mobile .oc-header {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-bottom: 1px solid #d4d8e0 !important;
+  }
+  body:not(.theme-dark) .is-mobile .oc-composer {
+    background: #f5f6f9 !important;
+    border-top: 1px solid #d4d8e0 !important;
+  }
+  body:not(.theme-dark) .is-mobile .oc-input-wrapper {
+    background: #ffffff !important;
+    border: 1px solid #d4d8e0 !important;
+  }
+  body:not(.theme-dark) .is-mobile .oc-message-content,
+  body:not(.theme-dark) .is-mobile .oc-message-content p,
+  body:not(.theme-dark) .is-mobile .oc-message-content li,
+  body:not(.theme-dark) .is-mobile .oc-message-content td {
+    color: #1a1d24 !important;
+  }
+}
+
+/* ================================================================
+ * Settings tab — grouped containers + collapsible advanced.
+ *
+ * Goal: match Obsidian's native settings visual rhythm — one bordered
+ * container per logical group, individual setting-items separated by
+ * thin horizontal dividers rather than each item being its own card.
+ * The intro/description for the group lives in a framed callout above
+ * the container so the eye can quickly tell "what is this section".
+ *
+ * Class taxonomy (set by basic-settings-section-methods.js):
+ *   .oc-settings-section          — wraps one group (heading + intro + group)
+ *     .oc-settings-section-heading  — small uppercase heading row
+ *     .oc-settings-section-intro    — framed callout with descriptive copy
+ *     .oc-settings-group            — bordered container holding .setting-items
+ *
+ *   .oc-settings-collapsible       — <details> wrapper for advanced sections
+ *     .oc-settings-collapsible-summary — clickable header row
+ *     .oc-settings-section-intro       — same callout class
+ *     .oc-settings-group               — same container class
+ * ================================================================ */
+
+.oc-settings-root {
+  --oc-set-bg:       var(--background-primary);
+  --oc-set-surface:  var(--background-secondary);
+  --oc-set-border:   var(--background-modifier-border);
+  --oc-set-radius:   10px;
+}
+
+.oc-settings-section {
+  margin: 22px 0 14px;
+}
+.oc-settings-section-heading {
+  margin: 0 2px 10px;
+}
+.oc-settings-section-heading h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-normal);
+  line-height: 1.3;
+}
+
+/* Legacy framed intro callout — kept hidden so existing call sites
+ * that still pass `intro:` don't break, but visually suppressed in
+ * favor of native inline setDesc() per setting. */
+.oc-settings-section-intro {
+  display: none;
+}
+
+.oc-settings-group {
+  border: 1px solid var(--oc-set-border);
+  border-radius: var(--oc-set-radius);
+  background: var(--oc-set-bg);
+  overflow: hidden;
+}
+
+/* Each setting-item inside a group: flat row with a thin top divider.
+ * Force-override theme styles that paint a per-item rounded background. */
+.oc-settings-group > .setting-item,
+.oc-settings-group .setting-item {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-top: 1px solid var(--oc-set-border) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 14px 16px !important;
+  margin: 0 !important;
+}
+.oc-settings-group > .setting-item:first-child,
+.oc-settings-group .setting-item:first-child {
+  border-top: none !important;
+}
+/* Defensive: some themes paint a backplate on the info/control halves. */
+.oc-settings-group .setting-item-info,
+.oc-settings-group .setting-item-control {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Some internal renderers (e.g. agent-provider-section, skill-management)
+ * inject their own `.setHeading()` row via Obsidian's API. Inside a
+ * grouped container, demote those heading rows so we don't get a
+ * double-heading visual. */
+.oc-settings-group .setting-item.setting-item-heading {
+  background: var(--oc-set-surface);
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  border-top: 1px solid var(--oc-set-border);
+}
+.oc-settings-group .setting-item.setting-item-heading:first-child {
+  border-top: none;
+}
+/* Skip the heading row entirely if it has empty content — happens when
+ * an inner section's title is already shown by our outer .heading. */
+.oc-settings-group .setting-item.setting-item-heading
+  .setting-item-info:empty {
+  display: none;
+}
+
+/* Free-floating descriptive <p> or custom divs that some inner sections
+ * emit between settings: indent them so they look part of the container,
+ * not a separate stack. */
+.oc-settings-group > p,
+.oc-settings-group > div:not(.setting-item):not(.oc-skill-mgmt-host):not(.oc-template-mgmt-host) {
+  padding: 8px 14px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--oc-set-border);
+}
+.oc-settings-group > p:first-child,
+.oc-settings-group > div:not(.setting-item):not(.oc-skill-mgmt-host):not(.oc-template-mgmt-host):first-child {
+  border-top: none;
+}
+
+/* Skill / template management embed their own list hosts. Keep them
+ * flush with the group's container edges so they look continuous. */
+.oc-settings-group > .oc-skill-mgmt-host,
+.oc-settings-group > .oc-template-mgmt-host {
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+.oc-skill-secret-host {
+  margin: 10px 0 12px;
+  border: 1px solid var(--oc-set-border);
+  border-radius: 6px;
+  background: var(--oc-set-surface);
+  overflow: hidden;
+}
+.oc-skill-secret-intro {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--oc-set-border);
+}
+.oc-skill-secret-host .setting-item {
+  background: transparent !important;
+  border: none !important;
+  border-top: 1px solid var(--oc-set-border) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 12px !important;
+}
+.oc-skill-secret-host .setting-item:first-of-type {
+  border-top: none !important;
+}
+.oc-settings-group > .oc-skill-mgmt-host .oc-skill-mgmt-list,
+.oc-settings-group > .oc-template-mgmt-host .oc-template-mgmt-list {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Collapsible (advanced / opencode bridge) panels */
+.oc-settings-collapsible {
+  margin: 14px 0;
+  border: 1px solid var(--oc-set-border);
+  border-radius: var(--oc-set-radius);
+  background: var(--oc-set-bg);
+  overflow: hidden;
+}
+.oc-settings-collapsible[open] {
+  background: var(--oc-set-bg);
+}
+.oc-settings-collapsible-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  background: var(--oc-set-surface);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.oc-settings-collapsible-summary::-webkit-details-marker { display: none; }
+.oc-settings-collapsible-summary::before {
+  content: "▸";
+  color: var(--text-muted);
+  font-size: 11px;
+  transition: transform 0.15s ease;
+  display: inline-block;
+  width: 12px;
+}
+.oc-settings-collapsible[open] > .oc-settings-collapsible-summary::before {
+  transform: rotate(90deg);
+}
+.oc-settings-collapsible > .oc-settings-section-intro {
+  margin: 10px 12px 4px;
+  border-radius: 6px;
+}
+.oc-settings-collapsible > .oc-settings-group {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--oc-set-border);
+}
+
+/* Mobile: tighter padding, smaller fonts inside settings (the chat
+ * view design system above is independent). */
+.is-mobile .oc-settings-section {
+  margin: 14px 0 8px;
+}
+.is-mobile .oc-settings-section-intro {
+  font-size: 12px;
+  padding: 7px 10px;
+}
+.is-mobile .oc-settings-group > .setting-item,
+.is-mobile .oc-settings-group .setting-item {
+  padding: 10px 12px;
+}
+.is-mobile .oc-settings-collapsible-summary {
+  padding: 10px 12px;
+  font-size: 13px;
 }

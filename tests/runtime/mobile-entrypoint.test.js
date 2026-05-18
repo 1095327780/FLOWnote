@@ -164,9 +164,14 @@ test("mobile onload should use mixin entrypoint and register mobile surfaces", a
     assert.equal(typeof plugin.onloadMobile, "function");
     assert.equal(typeof plugin.openCaptureModal, "function");
     assert.equal(typeof plugin.loadMobilePersistedData, "function");
+    // Stage 1 (capture-only) MUST always register. The fixture's mocked
+    // `obsidian` lacks ItemView etc., so Stage 2 (full assistant) fails
+    // harmlessly, but the capture ribbon + command and a fallback
+    // settings tab (MobileSettingsTab) stay alive — that's the contract
+    // mobile users depend on after the desktop unification.
     assert.equal(plugin._commands.some((cmd) => cmd && cmd.id === "mobile-quick-capture"), true);
-    assert.equal(plugin._tabs.length, 1);
-    assert.equal(plugin._ribbons.length, 1);
+    assert.equal(plugin._ribbons.length >= 1, true);
+    assert.equal(plugin._tabs.length, 1, "fallback settings tab must register when Stage 2 fails");
     assert.equal(fixture.noticeMessages.length, 0);
   } finally {
     fixture.restore();

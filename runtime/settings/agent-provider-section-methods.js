@@ -9,21 +9,37 @@
 // runtime/agent/agent-provider-resolver.buildProviderFromSpec so the
 // user's currently-typed values can be tested without saving first.
 
-const { Setting, Notice } = require("obsidian");
+const { Setting, Notice, Platform = {} } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
+const { bindDropdownChange } = require("./component-value-utils");
 const {
   defaultAgentSettings,
   getActiveApiKey,
   setApiKeyFor,
   switchActiveProvider,
-  normalizeAgentSettings,
+  normalizeAgentSettingsInPlace,
 } = require("../agent/agent-settings");
+const { normalizeToolPermissionMode } = require("../agent/permission-policy");
 const { buildProviderFromSpec } = require("../agent/agent-provider-resolver");
 const {
   getProviderSpec,
   listProviderSpecs,
   resolveBaseUrl,
 } = require("../providers/registry");
+
+function getEffectiveAgentProviderMode(agent, platform = Platform) {
+  const persistedMode = agent && agent.mode === "opencode-legacy" ? "opencode-legacy" : "direct";
+  return platform && platform.isMobile ? "direct" : persistedMode;
+}
+
+function ensureAgentProviderSettings(plugin) {
+  if (!plugin.settings.agentProvider) {
+    plugin.settings.agentProvider = defaultAgentSettings();
+  } else {
+    plugin.settings.agentProvider = normalizeAgentSettingsInPlace(plugin.settings.agentProvider);
+  }
+  return plugin.settings.agentProvider;
+}
 
 /**
  * Render the section into containerEl.
@@ -42,48 +58,38 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
   };
 
   // Ensure settings are normalized before reading.
-  if (!plugin.settings.agentProvider) {
-    plugin.settings.agentProvider = defaultAgentSettings();
-  } else {
-    plugin.settings.agentProvider = normalizeAgentSettings(plugin.settings.agentProvider);
-  }
-  const agent = plugin.settings.agentProvider;
-
-  // -------------------------------------------------------------------------
-  // Heading + intro
-  // -------------------------------------------------------------------------
-  new Setting(containerEl)
-    .setName(t("settings.agent.heading", "AI Provider"))
-    .setHeading();
-  containerEl.createEl("p", {
-    text: t(
-      "settings.agent.intro",
-      "选择一家服务商，粘贴你的 API key。支持各家的「Coding Plan 订阅」和「按量付费 API」两种模式。",
-    ),
-    cls: "setting-item-description",
-  });
+  const agent = ensureAgentProviderSettings(plugin);
 
   // -------------------------------------------------------------------------
   // Mode toggle: Direct vs OpenCode legacy
+  //
+  // Mobile has no OpenCode CLI bridge. Use direct mode for this render only
+  // and hide the toggle, but don't overwrite the persisted desktop setting
+  // in the shared vault data.json.
   // -------------------------------------------------------------------------
-  new Setting(containerEl)
-    .setName(t("settings.agent.modeName", "运行方式"))
-    .setDesc(t(
-      "settings.agent.modeDesc",
-      "Direct：直接调用各家 AI API，无需安装 OpenCode；推荐。\nOpenCode（legacy）：通过本地 OpenCode CLI 中转，与 0.4.x 行为一致。",
-    ))
-    .addDropdown((d) => {
-      d.addOption("direct", t("settings.agent.modeDirect", "Direct（推荐）"));
-      d.addOption("opencode-legacy", t("settings.agent.modeOpenCode", "OpenCode（legacy）"));
-      d.setValue(agent.mode);
-      d.onChange(async (v) => {
-        agent.mode = v === "opencode-legacy" ? "opencode-legacy" : "direct";
-        await plugin.saveSettings();
-        reRender();
+  const effectiveMode = getEffectiveAgentProviderMode(agent, Platform);
+  if (!(Platform && Platform.isMobile)) {
+    new Setting(containerEl)
+      .setName(t("settings.agent.modeName", "运行方式"))
+      .setDesc(t(
+        "settings.agent.modeDesc",
+        "内置 AI：在插件里配置自己的 API Key，桌面和手机都可用，不依赖 OpenCode 或终端环境。\nOpenCode 桥接：继续通过本机 OpenCode 调用模型，适合已有 OpenCode 配置或想使用其免费/实验模型的用户；配置更复杂，主要适合桌面端。",
+      ))
+      .addDropdown((d) => {
+        d.addOption("direct", t("settings.agent.modeDirect", "内置 AI（推荐新用户 / 移动端）"));
+        d.addOption("opencode-legacy", t("settings.agent.modeOpenCode", "OpenCode 桥接（兼容旧用户）"));
+        d.setValue(agent.mode);
+        bindDropdownChange(d, async (selectedMode) => {
+          const nextMode = selectedMode === "opencode-legacy" ? "opencode-legacy" : "direct";
+          agent.mode = nextMode;
+          plugin.settings.agentProviderModePreference = nextMode;
+          await plugin.saveSettings();
+          reRender();
+        });
       });
-    });
+  }
 
-  if (agent.mode === "opencode-legacy") {
+  if (effectiveMode === "opencode-legacy") {
     containerEl.createEl("p", {
       text: t(
         "settings.agent.opencodeNote",
@@ -98,6 +104,61 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
   // Direct mode UI
   // =========================================================================
 
+  // --- Tool permission policy ----------------------------------------------
+  const permissionMode = normalizeToolPermissionMode(plugin.settings.toolPermissionMode);
+  plugin.settings.toolPermissionMode = permissionMode;
+  new Setting(containerEl)
+    .setName(t("settings.agent.permissionModeName", "工具权限"))
+    .setDesc(t(
+      "settings.agent.permissionModeDesc",
+      "控制 AI 调用工具前是否弹出确认。保守模式会保持现在的行为；仅危险操作确认会自动允许读取、搜索、创建、追加和普通 API 请求；全自动会跳过所有工具确认。",
+    ))
+    .addDropdown((d) => {
+      d.addOption("ask", t("settings.agent.permissionModeAsk", "每次确认（最保守）"));
+      d.addOption("ask-dangerous", t("settings.agent.permissionModeDangerous", "仅危险操作确认"));
+      d.addOption("auto", t("settings.agent.permissionModeAuto", "全自动（高风险）"));
+      d.setValue(permissionMode);
+      bindDropdownChange(d, async (value) => {
+        const next = normalizeToolPermissionMode(value);
+        if (next === "auto" && permissionMode !== "auto") {
+          const warning = t(
+            "settings.agent.permissionModeAutoConfirm",
+            "全自动模式会允许 AI 不再逐次确认地写入、修改、移动笔记，并向外部 API 发起请求。请只在你信任当前模型、skill 和任务时开启。确定开启？",
+          );
+          if (typeof window !== "undefined" && typeof window.confirm === "function") {
+            const ok = window.confirm(warning);
+            if (!ok) {
+              d.setValue(permissionMode);
+              return;
+            }
+          } else {
+            new Notice(warning);
+          }
+        }
+        plugin.settings.toolPermissionMode = next;
+        await plugin.saveSettings();
+        reRender();
+      });
+    });
+
+  if (permissionMode === "auto") {
+    containerEl.createEl("p", {
+      cls: "setting-item-description oc-permission-risk-warning",
+      text: t(
+        "settings.agent.permissionModeAutoWarning",
+        "风险提示：全自动模式会跳过所有工具确认，包含覆盖、移动、批量修改笔记和外部 API 请求。",
+      ),
+    });
+  } else if (permissionMode === "ask-dangerous") {
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: t(
+        "settings.agent.permissionModeDangerousHint",
+        "危险操作仍会确认：覆盖写入、移动/重命名、批量替换、删除属性、PUT/PATCH/DELETE API 请求。",
+      ),
+    });
+  }
+
   // --- Provider dropdown ---------------------------------------------------
   const allSpecs = listProviderSpecs().filter(
     (s) => s.protocol === "anthropic-messages" || s.protocol === "openai-chat",
@@ -110,8 +171,8 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
         d.addOption(spec.id, spec.displayName);
       }
       d.setValue(agent.direct.providerId);
-      d.onChange(async (v) => {
-        switchActiveProvider(agent, v);
+      bindDropdownChange(d, async (providerId) => {
+        switchActiveProvider(agent, providerId);
         await plugin.saveSettings();
         reRender();
       });
@@ -135,10 +196,10 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
           d.addOption(mid, m.label || mid);
         }
         d.setValue(agent.direct.providerMode || spec.defaultMode);
-        d.onChange(async (v) => {
-          agent.direct.providerMode = v;
+        bindDropdownChange(d, async (providerMode) => {
+          agent.direct.providerMode = providerMode;
           // If the chosen mode has a recommended model, suggest it.
-          const m = spec.modes[v];
+          const m = spec.modes[providerMode];
           if (m && m.recommendedModel) agent.direct.model = m.recommendedModel;
           await plugin.saveSettings();
           reRender();
@@ -166,8 +227,8 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
         if (spec.region.cnUrl) d.addOption("cn", t("settings.agent.regionCN", "中国大陆"));
         if (spec.region.intlUrl) d.addOption("intl", t("settings.agent.regionIntl", "海外"));
         d.setValue(agent.direct.region || spec.region.defaultRegion || "cn");
-        d.onChange(async (v) => {
-          agent.direct.region = v === "intl" ? "intl" : "cn";
+        bindDropdownChange(d, async (region) => {
+          agent.direct.region = region === "intl" ? "intl" : "cn";
           await plugin.saveSettings();
         });
       });
@@ -260,8 +321,8 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
       .addDropdown((d) => {
         for (const m of merged) d.addOption(m.id, m.label);
         d.setValue(agent.direct.model || spec.defaultModel);
-        d.onChange(async (v) => {
-          agent.direct.model = v;
+        bindDropdownChange(d, async (modelId) => {
+          agent.direct.model = modelId;
           await plugin.saveSettings();
         });
       })
@@ -375,17 +436,29 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
       });
     });
 
-  // --- Advanced collapsible ------------------------------------------------
-  const advHeader = new Setting(containerEl)
-    .setName(t("settings.agent.advancedHeading", "高级（可选）"))
-    .setHeading();
-  containerEl.createEl("p", {
-    text: t(
-      "settings.agent.advancedHint",
-      "通常不需要改这些。如果你的服务商要求特定 User-Agent 或 API 版本头，可在此处覆盖。",
-    ),
-    cls: "setting-item-description",
-  });
+}
+
+/**
+ * Render ONLY the advanced (base URL / UA / version header / stream /
+ * maxOutputTokens) settings. Pulled out of renderAgentProviderSection
+ * so the caller can wrap it in a collapsible <details> at the top
+ * level — keeps the "AI 服务" card uncluttered.
+ *
+ * Only meaningful in direct mode; the caller should skip in opencode mode.
+ */
+function renderAgentProviderAdvanced({ containerEl, plugin, tab }) {
+  const t = (key, fallback, params = {}) =>
+    tFromContext(tab || plugin, key, fallback, params);
+
+  if (!plugin.settings.agentProvider) {
+    plugin.settings.agentProvider = defaultAgentSettings();
+  } else {
+    plugin.settings.agentProvider = normalizeAgentSettingsInPlace(plugin.settings.agentProvider);
+  }
+  const agent = plugin.settings.agentProvider;
+  if (agent.mode !== "direct") return;
+  const spec = getProviderSpec(agent.direct.providerId);
+  if (!spec) return;
 
   new Setting(containerEl)
     .setName(t("settings.agent.advBaseUrlName", "Base URL 覆盖"))
@@ -456,12 +529,10 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
       });
     });
 
-  // Active model's hard ceiling, shown as the placeholder so the user
-  // knows what "default" means in concrete terms.
   const activeModel = (spec.models || []).find((m) => m && m.id === agent.direct.model);
   const modelCeiling = (activeModel && activeModel.maxOutput) || 0;
   new Setting(containerEl)
-    .setName(t("settings.agent.maxOutputName", "单次输出 token 上限（高级）"))
+    .setName(t("settings.agent.maxOutputName", "单次输出 token 上限"))
     .setDesc(t(
       "settings.agent.maxOutputDesc",
       "留 0 或空 = 直接用当前模型的硬上限（推荐，模型只生成需要的长度，多余不浪费）。" +
@@ -478,7 +549,6 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
           await plugin.saveSettings();
         });
     });
-
 }
 
 /**
@@ -494,9 +564,18 @@ const agentProviderSectionMethods = {
       refresh: () => this.display(),
     });
   },
+  renderAgentProviderAdvanced(containerEl) {
+    renderAgentProviderAdvanced({
+      containerEl,
+      plugin: this.plugin,
+      tab: this,
+    });
+  },
 };
 
 module.exports = {
   renderAgentProviderSection,
+  renderAgentProviderAdvanced,
   agentProviderSectionMethods,
+  getEffectiveAgentProviderMode,
 };

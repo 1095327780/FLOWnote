@@ -9,6 +9,7 @@
 //   2. Defaults: folder="" (vault root), format="YYYY-MM-DD", template=""
 
 const { buildTool } = require("../tool-registry");
+const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
   "Work with the user's Obsidian daily note. Modes: " +
@@ -240,7 +241,7 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
           await vault.modify(existing, joined);
           yield {
             type: "result",
-            content: `Appended ${Buffer.byteLength(content, "utf8")} bytes to "${path}".`,
+            content: `Appended ${byteLengthUtf8(content)} bytes to "${path}".`,
           };
           return;
         }
@@ -250,7 +251,7 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
         await vault.create(path, seed);
         yield {
           type: "result",
-          content: `Created "${path}" via append (${Buffer.byteLength(seed, "utf8")} bytes).`,
+          content: `Created "${path}" via append (${byteLengthUtf8(seed)} bytes).`,
         };
         return;
       }
@@ -272,7 +273,7 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
       yield {
         type: "result",
         content:
-          `Created "${path}" (${Buffer.byteLength(seed, "utf8")} bytes` +
+          `Created "${path}" (${byteLengthUtf8(seed)} bytes` +
           `${tplBody && !userBody ? `; seeded from template "${cfg.template}"` : ""}).`,
       };
     },

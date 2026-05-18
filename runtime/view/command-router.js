@@ -150,14 +150,18 @@ function resolveSkillFromPrompt(userText) {
       // Keep slash command routing usable even if a single refresh fails.
     }
   }
-  const skills = skillService && typeof skillService.getSkills === "function"
+  let skills = skillService && typeof skillService.getSkills === "function"
     ? skillService.getSkills()
     : [];
+  if ((!skills || !skills.length)
+    && this.plugin && Array.isArray(this.plugin.__flownoteMobileSkillList)) {
+    skills = this.plugin.__flownoteMobileSkillList;
+  }
   const findSkillByToken = (token) => skills.find((item) => {
     const needle = String(token || "").toLowerCase();
     if (!needle) return false;
-    const id = String(item.id || "").toLowerCase();
-    const name = String(item.name || "").toLowerCase();
+    const id = String((item && (item.id || item.slug)) || "").toLowerCase();
+    const name = String((item && item.name) || "").toLowerCase();
     return id === needle || name === needle;
   });
   const buildPromptText = (skill, promptTextRaw) => {
@@ -207,9 +211,13 @@ function openSkillSelector() {
       // ignore refresh error and fallback to existing cache
     }
   }
-  const skills = skillService && typeof skillService.getSkills === "function"
+  let skills = skillService && typeof skillService.getSkills === "function"
     ? skillService.getSkills()
     : [];
+  if ((!skills || !skills.length)
+    && this.plugin && Array.isArray(this.plugin.__flownoteMobileSkillList)) {
+    skills = this.plugin.__flownoteMobileSkillList;
+  }
   if (!skills.length) {
     new Notice(tr(this, "view.skill.noneFound", "No available skills found. Check Skills directory settings."));
     return;

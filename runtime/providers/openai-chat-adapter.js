@@ -12,6 +12,7 @@
 // anthropic-messages adapter.
 
 const { parseSseStream } = require("./sse-parser");
+const { streamingFetch } = require("./streaming-fetch");
 const { resolveBaseUrl } = require("./registry");
 
 const DEFAULT_USER_AGENT = "FLOWnote (Obsidian)";
@@ -332,7 +333,22 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
     const wantsStream = userConfig.stream !== false;
     const body = JSON.stringify({ ...buildRequestBody(input, spec), stream: wantsStream });
 
-    const response = await getRequest()({ url, method: "POST", headers, body });
+    // Streaming path: go through fetch() so we can read the body as a
+    // ReadableStream. requestUrl buffers the entire response which kills
+    // live token output. fetch is subject to CORS but most OpenAI-shaped
+    // APIs (OpenAI, DeepSeek, Moonshot, Zhipu, Groq, …) expose CORS
+    // headers. If fetch fails we fall back to the buffered path so the
+    // chat still completes — just without live streaming.
+    let response;
+    if (wantsStream && !doRequest) {
+      try {
+        response = await streamingFetch({ url, method: "POST", headers, body, signal: input && input.signal });
+      } catch (e) {
+        response = await getRequest()({ url, method: "POST", headers, body });
+      }
+    } else {
+      response = await getRequest()({ url, method: "POST", headers, body });
+    }
     const status = response && typeof response.status === "number" ? response.status : 0;
     if (status < 200 || status >= 300) {
       const text = response && typeof response.text === "function"
