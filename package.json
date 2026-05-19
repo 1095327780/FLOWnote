@@ -1,6 +1,6 @@
 {
   "name": "flownote",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "type": "commonjs",
   "scripts": {
