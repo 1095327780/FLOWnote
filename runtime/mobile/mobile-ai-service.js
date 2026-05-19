@@ -2,37 +2,52 @@ const { requestUrl } = require("obsidian");
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
 
 const PROVIDER_PRESETS = {
-  deepseek: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", defaultModel: "deepseek-chat", keyUrl: "https://platform.deepseek.com/api_keys" },
-  qwen: { name: "Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode", defaultModel: "qwen-turbo", keyUrl: "https://dashscope.console.aliyun.com/apiKey" },
-  moonshot: { name: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.cn", defaultModel: "moonshot-v1-8k", keyUrl: "https://platform.moonshot.cn/console/api-keys" },
-  zhipu: { name: "Zhipu (GLM)", baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-4-flash", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
-  siliconflow: { name: "SiliconFlow", baseUrl: "https://api.siliconflow.cn", defaultModel: "deepseek-ai/DeepSeek-V3", keyUrl: "https://cloud.siliconflow.cn/account/ak" },
-  custom: { name: "Custom", baseUrl: "", defaultModel: "", keyUrl: "" },
+  deepseek: {
+    name: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    defaultModel: "deepseek-v4-flash",
+    keyUrl: "https://platform.deepseek.com/api_keys",
+    chatPath: "/chat/completions",
+    modelsPath: "/models",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+  },
+  qwen: { name: "Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode", defaultModel: "qwen-turbo", keyUrl: "https://dashscope.console.aliyun.com/apiKey", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
+  moonshot: { name: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.cn", defaultModel: "moonshot-v1-8k", keyUrl: "https://platform.moonshot.cn/console/api-keys", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
+  zhipu: { name: "Zhipu (GLM)", baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-4-flash", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", chatPath: "/v4/chat/completions", modelsPath: "/v4/models" },
+  siliconflow: { name: "SiliconFlow", baseUrl: "https://api.siliconflow.cn", defaultModel: "deepseek-ai/DeepSeek-V3", keyUrl: "https://cloud.siliconflow.cn/account/ak", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
+  custom: { name: "Custom", baseUrl: "", defaultModel: "", keyUrl: "", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
 };
 
 const CAPTURE_SYSTEM_PROMPT = [
-  "你是一个文字清理助手。你的唯一任务是去除口语中的语气词和填充词（如：嗯、啊、那个、就是、然后、对、哦、emmm、额 等），",
-  "让句子更简洁。",
-  "规则：",
-  "1. 只去除语气词和填充词",
-  "2. 不要改写、润色或美化原文",
-  "3. 不要添加任何新内容",
-  "4. 不要改变原文的意思和表达方式",
-  "5. 保留所有实质内容和原始用词",
-  "6. 保留所有 URL 原样不变",
-  "7. 直接返回清理后的文本，不要任何解释或前缀",
+  "你是一个语音转录清理助手。你的任务是把快速捕获的口语化输入整理成可以直接写入日记的清楚文字。",
+  "处理范围：",
+  "1. 删除语气词、填充词和口头禅，如：嗯、啊、那个、就是、然后、对、哦、emmm、额。",
+  "2. 删除明显的重复、自我修正和卡顿片段，如“他自己那自己他自己”“陪陪伴式”。",
+  "3. 修正上下文能确定的语音识别错字、同音错词和明显笔误，如“人社”应按语境修为“人设”。",
+  "4. 补充必要标点，调整断句；内容较长时可以分成 2-4 个自然段。",
+  "5. 保留原文的核心观点、事实、专有名词、数字、URL 和用户自己的表达倾向。",
+  "禁止：",
+  "1. 不要新增原文没有的观点、例子或结论。",
+  "2. 不要总结成标题、要点清单或读书笔记结构，除非原文就是这种结构。",
+  "3. 不要改成营销文、正式文章或过度润色的风格。",
+  "4. 不要删除有信息量的内容。",
+  "直接返回整理后的文本，不要任何解释、前缀或引号。",
 ].join("\n");
 
 const CAPTURE_SYSTEM_PROMPT_EN = [
-  "You are a text cleanup assistant. Your only task is to remove filler words from spoken text (such as um, uh, like, you know, etc.) and keep the sentence concise.",
-  "Rules:",
-  "1. Only remove filler words",
-  "2. Do not rewrite, polish, or beautify the text",
-  "3. Do not add new content",
-  "4. Keep original meaning and wording",
-  "5. Preserve all substantive content",
-  "6. Preserve all URLs exactly as-is",
-  "7. Return cleaned text only, no explanation",
+  "You are a voice-transcript cleanup assistant. Your task is to turn quick spoken captures into clear text that can be written directly into a daily note.",
+  "Allowed cleanup:",
+  "1. Remove filler words and verbal tics such as um, uh, like, you know, so, right.",
+  "2. Remove obvious repetitions, false starts, and stutters.",
+  "3. Fix speech-recognition mistakes, homophone errors, and obvious typos when the intended wording is clear from context.",
+  "4. Add necessary punctuation and sentence breaks; split long input into 2-4 natural paragraphs when helpful.",
+  "5. Preserve the user's core ideas, facts, proper nouns, numbers, URLs, and personal voice.",
+  "Do not:",
+  "1. Do not add ideas, examples, or conclusions that are not in the source.",
+  "2. Do not convert the capture into a summary, title, bullet list, or essay unless the source already has that structure.",
+  "3. Do not over-polish it into marketing or formal prose.",
+  "4. Do not remove substantive content.",
+  "Return only the cleaned text, with no explanation, prefix, or quotes.",
 ].join("\n");
 
 const URL_SUMMARY_PROMPT = [
@@ -112,8 +127,66 @@ function resolveAiConfig(mcSettings) {
   return { providerId, preset, baseUrl, model, apiKey };
 }
 
+function joinApiPath(baseUrl, path) {
+  const base = String(baseUrl || "").replace(/\/+$/, "");
+  const suffix = String(path || "").trim();
+  if (!base) return suffix;
+  if (!suffix) return base;
+  return `${base}/${suffix.replace(/^\/+/, "")}`;
+}
+
+function getChatCompletionsUrl(ai) {
+  const preset = ai && ai.preset ? ai.preset : {};
+  return joinApiPath(ai && ai.baseUrl, preset.chatPath || "/v1/chat/completions");
+}
+
+function getModelsUrl(ai) {
+  const preset = ai && ai.preset ? ai.preset : {};
+  return joinApiPath(ai && ai.baseUrl, preset.modelsPath || "/v1/models");
+}
+
+function resolveEffectiveCaptureSettings(settingsOrCapture) {
+  const source = settingsOrCapture && typeof settingsOrCapture === "object" ? settingsOrCapture : {};
+  const hasNestedCapture = source.mobileCapture && typeof source.mobileCapture === "object";
+  const capture = hasNestedCapture ? source.mobileCapture : source;
+  const out = { ...(capture || {}) };
+
+  const agent = hasNestedCapture && source.agentProvider && typeof source.agentProvider === "object"
+    ? source.agentProvider
+    : null;
+  const direct = agent && agent.direct && typeof agent.direct === "object" ? agent.direct : null;
+  const providerId = String(out.provider || (direct && direct.providerId) || "deepseek").trim();
+  out.provider = providerId;
+
+  if (!String(out.apiKey || "").trim() && direct && direct.apiKeys && typeof direct.apiKeys === "object") {
+    const keyForCaptureProvider = String(direct.apiKeys[providerId] || "").trim();
+    const keyForActiveProvider = String(direct.apiKeys[direct.providerId] || "").trim();
+    out.apiKey = keyForCaptureProvider || (direct.providerId === providerId ? keyForActiveProvider : "");
+  }
+
+  if (
+    providerId === "custom"
+    && !String(out.baseUrl || "").trim()
+    && direct
+    && String(direct.providerId || "").trim() === "custom"
+  ) {
+    out.baseUrl = String(direct.baseUrlOverride || "").trim();
+  }
+
+  if (
+    providerId === "custom"
+    && !String(out.model || "").trim()
+    && direct
+    && String(direct.providerId || "").trim() === "custom"
+  ) {
+    out.model = String(direct.model || "").trim();
+  }
+
+  return out;
+}
+
 function hasAiConfig(mcSettings) {
-  const ai = resolveAiConfig(mcSettings || {});
+  const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
   return Boolean(ai.baseUrl && ai.apiKey);
 }
 
@@ -137,7 +210,7 @@ async function requestAiCompletion(messages, mcSettings, options = {}) {
   }
 
   const response = await requestUrl({
-    url: `${ai.baseUrl}/v1/chat/completions`,
+    url: getChatCompletionsUrl(ai),
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -166,6 +239,41 @@ async function requestAiCompletion(messages, mcSettings, options = {}) {
     throw new Error(isZh(locale) ? "AI 返回内容为空" : "AI returned empty content");
   }
   return content;
+}
+
+async function listCaptureModels(mcSettings, options = {}) {
+  const locale = normalizeSupportedLocale(options.locale || "en");
+  const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
+  if (!ai.baseUrl || !ai.apiKey) {
+    throw new Error(isZh(locale)
+      ? "AI 服务未配置：缺少 Base URL 或 API Key"
+      : "AI is not configured: missing Base URL or API Key");
+  }
+
+  const response = await requestUrl({
+    url: getModelsUrl(ai),
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ai.apiKey}`,
+    },
+    throw: false,
+    timeout: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 30000,
+  });
+  if (response.status !== 200) {
+    const snippet = JSON.stringify(response.json || response.text).slice(0, 200);
+    if (isZh(locale)) throw new Error(`模型列表请求失败 (${response.status}): ${snippet}`);
+    throw new Error(`Model list request failed (${response.status}): ${snippet}`);
+  }
+  const data = response.json;
+  const items = data && Array.isArray(data.data) ? data.data : [];
+  const models = [];
+  for (const item of items) {
+    const id = item && typeof item.id === "string" ? item.id.trim() : "";
+    if (id) models.push({ id, label: id });
+  }
+  models.sort((a, b) => a.id.localeCompare(b.id));
+  return models;
 }
 
 async function cleanupCapture(text, mcSettings, options = {}) {
@@ -210,9 +318,13 @@ module.exports = {
   getUrlSummaryPrompt,
   getUrlFallbackPrompt,
   resolveAiConfig,
+  getChatCompletionsUrl,
+  getModelsUrl,
+  resolveEffectiveCaptureSettings,
   hasAiConfig,
   pickFirstText,
   requestAiCompletion,
+  listCaptureModels,
   cleanupCapture,
   summarizeTextWithAi,
   testConnection,

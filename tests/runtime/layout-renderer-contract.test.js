@@ -65,6 +65,12 @@ test("layout renderer should preserve public method surface", () => {
       "render",
       "renderHeader",
       "renderSidebar",
+      "saveHomeScrollPosition",
+      "bindHomeScrollTracking",
+      "unbindHomeScrollTracking",
+      "restoreHomeScrollPosition",
+      "renderHomeDashboard",
+      "renderConnectionStatus",
       "renderMain",
       "applyStatus",
     ].sort();

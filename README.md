@@ -6,35 +6,37 @@
 
 语言：**简体中文** | [English](#english)
 
-**FLOWnote 是一个让笔记真正"流动"起来的 Obsidian 插件——从随手捕获到产出成果，由内置 AI 工作流、可选 OpenCode 桥接模式，以及为知识管理量身定制的技能包，一起搭起这条流水线。**
+**FLOWnote 是一个面向 Obsidian 的 AI 笔记工作台：打开就是个人首页，随手捕获、每日计划、项目推进、知识资产统计、AI 对话和技能工作流都在同一个空间里完成。**
 
-> FLOWnote 默认可使用用户自行配置的 AI API Key。OpenCode 仍作为可选的桌面端桥接模式保留，适合已经习惯这套工作流的用户。
+> FLOWnote 默认使用用户自行配置的 AI API Key，在桌面端和移动端都可运行。OpenCode 仍作为可选的桌面端桥接模式保留，适合已经习惯旧工作流的用户。
 
-## 0.5.1 更新
+## 产品预览
 
-0.5.1 是一次发布健康度修复版本，主要针对 Obsidian 官方插件页的 CSS 检查结果做清理，不改变 0.5.0 的核心功能。
+<p align="center">
+  <img src="assets/screenshots/home-dashboard.png" width="100%" alt="FLOWnote 首页工作台">
+</p>
 
-- **CSS lint 清理**：移除了 `styles.css` 中的 `!important` 强覆盖，降低官方检查页面的样式告警。
-- **移动端样式整理**：合并重复的移动端根容器与浅色模式选择器，保留 0.5.0 的移动端浅色模式适配。
-- **发布校验**：重新构建 release 产物，并通过完整自动化测试套件。
+<p align="center">
+  <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
+</p>
 
-## 0.5.0 更新亮点
+## 0.5.2 更新亮点
 
-0.5.0 是一次大版本更新：FLOWnote 从「主要依赖 OpenCode 桥接」升级为「Obsidian 内置 AI 工作流 + 可选 OpenCode 桥接」的双模式架构。
+0.5.2 把 FLOWnote 从「AI 聊天侧栏 + 捕获工具」推进到「Obsidian 里的个人知识工作台」。这次合并了 0.5.1 的发布健康度修复，并加入全新的首页、iOS 快捷指令和一批移动端体验优化。
 
-- **新的默认运行方式**：新安装用户默认使用内置直连 API 模式；已有用户升级后会保留原来的 OpenCode 桥接模式，避免更新后工作流突然变化。
-- **首次安装/升级引导**：新增运行方式说明弹窗，解释内置 AI 模式与 OpenCode 桥接模式的差异，并提供设置入口。
-- **内置多工具 AI 工作流**：直连 API 模式现在具备 Obsidian 原生工具链能力，包括笔记读取、写入、搜索、每日笔记、任务、标签、反链、属性、文件移动、目录创建等。
-- **Skills 能力扩展**：支持导入完整的外部 skill 文件夹，不再只编辑单个 `SKILL.md`；技能管理页可以读取、编辑、删除、导入自定义 skills。
-- **第三方 API 型 skills 支持**：新增 `web_request` 工具，支持 POST、Authorization header、JSON body 和 `$SECRET` 占位符，可用于微信读书等官方 skills。
-- **权限策略优化**：新增严格询问、仅危险操作询问、全自动三种工具权限模式；全自动模式会显示风险提示。
-- **桌面与移动端体验统一**：移动端技能列表、模型选择器浅色模式、推荐卡片、AI Provider 路径等做了适配；桌面端也补齐了推荐卡片。
-- **聊天结果更可交互**：AI 回复中的 Obsidian 笔记路径现在会自动识别为可点击链接，点击即可打开对应笔记。
-- **OpenCode 桥接兼容性修复**：修复设置页切换桥接模式后自动跳回默认模式的问题，保留老用户依赖 OpenCode 的使用方式。
-- **设置项持久化修复**：修复服务商、模型等选择后回跳的问题，并补强设置组件取值逻辑。
-- **界面细节修复**：修复模型选择器外框、移动端浅色模式样式、插件 logo、消息复制按钮、滚动导航等一批 UI 细节。
-- **发布与隐私披露强化**：补充 README 隐私、联网、Vault 访问、剪贴板、本地环境读取说明；OpenCode 子进程只转发白名单环境变量。
-- **稳定性与测试覆盖**：补充直连 Agent、权限策略、skills 导入、模板管理、路径链接、移动端入口等测试；当前自动化测试覆盖 757 个用例。
+- **全新首页 Dashboard**：打开 FLOWnote 即可看到今日状态、今日日记、今日聚焦、待办进度、快捷动作、最近活动、项目进展、知识资产统计和记录热力图，不再从笔记列表里慢慢找入口。
+- **今日日记深度联动**：首页会读取真实每日笔记内容，展示今日待办并支持直接勾选；勾选后会同步修改原始 Markdown 复选框，并保持页面滚动位置。
+- **项目总览升级**：首页会聚合所有项目，展示状态、优先级、分类、待办/完成数量、截止时间和进度条；宽屏可并排浏览，小窗口和移动端会自动收敛为单列。
+- **记录热力图**：基于每日笔记统计捕获/记录数量，提供年度热力图和年份切换，帮助用户看到自己的记录节奏。
+- **快捷动作入口**：首页顶部提供规划今天、快速捕获、每日回顾、新建项目、打开主页文档等高频动作，桌面端和移动端都做了空间适配。
+- **iOS 快捷指令支持**：设置页新增 FLOWnote 快速捕获快捷指令入口，提供 iCloud 快捷指令安装链接，并自动显示当前笔记库名称，用户复制到快捷指令的「文本」栏即可使用。
+- **移动端快速捕获优化**：快速捕获面板重做为更适合手机的输入体验，修复键盘弹起后输入区被遮挡或漂移的问题，并继续支持 AI 文本清理、链接解析和降级保留原文。
+- **移动端聊天体验修复**：恢复聊天页快速启动卡片、设置按钮位置、浅色模式气泡和顶部/底部遮挡适配，避免首页和聊天页互相干扰。
+- **内置 AI 工作流继续完善**：新安装用户默认使用内置直连 API 模式；直连模式具备 Obsidian 原生工具链能力，包括读取、写入、搜索、每日笔记、任务、标签、反链、属性、文件移动和目录创建等。
+- **Skills 与第三方 API 能力**：支持导入完整外部 skill 文件夹；`web_request` 支持 POST、Authorization header、JSON body 和 `$SECRET` 占位符，可用于微信读书等 API 型技能。
+- **设置与 Provider 体验优化**：移动端捕获模型支持从服务商接口刷新模型列表；修复服务商、模型等设置项刷新后回跳的问题；OpenCode 桥接模式仍保留给旧用户。
+- **界面与发布健康度清理**：移除 `styles.css` 中的 `!important` 强覆盖，整理移动端浅色模式、设置页折叠箭头、模型选择器、logo、复制按钮、滚动导航等样式细节。
+- **隐私、稳定性与测试覆盖**：补充 README 隐私、联网、Vault 访问、剪贴板、本地环境读取说明；OpenCode 子进程只转发白名单环境变量；自动化测试覆盖首页、移动端、快捷指令、直连 Agent、权限策略、skills 导入、模板管理和路径链接等核心路径。
 
 ## 这套系统在解决什么问题
 
@@ -79,6 +81,14 @@
 
 ## 核心能力
 
+### 首页工作台
+
+- 今日状态、今日日记创建状态和今日聚焦
+- 今日待办读取与原文复选框同步
+- 快捷动作：规划今天、快速捕获、每日回顾、新建项目、打开主页文档
+- 最近活动、所有项目、知识资产统计和年度记录热力图
+- 桌面端、小窗口和移动端响应式布局
+
 ### 桌面端 AI 工作区
 
 - 会话侧栏与历史持久化
@@ -98,6 +108,7 @@
 ### 移动端快速捕获
 
 - 一键捕获到每日笔记
+- iOS 快捷指令快速捕获入口，可通过系统快捷指令把文本直接送入 FLOWnote
 - 可选 AI 文本清理（口语转记录）
 - 链接解析与降级链路：
   - 解析服务三选一：`TianAPI` / `ShowAPI` / `Gugudata`
@@ -105,6 +116,10 @@
   - 无解析服务且无 AI Key：保留纯文本
 - 所有方案都保留原始 URL
 - 已包含 iOS 键盘遮挡兜底
+
+<p align="center">
+  <img src="assets/screenshots/ios-shortcut-setup.png" width="360" alt="FLOWnote iOS 快捷指令配置">
+</p>
 
 ## 内置技能清单
 
@@ -257,27 +272,37 @@ FLOWnote 采用 MIT 许可证。
 
 Language: [简体中文](#flownote) | **English**
 
-**FLOWnote is an Obsidian plugin that makes your notes flow — from raw capture to finished work — powered by built-in AI workflows, an optional OpenCode bridge, and a skill pack purpose-built for knowledge management.**
+**FLOWnote is an AI note workspace for Obsidian: a dashboard home, quick capture, daily planning, project progress, knowledge metrics, AI chat, and skill workflows in one place.**
 
-> FLOWnote works with user-configured AI API keys by default. OpenCode remains available as an optional desktop bridge for users who prefer that workflow.
+> FLOWnote works with user-configured AI API keys by default on desktop and mobile. OpenCode remains available as an optional desktop bridge for users who prefer the legacy workflow.
 
-## What's New in 0.5.0
+## Product Preview
 
-0.5.0 is a major release that moves FLOWnote from an OpenCode-first bridge into a dual-mode architecture: built-in Obsidian-native AI workflows plus an optional OpenCode bridge.
+<p align="center">
+  <img src="assets/screenshots/home-dashboard.png" width="100%" alt="FLOWnote dashboard home">
+</p>
 
-- **New default runtime**: New installs use built-in direct API mode by default. Existing users keep their previous OpenCode bridge mode after upgrading.
-- **Install and upgrade guidance**: A new startup notice explains the difference between built-in AI mode and OpenCode bridge mode, with a direct path into settings.
-- **Built-in tool-capable AI workflow**: Direct API mode now includes Obsidian-native tools for reading, writing, searching, daily notes, tasks, tags, backlinks, properties, file moves, and folder creation.
-- **Expanded skills system**: You can import complete external skill folders, not only edit a single `SKILL.md`. The skill management settings can list, edit, delete, and import custom skills.
-- **API-backed skill support**: Added `web_request` with POST, Authorization headers, JSON bodies, and `$SECRET` placeholders for skills such as WeRead.
-- **Permission policy controls**: Added strict ask, dangerous-only ask, and full-auto modes. Full-auto mode includes an explicit risk warning.
-- **Desktop and mobile parity**: Improved mobile skill visibility, light-mode model selector styling, recommendation cards, and built-in provider routing. Desktop now also gets recommendation cards.
-- **Clickable note paths**: Obsidian vault paths in AI replies are detected and rendered as clickable links.
-- **OpenCode bridge compatibility**: Fixed settings mode persistence so the OpenCode bridge no longer jumps back to default mode.
-- **Settings persistence fixes**: Provider and model selections now persist correctly across settings refreshes.
-- **UI polish**: Fixed model selector outlines, mobile light mode colors, plugin logo, copy buttons, scroll navigation, and related interface details.
-- **Release and privacy hardening**: README disclosures now cover networking, vault access, clipboard use, and local environment access. Optional OpenCode child processes receive only allowlisted environment values.
-- **Stability and coverage**: Added tests for the direct agent runtime, permission policy, skill import, template management, vault path links, and mobile entry points. The current automated suite covers 757 tests.
+<p align="center">
+  <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
+</p>
+
+## What's New in 0.5.2
+
+0.5.2 turns FLOWnote from an AI chat sidebar plus capture tool into a personal knowledge workspace inside Obsidian. It includes the 0.5.1 release-health fixes, plus a new dashboard home, iOS Shortcuts support, and broad mobile polish.
+
+- **New dashboard home**: Opening FLOWnote now shows today's state, daily note, focus, task progress, quick actions, recent activity, project progress, knowledge metrics, and an activity heatmap.
+- **Daily note integration**: The home view reads real daily-note content, displays today's tasks, and lets users toggle checkboxes while syncing the original Markdown and preserving scroll position.
+- **Project overview**: FLOWnote aggregates all projects with status, priority, category, open/done tasks, due dates, and progress bars. Wide screens can show project cards side-by-side; narrow and mobile layouts collapse cleanly.
+- **Activity heatmap**: Daily-note capture counts are rendered as a yearly heatmap with year switching, making the user's recording rhythm visible.
+- **Quick actions**: Plan today, quick capture, daily review, new project, and open home document actions are available from the home header with responsive desktop/mobile layouts.
+- **iOS Shortcuts support**: Settings now include a FLOWnote Quick Capture shortcut link and the current vault name. Users install the iCloud shortcut, paste the vault name into the shortcut's Text action, and can capture directly from iOS.
+- **Mobile capture redesign**: The quick-capture panel now fits mobile screens better, avoids keyboard overlap, and still supports AI cleanup, URL resolving, fallback behavior, and original-text preservation.
+- **Mobile chat fixes**: Restored quick-start cards, corrected settings-button placement, improved light-mode bubbles, and fixed top/bottom safe-area coverage so home and chat no longer interfere with each other.
+- **Built-in AI workflows**: New installs default to direct API mode. The direct runtime includes Obsidian-native tools for reading, writing, searching, daily notes, tasks, tags, backlinks, properties, file moves, and folder creation.
+- **Skills and API-backed workflows**: Complete external skill folders can be imported. `web_request` supports POST, Authorization headers, JSON bodies, and `$SECRET` placeholders for API-driven skills such as WeRead.
+- **Provider and settings polish**: Mobile capture models can be refreshed from provider model endpoints; provider/model settings persist across refreshes; the optional OpenCode bridge remains available for legacy users.
+- **UI and release health**: Removed `!important` CSS overrides, refined mobile light-mode styling, settings expand arrows, model selectors, logo display, copy buttons, and scroll behavior.
+- **Privacy, stability, and tests**: README disclosures now cover networking, vault access, clipboard use, and local environment access. Optional OpenCode child processes receive only allowlisted environment values. Tests now cover the home dashboard, mobile flows, Shortcuts URLs, direct agent runtime, permission policy, skill import, template management, and vault path links.
 
 ## Why FLOWnote
 
@@ -321,6 +346,14 @@ The author publishes a six-episode tutorial series on **FLOW 笔记法** at:
 
 ## Core Capabilities
 
+### Dashboard Home
+
+- Today status, daily-note creation state, and today's focus
+- Daily-note task reading with checkbox sync back to Markdown
+- Quick actions for planning, capture, review, project creation, and home-document access
+- Recent activity, all projects, knowledge metrics, and yearly activity heatmap
+- Responsive desktop, narrow-pane, and mobile layouts
+
 ### Desktop AI Workspace
 
 - Session sidebar with persistent history
@@ -340,6 +373,7 @@ The author publishes a six-episode tutorial series on **FLOW 笔记法** at:
 ### Mobile Quick Capture
 
 - One-tap capture modal that writes into today's daily note
+- iOS Shortcuts entrypoint for sending text directly into FLOWnote
 - Optional AI cleanup for spoken or raw text
 - URL enrichment with graceful fallback:
   - Pick one resolver: `TianAPI` / `ShowAPI` / `Gugudata`
@@ -347,6 +381,10 @@ The author publishes a six-episode tutorial series on **FLOW 笔记法** at:
   - If neither is configured: keep plain text
 - The original URL is preserved in the output
 - Includes iOS keyboard avoidance fallback for focus visibility
+
+<p align="center">
+  <img src="assets/screenshots/ios-shortcut-setup.png" width="360" alt="FLOWnote iOS Shortcut setup">
+</p>
 
 ## Built-in Skill Pack
 

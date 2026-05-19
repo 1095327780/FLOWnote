@@ -1,4 +1,4 @@
-const { Notice, setIcon } = require("obsidian");
+const { Notice, Platform = {}, setIcon } = require("obsidian");
 const { tr } = require("./shared-utils");
 const { summarizeActiveAgent } = require("./agent-summary");
 
@@ -233,17 +233,8 @@ async function refreshConnectionStatusPopover(view, force = true) {
   renderConnectionStatusPopoverContent(view, result);
 }
 
-function renderMain(main) {
-  main.empty();
-  if (typeof this.closeLinkedContextFilePicker === "function") {
-    this.closeLinkedContextFilePicker();
-  }
-
-  const toolbar = main.createDiv({ cls: "oc-toolbar" });
-  const toolbarLeft = toolbar.createDiv({ cls: "oc-toolbar-left" });
-  const toolbarRight = toolbar.createDiv({ cls: "oc-toolbar-right" });
-
-  const connectionIndicator = toolbarLeft.createDiv({ cls: "oc-connection-indicator" });
+function renderConnectionStatus(container) {
+  const connectionIndicator = container.createDiv({ cls: "oc-connection-indicator" });
   this.elements.statusDot = connectionIndicator.createDiv({ cls: "oc-connection-dot warn" });
   this.elements.statusDot.setAttr("role", "button");
   this.elements.statusDot.setAttr("tabindex", "0");
@@ -289,9 +280,50 @@ function renderMain(main) {
       closeConnectionStatusPopover(this);
     });
   }
+}
 
-  const settingsBtn = this.buildIconButton(toolbarRight, "settings", tr(this, "view.settings", "Settings"), () => this.openSettings());
-  settingsBtn.addClass("oc-toolbar-btn");
+function renderMain(main) {
+  main.empty();
+  this.activePanel = this.activePanel === "chat" ? "chat" : "home";
+  if (typeof this.closeLinkedContextFilePicker === "function") {
+    this.closeLinkedContextFilePicker();
+  }
+
+  const toolbar = main.createDiv({ cls: "oc-toolbar" });
+  const toolbarLeft = toolbar.createDiv({ cls: "oc-toolbar-left" });
+  toolbar.createDiv({ cls: "oc-toolbar-right" });
+
+  if (Platform && Platform.isMobile) {
+    this.renderConnectionStatus(toolbarLeft);
+  } else {
+    toolbar.addClass("oc-toolbar-desktop-hidden");
+  }
+
+  if (this.activePanel !== "chat") {
+    this.unbindMessagesScrollTracking();
+    this.elements.messages = null;
+    this.elements.inlineQuestionHost = null;
+    this.elements.currentSessionLabel = null;
+    this.elements.composer = null;
+    this.elements.input = null;
+    this.elements.inputContainer = null;
+    this.elements.inputWrapper = null;
+    this.elements.contextRow = null;
+    this.elements.fileIndicator = null;
+    this.elements.selectionIndicator = null;
+    this.elements.attachFileBtn = null;
+    this.elements.modelSelect = null;
+    this.elements.modelSelectText = null;
+    this.elements.cancelBtn = null;
+    this.elements.sendBtn = null;
+    const homeWrapper = main.createDiv({ cls: "oc-home-wrapper" });
+    this.renderHomeDashboard(homeWrapper);
+    return;
+  }
+
+  if (typeof this.unbindHomeScrollTracking === "function") {
+    this.unbindHomeScrollTracking();
+  }
 
   const messagesWrapper = main.createDiv({ cls: "oc-messages-wrapper" });
   this.elements.messages = messagesWrapper.createDiv({ cls: "oc-messages oc-messages-focusable", attr: { tabindex: "0" } });
@@ -543,6 +575,7 @@ function applyStatus(result) {
 }
 
 const mainComposerMethods = {
+  renderConnectionStatus,
   renderMain,
   applyStatus,
 };

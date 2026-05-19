@@ -1,4 +1,4 @@
-const { PluginSettingTab, Setting, Notice } = require("obsidian");
+const { PluginSettingTab, Setting, Notice, Platform = {} } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const { normalizeUiLanguage } = require("../i18n-locale-utils");
 const { bindDropdownChange } = require("../settings/component-value-utils");
@@ -17,11 +17,69 @@ const {
 const {
   PROVIDER_PRESETS,
   getAiProviderDisplayName,
+  listCaptureModels,
   testConnection,
 } = require("./mobile-ai-service");
 const {
   renderAgentProviderSection,
 } = require("../settings/agent-provider-section-methods");
+const { buildShortcutUrls } = require("./shortcut-url-utils");
+
+const FLOWNOTE_QUICK_CAPTURE_SHORTCUT_URL = "https://www.icloud.com/shortcuts/12b0291f16ff46cfa0280e18b0859118";
+
+function isIPhoneLike() {
+  const ua = typeof navigator !== "undefined" ? String(navigator.userAgent || "") : "";
+  return Boolean(
+    (Platform && Platform.isMobile)
+    || (Platform && (Platform.isIosApp || Platform.isIos))
+    || /iPhone|iPad|iPod/i.test(ua),
+  );
+}
+
+async function copyShortcutText(text) {
+  const value = String(text || "");
+  if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  if (typeof document !== "undefined") {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "readonly");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand && document.execCommand("copy");
+    textarea.remove();
+    return Boolean(ok);
+  }
+  return false;
+}
+
+function getCaptureModelOptions(plugin, providerId, preset, currentModel) {
+  const fetchedRoot = plugin.__flownoteMobileCaptureFetchedModels || {};
+  const fetched = fetchedRoot[providerId];
+  const builtin = Array.isArray(preset.models) ? preset.models : [];
+  const ids = [];
+  for (const id of builtin) {
+    const text = String(id || "").trim();
+    if (text && !ids.includes(text)) ids.push(text);
+  }
+  if (preset.defaultModel && !ids.includes(preset.defaultModel)) ids.unshift(preset.defaultModel);
+  if (fetched && Array.isArray(fetched.models)) {
+    for (const item of fetched.models) {
+      const text = String((item && item.id) || "").trim();
+      if (text && !ids.includes(text)) ids.push(text);
+    }
+  }
+  const current = String(currentModel || "").trim();
+  if (current && !ids.includes(current)) ids.unshift(current);
+  return {
+    models: ids.map((id) => ({ id, label: id })),
+    fetchedAt: fetched && fetched.fetchedAt ? fetched.fetchedAt : 0,
+  };
+}
 
 class MobileSettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
@@ -39,6 +97,10 @@ class MobileSettingsTab extends PluginSettingTab {
 
     if (typeof this.setHeading === "function") this.setHeading();
     containerEl.createEl("p", { text: t("settings.mobile.intro", "Configure AI service and daily note path for mobile quick capture.") });
+
+    if (isIPhoneLike()) {
+      this.renderShortcutSection(containerEl, t);
+    }
 
     new Setting(containerEl)
       .setName(t("settings.language.name", "UI Language"))
@@ -124,13 +186,58 @@ class MobileSettingsTab extends PluginSettingTab {
       });
 
     const effectiveModel = mc.model || preset.defaultModel || "(Not set)";
+    const captureModelState = getCaptureModelOptions(this.plugin, mc.provider, preset, mc.model || preset.defaultModel);
+    const fetchedAgeMin = captureModelState.fetchedAt
+      ? Math.round((Date.now() - captureModelState.fetchedAt) / 60000)
+      : null;
     new Setting(containerEl)
       .setName(t("mobile.settings.modelName", "Model (optional)"))
-      .setDesc(t("mobile.settings.modelDesc", "Leave empty to use preset. Current: {value}", { value: effectiveModel }))
-      .addText((text) => {
-        text.setPlaceholder(preset.defaultModel || "model-name").setValue(mc.model).onChange(async (v) => {
-          mc.model = v.trim();
+      .setDesc(
+        fetchedAgeMin === null
+          ? t("mobile.settings.modelDesc", "Leave empty to use preset. Current: {value}", { value: effectiveModel })
+          : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin }),
+      )
+      .addDropdown((dropdown) => {
+        for (const model of captureModelState.models) {
+          dropdown.addOption(model.id, model.label);
+        }
+        dropdown.setValue(mc.model || preset.defaultModel || "");
+        bindDropdownChange(dropdown, async (modelId) => {
+          mc.model = String(modelId || "").trim();
           await this.plugin.saveSettings();
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText(t("settings.agent.modelRefresh", "刷新"));
+        button.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /models 接口拉取最新模型列表（需要已填 API Key）。"));
+        button.onClick(async () => {
+          button.setDisabled(true);
+          const originalText = button.buttonEl.textContent;
+          button.setButtonText(t("settings.agent.modelRefreshLoading", "拉取中…"));
+          try {
+            if (!String(mc.apiKey || "").trim()) {
+              throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
+            }
+            const models = await listCaptureModels(mc, { locale });
+            if (!this.plugin.__flownoteMobileCaptureFetchedModels) {
+              this.plugin.__flownoteMobileCaptureFetchedModels = {};
+            }
+            this.plugin.__flownoteMobileCaptureFetchedModels[mc.provider] = {
+              models,
+              fetchedAt: Date.now(),
+            };
+            if (!mc.model && models.length && models[0].id) {
+              mc.model = models[0].id;
+              await this.plugin.saveSettings();
+            }
+            new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: models.length }));
+            this.display();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
+            button.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
+            button.setDisabled(false);
+          }
         });
       });
 
@@ -287,6 +394,60 @@ class MobileSettingsTab extends PluginSettingTab {
           }
         });
       });
+  }
+
+  renderShortcutSection(containerEl, t) {
+    const vaultName = buildShortcutUrls(this.plugin).vaultName || "";
+    const wrap = containerEl.createDiv({ cls: "oc-settings-section" });
+    const heading = wrap.createDiv({ cls: "oc-settings-section-heading" });
+    heading.createEl("h3", { text: t("mobile.shortcuts.heading", "快捷指令") });
+    const group = wrap.createDiv({ cls: "oc-settings-group" });
+
+    new Setting(group)
+      .setName(t("mobile.shortcuts.installName", "安装 FLOWnote 快速捕获"))
+      .setDesc(t("mobile.shortcuts.installDesc", "打开共享快捷指令后点「添加快捷指令」，保存到本机即可。"))
+      .addButton((button) => {
+        button.setButtonText(t("mobile.shortcuts.openShortcut", "打开链接"));
+        button.onClick(() => {
+          window.open(FLOWNOTE_QUICK_CAPTURE_SHORTCUT_URL, "_blank");
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText(t("mobile.shortcuts.copyShortcutLink", "复制链接"));
+        button.onClick(async () => {
+          const ok = await copyShortcutText(FLOWNOTE_QUICK_CAPTURE_SHORTCUT_URL);
+          new Notice(ok
+            ? t("mobile.shortcuts.copied", "已复制快捷指令 URL")
+            : t("mobile.shortcuts.copyFailed", "复制失败，请手动长按复制。"));
+        });
+      });
+
+    const vaultCopyText = vaultName || t("mobile.shortcuts.vaultUnknown", "请填写你的 Obsidian 笔记库名称");
+    new Setting(group)
+      .setName(t("mobile.shortcuts.vaultNameTitle", "当前笔记库名称"))
+      .setDesc(t("mobile.shortcuts.vaultNameDesc", "在快捷指令顶部「文本」一栏填入这个名称，用来生成 obsidian:// 链接。"))
+      .addText((text) => {
+        text.setValue(vaultCopyText);
+        text.inputEl.readOnly = true;
+        text.inputEl.addClass("oc-shortcut-vault-input");
+      })
+      .addButton((button) => {
+        button.setButtonText(t("mobile.shortcuts.copyVaultName", "复制"));
+        button.onClick(async () => {
+          const ok = await copyShortcutText(vaultCopyText);
+          new Notice(ok
+            ? t("mobile.shortcuts.vaultCopied", "已复制笔记库名称")
+            : t("mobile.shortcuts.copyFailed", "复制失败，请手动长按复制。"));
+        });
+      });
+
+    const hint = group.createDiv({ cls: "oc-shortcut-simple-hint" });
+    hint.createSpan({
+      text: t(
+        "mobile.shortcuts.simpleHint",
+        "使用方式：安装上面的快捷指令后，把「当前笔记库名称」复制到快捷指令最上方的「文本」操作里；之后运行快捷指令即可快速捕获并提交到 FLOWnote。",
+      ),
+    });
   }
 }
 

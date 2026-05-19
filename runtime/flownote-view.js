@@ -32,6 +32,7 @@ class FLOWnoteAssistantView extends ItemView {
     this.root = null;
     this.elements = {};
     this.currentAbort = null;
+    this.activePanel = "home";
     this.selectedModel = "";
     this.isSidebarCollapsed = false;
     this.questionAnswerStates = new Map();
@@ -50,6 +51,12 @@ class FLOWnoteAssistantView extends ItemView {
     this.ignoreMessageScrollEventsUntil = 0;
     this.forceBottomUntil = 0;
     this.lastManualScrollIntentAt = 0;
+    this.homeScrollState = { top: 0, left: 0, statsLeft: 0 };
+    this.homeScrollEl = null;
+    this.homeScrollHandler = null;
+    this.homeStatsScrollEl = null;
+    this.homeStatsScrollHandler = null;
+    this.pendingHomeScrollRaf = 0;
     this.linkedContextFiles = [];
     this.patchDiffCache = new Map();
     this.patchDiffInflight = new Map();
@@ -75,9 +82,15 @@ class FLOWnoteAssistantView extends ItemView {
   }
 
   onClose() {
+    if (typeof this.saveHomeScrollPosition === "function") {
+      this.saveHomeScrollPosition();
+    }
     this.clearInlineQuestionWidget(true);
     if (typeof this.closeLinkedContextFilePicker === "function") {
       this.closeLinkedContextFilePicker();
+    }
+    if (typeof this.unbindHomeScrollTracking === "function") {
+      this.unbindHomeScrollTracking();
     }
     this.unbindMessagesScrollTracking();
     this.forceBottomUntil = 0;

@@ -4,7 +4,14 @@ const { setRuntimeLocale } = require("../runtime-locale-state");
 const { normalizeMobileSettings } = require("./mobile-settings-utils");
 const { CaptureModal } = require("./capture-modal");
 const { MobileSettingsTab } = require("./mobile-settings-tab");
+const { registerShortcutProtocolHandlers } = require("./shortcut-protocol");
 const FLOWNOTE_ICON_ID = "flownote-journal-glow";
+const MOBILE_COMMAND_ICONS = Object.freeze({
+  quickCapture: "sparkles",
+  openAssistant: "message-square",
+  sendSelectedText: "arrow-up",
+  newSession: "plus",
+});
 
 // Read the embedded bundled-skills index — we use it as the last-ditch
 // fallback when the vault-side scan finds nothing (e.g. a fresh install
@@ -168,6 +175,8 @@ const mobileCaptureMethodsMixin = {
     // bootstrap) fails. Each callback lazy-checks whether the heavier
     // surface is ready and falls back gracefully.
     try {
+      registerShortcutProtocolHandlers(this);
+
       // Entry 1: quick capture into today's daily note.
       this.addRibbonIcon(
         FLOWNOTE_ICON_ID,
@@ -177,19 +186,21 @@ const mobileCaptureMethodsMixin = {
       this.addCommand({
         id: "mobile-quick-capture",
         name: t("commands.mobileQuickCapture", "快速捕获想法"),
+        icon: MOBILE_COMMAND_ICONS.quickCapture,
         callback: () => { this.openCaptureModal(); },
       });
 
       // Entry 2: full FLOWnote assistant (chat view). Distinct icon +
       // label so users see two clearly separate options in the more menu.
       this.addRibbonIcon(
-        "messages-square",
+        MOBILE_COMMAND_ICONS.openAssistant,
         t("commands.openMobileAssistant", "FLOWnote 助手"),
         () => { void this.activateMobileAssistantView(); },
       );
       this.addCommand({
         id: "flownote-open-assistant",
         name: t("commands.openMobileAssistant", "FLOWnote 助手"),
+        icon: MOBILE_COMMAND_ICONS.openAssistant,
         callback: () => { void this.activateMobileAssistantView(); },
       });
     } catch (e) {
@@ -281,6 +292,7 @@ const mobileCaptureMethodsMixin = {
     this.addCommand({
       id: "flownote-send-selected-text",
       name: this.t("commands.sendSelectedText"),
+      icon: MOBILE_COMMAND_ICONS.sendSelectedText,
       editorCallback: async (editor) => {
         const text = editor.getSelection().trim();
         if (!text) { new Notice(this.t("notices.pickTextFirst")); return; }
@@ -293,10 +305,12 @@ const mobileCaptureMethodsMixin = {
     this.addCommand({
       id: "flownote-new-session",
       name: this.t("commands.newSession"),
+      icon: MOBILE_COMMAND_ICONS.newSession,
       callback: async () => {
         const session = await this.createSession("");
         this.sessionStore.setActiveSession(session.id);
         await this.persistState();
+        await this.activateView();
         const view = this.getAssistantView();
         if (view) view.render();
       },
@@ -350,8 +364,8 @@ const mobileCaptureMethodsMixin = {
   /**
    * Open the capture modal.
    */
-  openCaptureModal() {
-    new CaptureModal(this.app, this).open();
+  openCaptureModal(options = {}) {
+    new CaptureModal(this.app, this, options).open();
   },
 
   /**

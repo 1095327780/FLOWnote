@@ -455,12 +455,14 @@ class FLOWnoteAssistantPlugin extends Plugin {
       this.addCommand({
         id: "open-flownote",
         name: this.t("commands.open"),
+        icon: FLOWNOTE_ICON_ID,
         callback: () => this.activateView(),
       });
 
       this.addCommand({
         id: "flownote-send-selected-text",
         name: this.t("commands.sendSelectedText"),
+        icon: "arrow-up",
         editorCallback: async (editor) => {
           const text = editor.getSelection().trim();
           if (!text) return new Notice(this.t("notices.pickTextFirst"));
@@ -474,6 +476,7 @@ class FLOWnoteAssistantPlugin extends Plugin {
       this.addCommand({
         id: "flownote-new-session",
         name: this.t("commands.newSession"),
+        icon: "plus",
         callback: async () => {
           const session = await this.createSession("");
           this.sessionStore.setActiveSession(session.id);

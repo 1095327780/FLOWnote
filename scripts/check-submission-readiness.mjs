@@ -15,6 +15,10 @@ async function readJson(relativePath) {
   return JSON.parse(await fs.readFile(full, "utf8"));
 }
 
+async function readText(relativePath) {
+  return fs.readFile(path.join(ROOT, relativePath), "utf8");
+}
+
 async function exists(relativePath) {
   try {
     await fs.access(path.join(ROOT, relativePath));
@@ -109,6 +113,34 @@ async function main() {
     );
   } catch (error) {
     errors.push(`无法读取 release/main.js: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const releaseWorkflow = await readText(path.join(".github", "workflows", "release.yml"));
+    assert(
+      /tag_version=.*GITHUB_REF_NAME[\s\S]*manifest_version=.*manifest\.json[\s\S]*tag_version[\s\S]*manifest_version/.test(releaseWorkflow),
+      "release workflow 未校验 tag 与 manifest.json 版本一致",
+      errors,
+    );
+    assert(
+      /npm run release:check/.test(releaseWorkflow),
+      "release workflow 未在上传前运行 npm run release:check",
+      errors,
+    );
+    assert(
+      /cp\s+release\/main\.js\s+release\/manifest\.json\s+release\/styles\.css\s+artifacts\//.test(releaseWorkflow),
+      "release workflow 未把 release 三件套复制到 artifacts/",
+      errors,
+    );
+    for (const asset of ["artifacts/main.js", "artifacts/manifest.json", "artifacts/styles.css"]) {
+      assert(
+        releaseWorkflow.includes(asset),
+        `release workflow 未上传 ${asset}`,
+        errors,
+      );
+    }
+  } catch (error) {
+    errors.push(`无法检查 release workflow: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   if (errors.length) {

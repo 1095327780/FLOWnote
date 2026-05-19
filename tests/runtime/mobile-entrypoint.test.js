@@ -13,10 +13,20 @@ function loadMobilePluginFixture() {
       this._commands = [];
       this._tabs = [];
       this._ribbons = [];
+      this._views = [];
+      this._protocols = [];
     }
 
     addRibbonIcon(icon, title, callback) {
       this._ribbons.push({ icon, title, callback });
+    }
+
+    registerView(type, factory) {
+      this._views.push({ type, factory });
+    }
+
+    registerObsidianProtocolHandler(action, handler) {
+      this._protocols.push({ action, handler });
     }
 
     addCommand(command) {
@@ -170,9 +180,82 @@ test("mobile onload should use mixin entrypoint and register mobile surfaces", a
     // settings tab (MobileSettingsTab) stay alive — that's the contract
     // mobile users depend on after the desktop unification.
     assert.equal(plugin._commands.some((cmd) => cmd && cmd.id === "mobile-quick-capture"), true);
+    const quickCaptureCommand = plugin._commands.find((cmd) => cmd && cmd.id === "mobile-quick-capture");
+    const assistantCommand = plugin._commands.find((cmd) => cmd && cmd.id === "flownote-open-assistant");
+    assert.equal(quickCaptureCommand.icon, "sparkles");
+    assert.equal(assistantCommand.icon, "message-square");
+    assert.equal(typeof assistantCommand.callback, "function");
+    assert.deepEqual(plugin._protocols.map((entry) => entry.action).sort(), [
+      "flownote-capture",
+      "flownote-chat",
+      "flownote-new-session",
+      "flownote-open",
+    ]);
     assert.equal(plugin._ribbons.length >= 1, true);
     assert.equal(plugin._tabs.length, 1, "fallback settings tab must register when Stage 2 fails");
     assert.equal(fixture.noticeMessages.length, 0);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("mobile full runtime commands should expose toolbar icons and open chat after new session", async () => {
+  const fixture = loadMobilePluginFixture();
+  try {
+    let activateViewCalls = 0;
+    let renderCalls = 0;
+    let activeSessionId = "";
+    const app = {
+      vault: {
+        adapter: { basePath: "/tmp/vault" },
+        configDir: ".obsidian",
+      },
+      workspace: {
+        detachLeavesOfType() {},
+      },
+    };
+    const manifest = {
+      id: "flownote",
+      dir: process.cwd(),
+      version: "0.0.0-test",
+    };
+
+    const plugin = new fixture.PluginClass(app, manifest);
+    await plugin.onload();
+    plugin.settings = { skillsDir: "skills", uiLanguage: "zh-CN" };
+    plugin.ensureRuntimeModules = () => ({
+      migrateSkillDir: async () => null,
+      SessionStore: class {
+        setActiveSession(id) {
+          activeSessionId = id;
+        }
+      },
+      FLOWnoteAssistantView: class {
+        constructor() {}
+      },
+      FLOWnoteSettingsTab: class {
+        constructor() {}
+      },
+    });
+    plugin.getEffectiveLocale = () => "zh-CN";
+    plugin.getViewType = () => "flownote-view";
+    plugin.createSession = async () => ({ id: "session-1" });
+    plugin.persistState = async () => {};
+    plugin.activateView = async () => { activateViewCalls += 1; };
+    plugin.getAssistantView = () => ({ render: () => { renderCalls += 1; } });
+
+    await plugin.bootstrapMobileFullRuntime();
+
+    const sendSelectedCommand = plugin._commands.find((cmd) => cmd && cmd.id === "flownote-send-selected-text");
+    const newSessionCommand = plugin._commands.find((cmd) => cmd && cmd.id === "flownote-new-session");
+    assert.equal(sendSelectedCommand.icon, "arrow-up");
+    assert.equal(newSessionCommand.icon, "plus");
+
+    await newSessionCommand.callback();
+
+    assert.equal(activeSessionId, "session-1");
+    assert.equal(activateViewCalls, 1);
+    assert.equal(renderCalls, 1);
   } finally {
     fixture.restore();
   }
