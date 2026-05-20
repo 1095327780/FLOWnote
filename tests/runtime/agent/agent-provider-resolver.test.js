@@ -39,7 +39,7 @@ test("resolveAgentProvider builds the right Provider for each preset", () => {
     { id: "anthropic-official", protocol: "anthropic-messages" },
     { id: "zhipu-glm",         protocol: "anthropic-messages" },
     { id: "minimax",           protocol: "anthropic-messages" },
-    { id: "moonshot-kimi",     protocol: "anthropic-messages" },
+    { id: "moonshot-kimi",     protocol: "openai-chat" },
     { id: "qwen",              protocol: "openai-chat" },
     { id: "doubao",            protocol: "openai-chat" },
     { id: "openai-official",   protocol: "openai-chat" },
@@ -48,6 +48,7 @@ test("resolveAgentProvider builds the right Provider for each preset", () => {
   for (const { id, protocol, noKey } of presets) {
     const s = defaultAgentSettings();
     switchActiveProvider(s, id);
+    if (id === "doubao") s.direct.model = "ep-test";
     if (!noKey) setApiKeyFor(s, id, `k-${id}`);
     const provider = resolveAgentProvider(s, { requestImpl: fakeRequestImpl });
     assert.equal(provider.id, id, `provider id mismatch for ${id}`);
@@ -129,7 +130,7 @@ test("buildProviderFromSpec dispatches by protocol", () => {
 
   const b = buildProviderFromSpec({
     spec: PROVIDERS["openai-official"],
-    userConfig: { providerId: "openai-official", mode: "api", apiKey: "k", model: "gpt-5.4" },
+    userConfig: { providerId: "openai-official", mode: "api", apiKey: "k", model: "gpt-5.5" },
     requestImpl: fakeRequestImpl,
   });
   assert.equal(b.spec.protocol, "openai-chat");

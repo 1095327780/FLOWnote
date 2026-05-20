@@ -163,7 +163,7 @@ test("provider dropdown persists the component value even if callback arg is sta
 
     assert.equal(plugin.settings.agentProvider.direct.providerId, "zhipu-glm");
     assert.equal(plugin.settings.agentProvider.direct.providerMode, "coding-plan");
-    assert.equal(plugin.settings.agentProvider.direct.model, "glm-4.7-flash");
+    assert.equal(plugin.settings.agentProvider.direct.model, "glm-5.1");
     assert.equal(refreshed, true);
   } finally {
     fixture.restore();

@@ -5097,7 +5097,7 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
   }
 
   /* Header strip and its action buttons */
-  .oc-header {
+  .oc-header:where(*) {
     background: #ffffff;
     color: #1a1d24;
     backdrop-filter: none;
@@ -5130,7 +5130,7 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
   }
 
   /* Composer (bottom input area) */
-  .oc-composer {
+  .oc-composer:where(*) {
     background: #ffffff;
     background-image: none;
     border-top: 1px solid #d4d8e0;
@@ -5163,7 +5163,7 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
     border: 1px solid #d4d8e0;
     color: #4a5366;
   }
-  .is-mobile .oc-model-select-inline-wrap {
+  .is-mobile .oc-model-select-inline-wrap:where(*) {
     background: #eff1f6;
     background-image: none;
     border: 1px solid #d4d8e0;
@@ -5235,7 +5235,7 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
     color: #1a1d24;
   }
   /* User message bubble — soft blue tint on white */
-  .oc-message-user {
+  .oc-message-user:where(*) {
     background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%);
     border: 1px solid #b4d4f0;
     color: #1a1d24;
@@ -5287,7 +5287,7 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
   }
 
   /* History dropdown (session switcher in header) */
-  .oc-history-menu {
+  .oc-history-menu:where(*) {
     background: #ffffff;
     border: 1px solid #d4d8e0;
     color: #1a1d24;

@@ -5,6 +5,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const Module = require("node:module");
 
 const {
   createAnthropicMessagesProvider,
@@ -12,6 +13,7 @@ const {
 const {
   createOpenAIChatProvider,
 } = require("../../runtime/providers/openai-chat-adapter");
+const { PROVIDERS } = require("../../runtime/providers/registry");
 
 function makeRequestRecorder(responses) {
   const calls = [];
@@ -113,6 +115,7 @@ test("openai-chat listModels: Ollama works without API key", async () => {
   const out = await provider.listModels();
   assert.equal(calls[0].url, "http://localhost:11434/v1/models");
   assert.equal(calls[0].headers.Authorization, undefined);
+  assert.equal(calls.length, 1);
   assert.deepEqual(out.map((m) => m.id), ["llama3.2", "qwen2.5-coder:7b"]);
 });
 
@@ -128,7 +131,7 @@ test("anthropic-messages listModels: strips /anthropic, appends /v1/models", asy
     auth: { headerName: "Authorization", scheme: "bearer" },
     modes: { api: { label: "API", baseUrl: "https://api.deepseek.com/anthropic" } },
     defaultMode: "api",
-    versionHeader: "anthropic-version: 2026-01-01",
+    versionHeader: "anthropic-version: 2023-06-01",
     models: [],
   };
   const userConfig = { providerId: "deepseek-test", mode: "api", apiKey: "sk-deepseek" };
@@ -167,6 +170,88 @@ test("anthropic-messages listModels: uses modelsListEndpoint override when set",
   const provider = createAnthropicMessagesProvider({ spec, userConfig, requestImpl });
   await provider.listModels();
   assert.equal(calls[0].url, "https://catalog.weird.com/list");
+});
+
+test("anthropic-messages listModels: DeepSeek uses official /models endpoint", async () => {
+  const userConfig = { providerId: "deepseek", mode: "api", apiKey: "sk-deepseek" };
+  const { calls, requestImpl } = makeRequestRecorder([
+    {
+      status: 200,
+      json: { data: [{ id: "deepseek-v4-flash" }, { id: "deepseek-v4-pro" }] },
+    },
+  ]);
+  const provider = createAnthropicMessagesProvider({
+    spec: PROVIDERS.deepseek,
+    userConfig,
+    requestImpl,
+  });
+  const out = await provider.listModels();
+  assert.equal(calls[0].url, "https://api.deepseek.com/models");
+  assert.match(calls[0].headers.Authorization, /Bearer sk-deepseek/);
+  assert.deepEqual(out.map((m) => m.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+});
+
+test("anthropic-messages listModels: production path uses Obsidian requestUrl when no requestImpl is injected", async () => {
+  const calls = [];
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === "obsidian") {
+      return {
+        requestUrl: async (args) => {
+          calls.push(args);
+          return {
+            status: 200,
+            json: { data: [{ id: "deepseek-v4-flash" }] },
+          };
+        },
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    const provider = createAnthropicMessagesProvider({
+      spec: PROVIDERS.deepseek,
+      userConfig: { providerId: "deepseek", mode: "api", apiKey: "sk-deepseek" },
+    });
+    const out = await provider.listModels();
+    assert.equal(calls[0].url, "https://api.deepseek.com/models");
+    assert.deepEqual(out.map((m) => m.id), ["deepseek-v4-flash"]);
+  } finally {
+    Module._load = originalLoad;
+  }
+});
+
+test("anthropic-messages listModels: Anthropic official keeps x-api-key for explicit endpoint", async () => {
+  const userConfig = { providerId: "anthropic-official", mode: "api", apiKey: "sk-anthropic" };
+  const { calls, requestImpl } = makeRequestRecorder([
+    { status: 200, json: { data: [{ id: "claude-sonnet-4-6" }] } },
+  ]);
+  const provider = createAnthropicMessagesProvider({
+    spec: PROVIDERS["anthropic-official"],
+    userConfig,
+    requestImpl,
+  });
+  const out = await provider.listModels();
+  assert.equal(calls[0].url, "https://api.anthropic.com/v1/models");
+  assert.equal(calls[0].headers["x-api-key"], "sk-anthropic");
+  assert.equal(calls[0].headers.Authorization, undefined);
+  assert.deepEqual(out.map((m) => m.id), ["claude-sonnet-4-6"]);
+});
+
+test("anthropic-messages listModels: MiniMax uses region base path and X-Api-Key auth", async () => {
+  const userConfig = { providerId: "minimax", mode: "api", region: "cn", apiKey: "sk-minimax" };
+  const { calls, requestImpl } = makeRequestRecorder([
+    { status: 200, json: { data: [{ id: "MiniMax-M2.7" }] } },
+  ]);
+  const provider = createAnthropicMessagesProvider({
+    spec: PROVIDERS.minimax,
+    userConfig,
+    requestImpl,
+  });
+  await provider.listModels();
+  assert.equal(calls[0].url, "https://api.minimaxi.com/anthropic/v1/models");
+  assert.equal(calls[0].headers["X-Api-Key"], "sk-minimax");
+  assert.equal(calls[0].headers.Authorization, undefined);
 });
 
 test("anthropic-messages listModels: throws 'not supported' when neither endpoint nor /anthropic suffix", async () => {

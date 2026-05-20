@@ -53,7 +53,10 @@
  * @property {Object<string, ModeConfig>} modes  keyed by mode id, e.g. 'coding-plan' | 'api'
  * @property {string} defaultMode                 mode id picked by default in UI
  * @property {AuthConfig} auth
- * @property {string}   [versionHeader]           full header line, e.g. 'anthropic-version: 2026-01-01'
+ * @property {string}   [versionHeader]           full header line, e.g. 'anthropic-version: 2023-06-01'
+ * @property {string}   [modelsListEndpoint]      absolute endpoint for dynamic model listing
+ * @property {string}   [modelsListPath]          path appended to resolved base URL for model listing
+ * @property {AuthConfig} [modelsListAuth]        auth override for dynamic model listing
  * @property {ModelInfo[]} models
  * @property {string} defaultModel                must match a model id in `models`
  * @property {RegionConfig} [region]

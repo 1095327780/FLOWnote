@@ -65,6 +65,36 @@ function getCaptureModelOptions(plugin, providerId, preset, currentModel) {
   };
 }
 
+function hasStaticModelEntries(models) {
+  return Array.isArray(models) && models.some((model) => {
+    if (typeof model === "string") return model.trim();
+    return model && typeof model.id === "string" && model.id.trim();
+  });
+}
+
+function shouldKeepStaticModelsAfterRefreshFailure(spec) {
+  if (!spec || spec.id === "ollama" || spec.userMustProvideBaseUrl) return false;
+  return hasStaticModelEntries(spec.models);
+}
+
+function shouldKeepStaticCaptureModelsAfterRefreshFailure(providerId, preset) {
+  if (String(providerId || "").trim().toLowerCase() === "custom") return false;
+  return hasStaticModelEntries(preset && preset.models);
+}
+
+function shouldShowModelRefreshButton(spec) {
+  if (!spec) return false;
+  if (spec.id === "ollama") return true;
+  if (spec.userMustProvideBaseUrl || spec.modelsListEndpoint || spec.modelsListPath) return true;
+  if (spec.protocol === "openai-chat" && !spec.userMustProvideModels) return true;
+  return !shouldKeepStaticModelsAfterRefreshFailure(spec);
+}
+
+function shouldShowCaptureModelRefreshButton(providerId, preset) {
+  if (preset && preset.modelsPath) return true;
+  return !shouldKeepStaticCaptureModelsAfterRefreshFailure(providerId, preset);
+}
+
 function ensureMobileCaptureSettings(plugin) {
   if (!plugin.settings.mobileCapture || typeof plugin.settings.mobileCapture !== "object") {
     plugin.settings.mobileCapture = {};
@@ -76,6 +106,67 @@ function ensureMobileCaptureSettings(plugin) {
   if (typeof mc.model !== "string") mc.model = "";
   return mc;
 }
+
+function scheduleOllamaModelAutofetch({ plugin, agent, spec, refresh }) {
+  if (!plugin || !agent || !spec || spec.id !== "ollama") return;
+  if (!plugin.__flownoteFetchedModels) plugin.__flownoteFetchedModels = {};
+  const fetched = plugin.__flownoteFetchedModels[spec.id];
+  const currentModel = String(agent.direct && (agent.direct.model || spec.defaultModel) || "").trim();
+  const fetchedHasCurrent = fetched && Array.isArray(fetched.models)
+    && fetched.models.some((m) => m && m.id === currentModel);
+  if (fetched && Array.isArray(fetched.models) && fetched.models.length > 0 && fetchedHasCurrent) return;
+  if (!plugin.__flownoteAutoFetchingModels) plugin.__flownoteAutoFetchingModels = {};
+  if (plugin.__flownoteAutoFetchingModels[spec.id]) return;
+  plugin.__flownoteAutoFetchingModels[spec.id] = true;
+
+  const run = async () => {
+    try {
+      const result = await refreshOllamaModelListNow({ plugin, agent, spec });
+      if (result && result.modelChanged) {
+        await plugin.saveSettings();
+      }
+      if (typeof refresh === "function") refresh();
+    } catch (_e) {
+      // Leave the manual refresh button available; no modal noise on render.
+    } finally {
+      plugin.__flownoteAutoFetchingModels[spec.id] = false;
+    }
+  };
+
+  if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+    window.setTimeout(run, 0);
+  } else {
+    Promise.resolve().then(run);
+  }
+}
+
+async function refreshOllamaModelListNow({ plugin, agent, spec }) {
+  if (!plugin || !agent || !spec || spec.id !== "ollama") return { models: [], modelChanged: false };
+  if (!plugin.__flownoteFetchedModels) plugin.__flownoteFetchedModels = {};
+  const userConfig = {
+    providerId: spec.id,
+    mode: agent.direct.providerMode || spec.defaultMode,
+    region: agent.direct.region,
+    apiKey: getActiveApiKey(agent),
+    model: agent.direct.model || spec.defaultModel,
+    baseUrlOverride: agent.direct.baseUrlOverride || "",
+    userAgentOverride: agent.direct.userAgentOverride || "",
+    versionHeaderOverride: agent.direct.versionHeaderOverride || "",
+    stream: false,
+  };
+  const provider = buildProviderFromSpec({ spec, userConfig });
+  if (typeof provider.listModels !== "function") return { models: [], modelChanged: false };
+  const list = await provider.listModels();
+  plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
+  const currentModel = String(agent.direct.model || spec.defaultModel || "").trim();
+  const hasCurrent = list.some((m) => m && m.id === currentModel);
+  const nextModel = list.length > 0 && !hasCurrent ? String(list[0].id || "") : "";
+  if (nextModel) {
+    agent.direct.model = nextModel;
+  }
+  return { models: list, modelChanged: Boolean(nextModel) };
+}
+
 
 function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
   const t = (key, fallback, params = {}) =>
@@ -90,6 +181,7 @@ function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
     PROVIDER_PRESETS,
     getAiProviderDisplayName,
     listCaptureModels,
+    testConnection,
   } = mobileAiService;
   const mc = ensureMobileCaptureSettings(plugin);
   const locale = typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : "zh-CN";
@@ -170,7 +262,7 @@ function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
   const fetchedAgeMin = captureModelState.fetchedAt
     ? Math.round((Date.now() - captureModelState.fetchedAt) / 60000)
     : null;
-  new Setting(containerEl)
+  const mobileModelSetting = new Setting(containerEl)
     .setName(t("mobile.settings.modelName", "移动端模型名（可选）"))
     .setDesc(
       fetchedAgeMin === null
@@ -186,8 +278,10 @@ function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
         mc.model = String(modelId || "").trim();
         await plugin.saveSettings();
       });
-    })
-    .addButton((button) => {
+    });
+
+  if (shouldShowCaptureModelRefreshButton(mc.provider, preset)) {
+    mobileModelSetting.addButton((button) => {
       button.setButtonText(t("settings.agent.modelRefresh", "刷新"));
       button.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /v1/models 接口拉取最新模型列表（需要已填 API Key）。"));
       button.onClick(async () => {
@@ -214,12 +308,88 @@ function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
           if (typeof refresh === "function") refresh();
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
+          if (shouldKeepStaticCaptureModelsAfterRefreshFailure(mc.provider, preset)) {
+            new Notice(t(
+              "settings.agent.modelRefreshFallbackStatic",
+              "模型列表接口暂不可用，已保留内置模型列表。",
+            ));
+            button.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
+            button.setDisabled(false);
+            return;
+          }
           new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
           button.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
           button.setDisabled(false);
         }
       });
     });
+  }
+
+  const mobileTestHostEl = containerEl.createDiv({ cls: "flownote-test-result-host" });
+  new Setting(containerEl)
+    .setName(t("mobile.settings.testName", "测试移动端连接"))
+    .setDesc(t(
+      "mobile.settings.testDesc",
+      "测试手机端备用 AI 配置：{provider} / {model}。用于移动端聊天和快速捕获清理。",
+      {
+        provider: getAiProviderDisplayName(mc.provider, preset.name, locale),
+        model: mc.model || preset.defaultModel || "(无)",
+      },
+    ))
+    .addButton((button) => {
+      button.setButtonText(t("mobile.settings.testBtn", "测试"));
+      button.onClick(async () => {
+        button.setDisabled(true);
+        const originalText = button.buttonEl.textContent;
+        button.setButtonText(t("mobile.settings.testBusy", "测试中..."));
+        mobileTestHostEl.empty();
+        mobileTestHostEl.createEl("span", { text: t("mobile.settings.testBusy", "测试中...") });
+        try {
+          const result = await testConnection(mc, { locale });
+          mobileTestHostEl.empty();
+          const el = mobileTestHostEl.createEl("span", {
+            text: result && result.ok
+              ? t("mobile.settings.testOk", "✓ 移动端 AI 连接成功")
+              : t("mobile.settings.testFail", "✗ 移动端 AI 测试失败：{message}", {
+                message: result && result.message ? result.message : "unknown",
+              }),
+          });
+          el.style.color = result && result.ok
+            ? "var(--text-success, #2ea043)"
+            : "var(--text-error, #cf222e)";
+          if (result && result.ok) {
+            new Notice(t("mobile.settings.testNoticeOk", "移动端 AI 测试成功"));
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          mobileTestHostEl.empty();
+          const errEl = mobileTestHostEl.createEl("span", {
+            text: t("mobile.settings.testFail", "✗ 移动端 AI 测试失败：{message}", { message: msg }),
+          });
+          errEl.style.color = "var(--text-error, #cf222e)";
+        } finally {
+          button.setButtonText(originalText || t("mobile.settings.testBtn", "测试"));
+          button.setDisabled(false);
+        }
+      });
+  });
+}
+
+function renderOllamaLocalModelNotice({ containerEl, plugin, tab }) {
+  const t = (key, fallback, params = {}) =>
+    tFromContext(tab || plugin, key, fallback, params);
+  const note = containerEl.createDiv({ cls: "oc-settings-note oc-settings-note-warning" });
+  note.createEl("div", {
+    cls: "oc-settings-note-title",
+    text: t("settings.agent.ollamaLocalNoticeTitle", "本地 Ollama 模型建议"),
+  });
+  note.createEl("div", {
+    cls: "oc-settings-note-body",
+    text: t(
+      "settings.agent.ollamaLocalNoticeBody",
+      "FLOWnote 会发送技能说明、工具列表和笔记上下文。本地模型建议使用上下文窗口 16K tokens 以上、参数规模 7B/8B 以上的工具调用模型，更推荐 14B 以上。规格太小可能只会回复“我会调用工具”，但实际不会执行技能或写入笔记。",
+    ),
+  });
 }
 
 /**
@@ -354,6 +524,10 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
       d.setValue(agent.direct.providerId);
       bindDropdownChange(d, async (providerId) => {
         switchActiveProvider(agent, providerId);
+        const nextSpec = getProviderSpec(providerId);
+        if (nextSpec && nextSpec.id === "ollama") {
+          await refreshOllamaModelListNow({ plugin, agent, spec: nextSpec });
+        }
         await plugin.saveSettings();
         reRender();
       });
@@ -361,9 +535,7 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
 
   const spec = getProviderSpec(agent.direct.providerId);
   if (!spec) return;
-  if (spec.id === "ollama") {
-    renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh: reRender });
-  }
+  scheduleOllamaModelAutofetch({ plugin, agent, spec, refresh: reRender });
 
   // --- Mode dropdown (only if provider has more than one mode) ------------
   const modeIds = Object.keys(spec.modes || {});
@@ -492,33 +664,55 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
     const fetchedList = (fetched && Array.isArray(fetched.models)) ? fetched.models : [];
 
     // Merge: registry entries first (preserves curated labels), then any
-    // fetched ids the registry doesn't know about.
+    // fetched ids the registry doesn't know about. Ollama is different:
+    // registry entries are only startup placeholders, while real usability
+    // depends on the local daemon's current /v1/models response.
     const registryIds = new Set(spec.models.map((m) => m.id));
-    const merged = [
-      ...spec.models.map((m) => ({ id: m.id, label: m.deprecated ? `${m.label} (deprecated)` : m.label })),
-      ...fetchedList
-        .filter((m) => !registryIds.has(m.id))
-        .map((m) => ({ id: m.id, label: `${m.label || m.id}（来自接口）` })),
-    ];
+    const merged = spec.id === "ollama" && fetchedList.length > 0
+      ? fetchedList.map((m) => ({ id: m.id, label: m.label || m.id }))
+      : [
+        ...spec.models.map((m) => ({ id: m.id, label: m.deprecated ? `${m.label} (deprecated)` : m.label })),
+        ...fetchedList
+          .filter((m) => !registryIds.has(m.id))
+          .map((m) => ({ id: m.id, label: `${m.label || m.id}（来自接口）` })),
+      ];
+    const selectedModel = agent.direct.model || spec.defaultModel;
+    const modelExistsInDropdown = merged.some((m) => m.id === selectedModel);
+    if (selectedModel && !modelExistsInDropdown) {
+      merged.unshift({
+        id: selectedModel,
+        label: spec.id === "ollama"
+          ? t("settings.agent.modelMissingInOllamaList", "{model}（未在当前 Ollama 列表中）", { model: selectedModel })
+          : selectedModel,
+      });
+    }
 
     const modelSetting = new Setting(containerEl)
       .setName(t("settings.agent.modelName", "模型"))
       .setDesc(
         fetchedAgeMin === null
-          ? t("settings.agent.modelDesc", "选择该服务商提供的模型。点击右侧刷新可从官方接口拉取最新列表。")
-          : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin }),
+          ? (spec.id === "ollama"
+            ? t("settings.agent.modelDescOllama", "选择当前本机 Ollama 已安装的模型。插件会从 localhost:11434/v1/models 读取列表；点击右侧刷新可重新读取。")
+            : t("settings.agent.modelDesc", "选择该服务商提供的模型。点击右侧刷新可从官方接口拉取最新列表。"))
+          : (spec.id === "ollama"
+            ? t("settings.agent.modelDescFetchedOllama", "模型列表已于 {min} 分钟前从本机 Ollama 刷新。", { min: fetchedAgeMin })
+            : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin })),
       )
       .addDropdown((d) => {
         for (const m of merged) d.addOption(m.id, m.label);
-        d.setValue(agent.direct.model || spec.defaultModel);
+        d.setValue(selectedModel);
         bindDropdownChange(d, async (modelId) => {
           agent.direct.model = modelId;
           await plugin.saveSettings();
         });
-      })
-      .addButton((b) => {
+      });
+
+    if (shouldShowModelRefreshButton(spec)) {
+      modelSetting.addButton((b) => {
         b.setButtonText(t("settings.agent.modelRefresh", "刷新"));
-        b.setTooltip(spec.apiKeyOptional
+        b.setTooltip(spec.id === "ollama"
+          ? t("settings.agent.modelRefreshTooltipOllama", "从本机 localhost:11434/v1/models 重新读取已安装模型。")
+          : spec.apiKeyOptional
           ? t("settings.agent.modelRefreshTooltipOptional", "从模型服务的 /v1/models 接口拉取本机可用模型。")
           : t("settings.agent.modelRefreshTooltip", "从官方 /v1/models 接口拉取最新模型列表（需要已填 API Key）。"));
         b.onClick(async () => {
@@ -546,17 +740,34 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
             }
             const list = await provider.listModels();
             plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
+            if (spec.id === "ollama" && list.length > 0) {
+              const currentModel = String(agent.direct.model || spec.defaultModel || "").trim();
+              if (!list.some((m) => m && m.id === currentModel)) {
+                agent.direct.model = list[0].id;
+                await plugin.saveSettings();
+              }
+            }
             new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: list.length }));
             // Re-render the settings tab so the dropdown picks up the new list.
             if (typeof refresh === "function") refresh();
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
+            if (shouldKeepStaticModelsAfterRefreshFailure(spec)) {
+              new Notice(t(
+                "settings.agent.modelRefreshFallbackStatic",
+                "模型列表接口暂不可用，已保留内置模型列表。",
+              ));
+              b.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
+              b.setDisabled(false);
+              return;
+            }
             new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
             b.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
             b.setDisabled(false);
           }
         });
       });
+    }
     // Use modelSetting so eslint doesn't flag it unused.
     void modelSetting;
   }
@@ -564,10 +775,16 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
   // --- Test button ---------------------------------------------------------
   const testHostEl = containerEl.createDiv({ cls: "flownote-test-result-host" });
   new Setting(containerEl)
-    .setName(t("settings.agent.testName", "测试连接"))
+    .setName(t("settings.agent.testNameForProvider", "测试 {provider} 连接", {
+      provider: spec.displayName || t("settings.agent.providerName", "服务商"),
+    }))
     .setDesc(t(
-      "settings.agent.testDesc",
-      "向所选服务商发送一次极短请求，验证 URL、Key 和模型是否可用。不会消耗多少 token。",
+      "settings.agent.testDescForProvider",
+      "测试当前电脑端服务商配置：{provider} / {model}。会验证 URL、Key 和模型是否可用。",
+      {
+        provider: spec.displayName || t("settings.agent.providerName", "服务商"),
+        model: agent.direct.model || spec.defaultModel || "(无)",
+      },
     ))
     .addButton((b) => {
       b.setButtonText(t("settings.agent.testButton", "测试"));
@@ -627,6 +844,11 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
         }
       });
     });
+
+  if (spec.id === "ollama") {
+    renderOllamaLocalModelNotice({ containerEl, plugin, tab });
+    renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh: reRender });
+  }
 
 }
 
@@ -694,11 +916,11 @@ function renderAgentProviderAdvanced({ containerEl, plugin, tab }) {
       .setName(t("settings.agent.advVersionName", "Anthropic 版本头"))
       .setDesc(t(
         "settings.agent.advVersionDesc",
-        "默认 anthropic-version: 2026-01-01。仅在服务商有特定要求时修改。",
+        "默认 anthropic-version: 2023-06-01。仅在服务商有特定要求时修改。",
       ))
       .addText((tx) => {
         tx
-          .setPlaceholder("anthropic-version: 2026-01-01")
+          .setPlaceholder("anthropic-version: 2023-06-01")
           .setValue(agent.direct.versionHeaderOverride || "")
           .onChange(async (v) => {
             agent.direct.versionHeaderOverride = String(v || "");

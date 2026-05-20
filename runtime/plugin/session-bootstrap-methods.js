@@ -272,6 +272,17 @@ const sessionBootstrapMethods = {
     if (this.skillService) this.skillService.updateSettings(this.settings);
     if (this.opencodeClient) this.opencodeClient.updateSettings(this.settings);
     await this.persistState();
+    try {
+      const view = typeof this.getAssistantView === "function" ? this.getAssistantView() : null;
+      if (view && typeof view.updateModelSelectOptions === "function") {
+        view.updateModelSelectOptions();
+      }
+      if (view && typeof view.applyStatus === "function") {
+        view.applyStatus(view.latestDiagnosticsResult);
+      }
+    } catch (e) {
+      this.log(`refresh assistant view after settings save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   },
 
   async persistState() {

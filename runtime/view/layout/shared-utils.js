@@ -141,16 +141,113 @@ function isDirectAgentMode(view) {
   return ap && ap.mode === "direct";
 }
 
+function isMobileRuntime() {
+  try {
+    const { Platform = {} } = require("obsidian");
+    return Boolean(Platform.isMobile);
+  } catch (_e) {
+    return false;
+  }
+}
+
+function getEffectiveDirectAgentSettings(view) {
+  const settings = view && view.plugin && view.plugin.settings;
+  const agent = settings && settings.agentProvider;
+  const direct = agent && agent.direct;
+  if (!agent || !direct) return { agent, direct, isMobileOllamaOverride: false };
+  if (isMobileRuntime() && String(direct.providerId || "").trim() === "ollama") {
+    try {
+      const { buildMobileAgentSettingsOverride } = require("../../mobile/mobile-ai-service");
+      const mobileOverride = buildMobileAgentSettingsOverride(settings);
+      if (mobileOverride && mobileOverride.direct) {
+        return { agent: mobileOverride, direct: mobileOverride.direct, isMobileOllamaOverride: true };
+      }
+    } catch (_e) {
+      // Fall through to desktop settings. The send path will surface the
+      // mobile Ollama configuration error if no reachable mobile model exists.
+    }
+  }
+  return { agent, direct, isMobileOllamaOverride: false };
+}
+
+function getProviderFetchedModels(plugin, providerId) {
+  const fetchedRoot = plugin && plugin.__flownoteFetchedModels;
+  const fetched = fetchedRoot && fetchedRoot[providerId];
+  return fetched && Array.isArray(fetched.models) ? fetched.models : [];
+}
+
+function scheduleDirectProviderModelAutofetch(view, spec, direct) {
+  if (!view || !view.plugin || !spec || spec.id !== "ollama") return;
+  if (getProviderFetchedModels(view.plugin, spec.id).length > 0) return;
+  if (!view.plugin.__flownoteAutoFetchingModels) view.plugin.__flownoteAutoFetchingModels = {};
+  if (view.plugin.__flownoteAutoFetchingModels[spec.id]) return;
+  view.plugin.__flownoteAutoFetchingModels[spec.id] = true;
+
+  const run = async () => {
+    try {
+      let resolver;
+      try { resolver = require("../../agent/agent-provider-resolver"); } catch { resolver = null; }
+      if (!resolver || typeof resolver.buildProviderFromSpec !== "function") return;
+      const agent = (view.plugin.settings && view.plugin.settings.agentProvider) || {};
+      const currentDirect = (agent && agent.direct) || direct || {};
+      const provider = resolver.buildProviderFromSpec({
+        spec,
+        userConfig: {
+          providerId: spec.id,
+          mode: currentDirect.providerMode || spec.defaultMode,
+          region: currentDirect.region,
+          apiKey: "",
+          model: currentDirect.model || spec.defaultModel,
+          baseUrlOverride: currentDirect.baseUrlOverride || "",
+          userAgentOverride: currentDirect.userAgentOverride || "",
+          versionHeaderOverride: currentDirect.versionHeaderOverride || "",
+          stream: false,
+        },
+      });
+      if (typeof provider.listModels !== "function") return;
+      const list = await provider.listModels();
+      if (!view.plugin.__flownoteFetchedModels) view.plugin.__flownoteFetchedModels = {};
+      view.plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
+      const selected = String(currentDirect.model || spec.defaultModel || "").trim();
+      if (list.length > 0 && !list.some((m) => m && m.id === selected)) {
+        currentDirect.model = list[0].id;
+        if (view.plugin.settings && view.plugin.settings.agentProvider && view.plugin.settings.agentProvider.direct) {
+          view.plugin.settings.agentProvider.direct.model = list[0].id;
+        }
+        if (typeof view.plugin.saveSettings === "function") await view.plugin.saveSettings();
+      }
+      updateModelSelectOptions.call(view);
+      if (typeof view.applyStatus === "function") view.applyStatus(view.latestDiagnosticsResult);
+    } catch (_e) {
+      // Leave the static fallback visible; settings has a manual refresh.
+    } finally {
+      view.plugin.__flownoteAutoFetchingModels[spec.id] = false;
+    }
+  };
+  if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+    window.setTimeout(run, 0);
+  } else {
+    Promise.resolve().then(run);
+  }
+}
+
 function buildDirectModelOptions(view) {
   // Pulls models from the active direct-mode provider's registry entry.
   // Avoids depending on OpenCode's catalog so the bottom selector
   // reflects what the agent will actually use this turn.
   let registry;
   try { registry = require("../../providers/registry"); } catch { return []; }
-  const ap = view.plugin.settings.agentProvider || {};
-  const direct = ap.direct || {};
+  const { direct } = getEffectiveDirectAgentSettings(view);
+  if (!direct) return [];
   const spec = registry.getProviderSpec(direct.providerId || "");
   if (!spec || !Array.isArray(spec.models)) return [];
+  if (spec.id === "ollama") {
+    const fetched = getProviderFetchedModels(view.plugin, spec.id);
+    if (fetched.length > 0) {
+      return fetched.map((m) => ({ id: m.id, label: m.label || m.id }));
+    }
+    scheduleDirectProviderModelAutofetch(view, spec, direct);
+  }
   return spec.models.map((m) => ({
     id: m.id,
     label: m.label || m.id,
@@ -166,7 +263,8 @@ function updateModelSelectOptions() {
   // doesn't apply — there's exactly one provider active.
   if (isDirectAgentMode(this)) {
     const opts = buildDirectModelOptions(this);
-    const direct = this.plugin.settings.agentProvider.direct || {};
+    const { direct } = getEffectiveDirectAgentSettings(this);
+    if (!direct) return;
     const currentModel = String(direct.model || "");
     modelSelect.empty();
     if (opts.length === 0) {
@@ -207,8 +305,7 @@ function syncInlineModelSelectLabel() {
   if (isDirectAgentMode(this)) {
     let registry;
     try { registry = require("../../providers/registry"); } catch { registry = null; }
-    const ap = this.plugin.settings.agentProvider || {};
-    const direct = ap.direct || {};
+    const { direct } = getEffectiveDirectAgentSettings(this);
     const spec = registry ? registry.getProviderSpec(direct.providerId || "") : null;
     const providerLabel = (spec && spec.displayName) || direct.providerId || "?";
     const option = modelSelect.options && modelSelect.selectedIndex >= 0

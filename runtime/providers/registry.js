@@ -19,7 +19,9 @@ const PROVIDERS = {
       },
     },
     defaultMode: "api",
-    auth: { headerName: "Authorization", scheme: "bearer" },
+    auth: { headerName: "x-api-key", scheme: "raw" },
+    modelsListEndpoint: "https://api.deepseek.com/models",
+    modelsListAuth: { headerName: "Authorization", scheme: "bearer" },
     models: [
       { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", contextWindow: 1_000_000, maxOutput: 384_000, tier: "fast", isDefault: true },
       { id: "deepseek-v4-pro",   label: "DeepSeek V4 Pro",   contextWindow: 1_000_000, maxOutput: 384_000, tier: "high" },
@@ -44,11 +46,12 @@ const PROVIDERS = {
     },
     defaultMode: "api",
     auth: { headerName: "x-api-key", scheme: "raw" },
-    versionHeader: "anthropic-version: 2026-01-01",
+    versionHeader: "anthropic-version: 2023-06-01",
+    modelsListEndpoint: "https://api.anthropic.com/v1/models",
     models: [
-      { id: "claude-opus-4-7",     label: "Claude Opus 4.7",     contextWindow:   200_000, maxOutput: 64_000, tier: "high" },
-      { id: "claude-sonnet-4-6",   label: "Claude Sonnet 4.6",   contextWindow: 1_000_000, maxOutput: 64_000, tier: "high", isDefault: true },
-      { id: "claude-haiku-4-5",    label: "Claude Haiku 4.5",    contextWindow:   200_000, maxOutput: 16_000, tier: "fast" },
+      { id: "claude-sonnet-4-6",          label: "Claude Sonnet 4.6", contextWindow: 1_000_000, maxOutput:  64_000, tier: "high", isDefault: true },
+      { id: "claude-opus-4-7",            label: "Claude Opus 4.7",   contextWindow: 1_000_000, maxOutput: 128_000, tier: "high" },
+      { id: "claude-haiku-4-5-20251001",  label: "Claude Haiku 4.5",  contextWindow:   200_000, maxOutput:  64_000, tier: "fast" },
     ],
     defaultModel: "claude-sonnet-4-6",
   },
@@ -62,12 +65,12 @@ const PROVIDERS = {
         label: "GLM Coding Plan",
         baseUrl: "https://open.bigmodel.cn/api/anthropic",
         planUrl: "https://www.bigmodel.cn/glm-coding",
-        recommendedModel: "glm-4.7-flash",
+        recommendedModel: "glm-5.1",
       },
       "api": {
         label: "按量付费 API",
         baseUrl: "https://open.bigmodel.cn/api/anthropic",
-        recommendedModel: "glm-4.7-flash",
+        recommendedModel: "glm-5.1",
       },
     },
     defaultMode: "coding-plan",
@@ -78,11 +81,13 @@ const PROVIDERS = {
       defaultRegion: "cn",
     },
     models: [
-      { id: "glm-5",          label: "GLM-5",          contextWindow: 200_000, maxOutput: 32_768, tier: "high" },
-      { id: "glm-4.7",        label: "GLM-4.7",        contextWindow: 200_000, maxOutput: 32_768, tier: "mid" },
-      { id: "glm-4.7-flash",  label: "GLM-4.7 Flash",  contextWindow: 200_000, maxOutput: 32_768, tier: "fast", isDefault: true },
+      { id: "glm-5.1",        label: "GLM-5.1",        contextWindow: 200_000, maxOutput: 128_000, tier: "high", isDefault: true },
+      { id: "glm-5",          label: "GLM-5",          contextWindow: 200_000, maxOutput: 128_000, tier: "high" },
+      { id: "glm-5-turbo",    label: "GLM-5 Turbo",    contextWindow: 200_000, maxOutput:  64_000, tier: "high" },
+      { id: "glm-4.7",        label: "GLM-4.7",        contextWindow: 200_000, maxOutput:  32_768, tier: "mid" },
+      { id: "glm-4.5-air",    label: "GLM-4.5 Air",    contextWindow: 128_000, maxOutput:  16_384, tier: "fast" },
     ],
-    defaultModel: "glm-4.7-flash",
+    defaultModel: "glm-5.1",
   },
 
   "minimax": {
@@ -103,17 +108,21 @@ const PROVIDERS = {
       },
     },
     defaultMode: "coding-plan",
-    auth: { headerName: "Authorization", scheme: "bearer" },
+    auth: { headerName: "X-Api-Key", scheme: "raw" },
+    modelsListPath: "/v1/models",
     region: {
       cnUrl: "https://api.minimaxi.com/anthropic",
       intlUrl: "https://api.minimax.io/anthropic",
       defaultRegion: "cn",
     },
     models: [
-      { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 高速", contextWindow: 245_760, maxOutput: 32_768, tier: "fast", isDefault: true },
-      { id: "MiniMax-M2.7",           label: "MiniMax M2.7",      contextWindow: 245_760, maxOutput: 32_768, tier: "high" },
-      { id: "MiniMax-M2.5-highspeed", label: "MiniMax M2.5 高速", contextWindow: 245_760, maxOutput: 16_384, tier: "fast" },
-      { id: "MiniMax-M2.5",           label: "MiniMax M2.5",      contextWindow: 245_760, maxOutput: 16_384, tier: "mid" },
+      { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 高速", contextWindow: 204_800, maxOutput: 32_768, tier: "fast", isDefault: true },
+      { id: "MiniMax-M2.7",           label: "MiniMax M2.7",      contextWindow: 204_800, maxOutput: 32_768, tier: "high" },
+      { id: "MiniMax-M2.5-highspeed", label: "MiniMax M2.5 高速", contextWindow: 204_800, maxOutput: 16_384, tier: "fast" },
+      { id: "MiniMax-M2.5",           label: "MiniMax M2.5",      contextWindow: 204_800, maxOutput: 16_384, tier: "mid" },
+      { id: "MiniMax-M2.1-highspeed", label: "MiniMax M2.1 高速", contextWindow: 204_800, maxOutput: 16_384, tier: "fast" },
+      { id: "MiniMax-M2.1",           label: "MiniMax M2.1",      contextWindow: 204_800, maxOutput: 16_384, tier: "mid" },
+      { id: "MiniMax-M2",             label: "MiniMax M2",        contextWindow: 204_800, maxOutput: 128_000, tier: "mid" },
     ],
     defaultModel: "MiniMax-M2.7-highspeed",
     quirks: {
@@ -136,26 +145,27 @@ const PROVIDERS = {
   "moonshot-kimi": {
     id: "moonshot-kimi",
     displayName: "Moonshot Kimi",
-    protocol: "anthropic-messages",
+    protocol: "openai-chat",
     modes: {
       "coding-plan": {
         label: "Kimi Coding Plan",
-        baseUrl: "https://api.moonshot.ai/anthropic",
+        baseUrl: "https://api.moonshot.ai/v1",
         planUrl: "https://platform.moonshot.ai/",
-        recommendedModel: "kimi-k2.5",
+        recommendedModel: "kimi-k2.6",
       },
       "api": {
         label: "按量付费 API",
-        baseUrl: "https://api.moonshot.ai/anthropic",
-        recommendedModel: "kimi-k2.5",
+        baseUrl: "https://api.moonshot.ai/v1",
+        recommendedModel: "kimi-k2.6",
       },
     },
     defaultMode: "coding-plan",
     auth: { headerName: "Authorization", scheme: "bearer" },
     models: [
-      { id: "kimi-k2.5", label: "Kimi K2.5", contextWindow: 200_000, maxOutput: 32_768, tier: "high", isDefault: true },
+      { id: "kimi-k2.6", label: "Kimi K2.6", contextWindow: 256_000, maxOutput: 32_768, tier: "high", isDefault: true },
+      { id: "kimi-k2.5", label: "Kimi K2.5", contextWindow: 256_000, maxOutput: 32_768, tier: "high" },
     ],
-    defaultModel: "kimi-k2.5",
+    defaultModel: "kimi-k2.6",
   },
 
   "qwen": {
@@ -167,22 +177,27 @@ const PROVIDERS = {
         label: "通义灵码套餐",
         baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         planUrl: "https://tongyi.aliyun.com/lingma",
-        recommendedModel: "qwen-coder-plus",
+        recommendedModel: "qwen3.6-plus",
       },
       "api": {
         label: "按量付费 API",
         baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        recommendedModel: "qwen-flash",
+        recommendedModel: "qwen3.6-flash",
       },
     },
     defaultMode: "coding-plan",
     auth: { headerName: "Authorization", scheme: "bearer" },
     models: [
-      { id: "qwen-coder-plus", label: "Qwen Coder Plus", contextWindow: 131_072, maxOutput: 32_768, tier: "high", isDefault: true },
-      { id: "qwen-max",        label: "Qwen Max",        contextWindow:  32_768, maxOutput:  8_192, tier: "high" },
-      { id: "qwen-flash",      label: "Qwen Flash",      contextWindow:  32_768, maxOutput:  8_192, tier: "fast" },
+      { id: "qwen3.6-max-preview", label: "Qwen3.6 Max Preview", contextWindow: 1_000_000, maxOutput: 64_000, tier: "high" },
+      { id: "qwen3-max",           label: "Qwen3 Max",           contextWindow: 1_000_000, maxOutput: 64_000, tier: "high" },
+      { id: "qwen3.6-plus",      label: "Qwen3.6 Plus",      contextWindow: 1_000_000, maxOutput: 64_000, tier: "high", isDefault: true },
+      { id: "qwen3.6-flash",     label: "Qwen3.6 Flash",     contextWindow: 1_000_000, maxOutput: 64_000, tier: "fast" },
+      { id: "qwen3-coder-plus",  label: "Qwen3 Coder Plus",  contextWindow: 1_000_000, maxOutput: 65_536, tier: "high" },
+      { id: "qwen3-coder-flash", label: "Qwen3 Coder Flash", contextWindow: 1_000_000, maxOutput: 32_768, tier: "fast" },
+      { id: "qwen-max",          label: "Qwen Max",          contextWindow:    32_768, maxOutput:  8_192, tier: "high" },
+      { id: "qwen-flash",        label: "Qwen Flash",        contextWindow:    32_768, maxOutput:  8_192, tier: "fast" },
     ],
-    defaultModel: "qwen-coder-plus",
+    defaultModel: "qwen3.6-plus",
   },
 
   "doubao": {
@@ -206,10 +221,8 @@ const PROVIDERS = {
     // use that as the model name; we surface a free-form field rather
     // than a fixed model dropdown.
     userMustProvideModels: true,
-    models: [
-      { id: "doubao-pro-32k", label: "Doubao Pro 32K (示例 endpoint-id)", contextWindow: 32_768, maxOutput: 4_096, tier: "high" },
-    ],
-    defaultModel: "doubao-pro-32k",
+    models: [],
+    defaultModel: "",
   },
 
   "openai-official": {
@@ -225,11 +238,13 @@ const PROVIDERS = {
     defaultMode: "api",
     auth: { headerName: "Authorization", scheme: "bearer" },
     models: [
-      { id: "gpt-5.4",        label: "GPT-5.4",        contextWindow: 400_000, maxOutput: 65_536, tier: "high", isDefault: true },
-      { id: "gpt-5.4-mini",   label: "GPT-5.4 Mini",   contextWindow: 400_000, maxOutput: 32_768, tier: "fast" },
-      { id: "gpt-5.4-turbo",  label: "GPT-5.4 Turbo",  contextWindow: 400_000, maxOutput: 32_768, tier: "mid" },
+      { id: "gpt-5.5",        label: "GPT-5.5",        contextWindow: 1_000_000, maxOutput: 128_000, tier: "high", isDefault: true },
+      { id: "gpt-5.4",        label: "GPT-5.4",        contextWindow: 1_000_000, maxOutput: 128_000, tier: "high" },
+      { id: "gpt-5.4-mini",   label: "GPT-5.4 Mini",   contextWindow:   400_000, maxOutput: 128_000, tier: "fast" },
+      { id: "gpt-5.4-nano",   label: "GPT-5.4 Nano",   contextWindow:   400_000, maxOutput: 128_000, tier: "fast" },
+      { id: "gpt-5.2",        label: "GPT-5.2",        contextWindow: 1_000_000, maxOutput: 128_000, tier: "high" },
     ],
-    defaultModel: "gpt-5.4",
+    defaultModel: "gpt-5.5",
   },
 
   "ollama": {
@@ -246,10 +261,7 @@ const PROVIDERS = {
     auth: { headerName: "", scheme: "raw" },
     apiKeyOptional: true,
     models: [
-      { id: "llama3.2", label: "Llama 3.2", contextWindow: 128_000, tier: "mid", isDefault: true },
-      { id: "gpt-oss:20b", label: "gpt-oss:20b", contextWindow: 128_000, tier: "mid" },
-      { id: "qwen2.5-coder:7b", label: "Qwen2.5 Coder 7B", contextWindow: 128_000, tier: "fast" },
-      { id: "deepseek-r1:8b", label: "DeepSeek-R1 8B", contextWindow: 128_000, tier: "mid" },
+      { id: "llama3.2", label: "Llama 3.2（示例，需本机已安装）", contextWindow: 128_000, tier: "mid", isDefault: true },
     ],
     defaultModel: "llama3.2",
     quirks: {

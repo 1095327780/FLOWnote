@@ -55,6 +55,65 @@ function buildEndpointUrl(baseUrl) {
   return `${trimmed}/chat/completions`;
 }
 
+function formatProviderHttpError({ spec, status, text }) {
+  const raw = typeof text === "string" ? text.slice(0, 500) : String(text || "");
+  let message = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    const parsedMessage = parsed && parsed.error && typeof parsed.error.message === "string"
+      ? parsed.error.message
+      : "";
+    if (parsedMessage) message = parsedMessage;
+  } catch (_e) {
+    // Keep raw text.
+  }
+  if (spec && spec.id === "ollama" && /does not support tools/i.test(message)) {
+    return [
+      "当前模型不支持工具调用，请更换支持工具调用的模型。",
+      message,
+    ].join("\n");
+  }
+  if (spec && spec.id === "ollama" && /model ['"].+['"] not found/i.test(message)) {
+    return [
+      "当前 Ollama 未找到这个模型，请点击刷新并选择列表中的本机模型或 Cloud 模型。",
+      message,
+    ].join("\n");
+  }
+  return raw;
+}
+
+function parseOpenAIModelList(body) {
+  const data = body && Array.isArray(body.data) ? body.data : [];
+  const out = [];
+  for (const m of data) {
+    const id = String((m && m.id) || "").trim();
+    if (!id) continue;
+    out.push({ id, label: id });
+  }
+  return out;
+}
+
+function sortAndDedupeModels(models) {
+  const seen = new Set();
+  const out = [];
+  for (const m of models || []) {
+    const id = String((m && m.id) || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, label: (m && m.label) || id });
+  }
+  out.sort((a, b) => a.id.localeCompare(b.id));
+  return out;
+}
+
+async function readJsonResponse(res) {
+  if (res && res.json) return res.json;
+  if (res && typeof res.text === "string") {
+    try { return JSON.parse(res.text); } catch { return null; }
+  }
+  return null;
+}
+
 function flattenTextContent(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -357,7 +416,7 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
         : (response && response.body) || "";
       yield {
         type: "error",
-        error: { type: `http_${status}`, message: typeof text === "string" ? text.slice(0, 500) : String(text) },
+        error: { type: `http_${status}`, message: formatProviderHttpError({ spec, status, text }) },
       };
       return;
     }
@@ -445,8 +504,9 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
    * the failure rather than silently falling back to the registry.
    */
   async function listModels() {
+    const requestImpl = getRequest();
     const url = `${resolveBaseUrl(spec, userConfig).replace(/\/+$/, "")}/models`;
-    const res = await getRequest()({
+    const res = await requestImpl({
       url,
       method: "GET",
       headers: buildHeaders(spec, userConfig),
@@ -455,19 +515,8 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
     if (status < 200 || status >= 300) {
       throw new Error(`listModels: ${status} from ${url}`);
     }
-    let body = res && res.json;
-    if (!body && res && typeof res.text === "string") {
-      try { body = JSON.parse(res.text); } catch { body = null; }
-    }
-    const data = body && Array.isArray(body.data) ? body.data : [];
-    /** @type {Array<{id: string, label: string}>} */
-    const out = [];
-    for (const m of data) {
-      if (!m || typeof m.id !== "string" || !m.id) continue;
-      out.push({ id: m.id, label: m.id });
-    }
-    out.sort((a, b) => a.id.localeCompare(b.id));
-    return out;
+    const localModels = parseOpenAIModelList(await readJsonResponse(res));
+    return sortAndDedupeModels(localModels);
   }
 
   async function countTokens(messages) {
@@ -510,6 +559,7 @@ module.exports = {
   buildRequestBody,
   buildHeaders,
   buildEndpointUrl,
+  formatProviderHttpError,
   translateOpenAIChunk,
   mapOpenAIFinishReason,
 };

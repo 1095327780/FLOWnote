@@ -6,6 +6,7 @@ const {
   buildRequestBody,
   buildHeaders,
   buildEndpointUrl,
+  formatProviderHttpError,
   translateOpenAIChunk,
   mapOpenAIFinishReason,
 } = require("../../../runtime/providers/openai-chat-adapter");
@@ -16,7 +17,7 @@ function openaiUserConfig(over = {}) {
     providerId: "openai-official",
     mode: "api",
     apiKey: "sk-openai",
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     ...over,
   };
 }
@@ -26,7 +27,7 @@ function qwenUserConfig(over = {}) {
     providerId: "qwen",
     mode: "coding-plan",
     apiKey: "qwen-key",
-    model: "qwen-coder-plus",
+    model: "qwen3.6-plus",
     ...over,
   };
 }
@@ -85,18 +86,18 @@ test("buildEndpointUrl appends /chat/completions", () => {
 
 test("buildRequestBody converts a plain user message", () => {
   const body = buildRequestBody({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
     maxTokens: 32,
   }, PROVIDERS["openai-official"]);
-  assert.equal(body.model, "gpt-5.4");
+  assert.equal(body.model, "gpt-5.5");
   assert.equal(body.max_tokens, 32);
   assert.deepEqual(body.messages, [{ role: "user", content: "hi" }]);
 });
 
 test("buildRequestBody prepends system message when set", () => {
   const body = buildRequestBody({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
     system: "you are a tester",
     maxTokens: 32,
@@ -108,7 +109,7 @@ test("buildRequestBody prepends system message when set", () => {
 
 test("buildRequestBody translates tools array into OpenAI function shape", () => {
   const body = buildRequestBody({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [{ role: "user", content: [{ type: "text", text: "go" }] }],
     tools: [{ name: "vault_read", description: "read", input_schema: { type: "object" } }],
     maxTokens: 16,
@@ -122,7 +123,7 @@ test("buildRequestBody translates tools array into OpenAI function shape", () =>
 
 test("buildRequestBody converts an assistant tool_use into tool_calls", () => {
   const body = buildRequestBody({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [
       { role: "user", content: [{ type: "text", text: "read x.md" }] },
       {
@@ -144,7 +145,7 @@ test("buildRequestBody converts an assistant tool_use into tool_calls", () => {
 
 test("buildRequestBody splits user tool_result blocks into separate role=tool messages", () => {
   const body = buildRequestBody({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [
       { role: "user", content: [{ type: "text", text: "go" }] },
       { role: "assistant", content: [{ type: "tool_use", id: "tu-1", name: "vault_read", input: {} }] },
@@ -270,7 +271,7 @@ test("createMessage end-to-end streams Anthropic-shaped events", async () => {
     requestImpl: mockRequest(seen, okSseResponse(OPENAI_SSE_FIXTURE)),
   });
   const events = await collect(provider.createMessage({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
     maxTokens: 32,
   }));
@@ -305,7 +306,7 @@ test("createMessage non-streaming mode synthesizes the canonical event sequence"
     }),
   });
   const events = await collect(provider.createMessage({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
     maxTokens: 16,
   }));
@@ -330,13 +331,44 @@ test("createMessage on error response yields a single error event", async () => 
     }),
   });
   const events = await collect(provider.createMessage({
-    model: "gpt-5.4",
+    model: "gpt-5.5",
     messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
     maxTokens: 16,
   }));
   assert.equal(events.length, 1);
   assert.equal(events[0].type, "error");
   assert.match(events[0].error.type, /^http_401$/);
+});
+
+test("formatProviderHttpError explains Ollama models without tool support", () => {
+  const message = formatProviderHttpError({
+    spec: PROVIDERS.ollama,
+    status: 400,
+    text: JSON.stringify({
+      error: {
+        message: "registry.ollama.ai/library/deepseek-r1:8b does not support tools",
+        type: "invalid_request_error",
+      },
+    }),
+  });
+  assert.match(message, /does not support tools/);
+  assert.match(message, /当前模型不支持工具调用，请更换支持工具调用的模型。/);
+  assert.doesNotMatch(message, /电脑卡顿|Ollama 没启动/);
+});
+
+test("formatProviderHttpError explains missing Ollama models", () => {
+  const message = formatProviderHttpError({
+    spec: PROVIDERS.ollama,
+    status: 404,
+    text: JSON.stringify({
+      error: {
+        message: "model 'qwen2.5-coder:7b' not found",
+        type: "not_found_error",
+      },
+    }),
+  });
+  assert.match(message, /当前 Ollama 未找到这个模型/);
+  assert.match(message, /qwen2.5-coder:7b/);
 });
 
 test("createMessage carries the Qwen base URL when the user picks Qwen", async () => {
@@ -347,7 +379,7 @@ test("createMessage carries the Qwen base URL when the user picks Qwen", async (
     requestImpl: mockRequest(seen, okSseResponse(OPENAI_SSE_FIXTURE)),
   });
   await collect(provider.createMessage({
-    model: "qwen-coder-plus",
+    model: "qwen3.6-plus",
     messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
     maxTokens: 16,
   }));

@@ -44,18 +44,19 @@ function minimaxUserConfig(over = {}) {
 // Header building
 // ---------------------------------------------------------------------------
 
-test("buildHeaders sets Bearer auth for DeepSeek", () => {
+test("buildHeaders sets x-api-key auth for DeepSeek Anthropic-compatible messages", () => {
   const h = buildHeaders(PROVIDERS.deepseek, deepseekUserConfig());
-  assert.equal(h.Authorization, "Bearer sk-test-deepseek");
+  assert.equal(h["x-api-key"], "sk-test-deepseek");
+  assert.equal(h.Authorization, undefined);
   assert.equal(h["Content-Type"], "application/json");
-  assert.equal(h["anthropic-version"], "2026-01-01"); // default version header applies
+  assert.equal(h["anthropic-version"], "2023-06-01"); // default version header applies
 });
 
 test("buildHeaders sets x-api-key (raw) for Anthropic official, with version header", () => {
   const h = buildHeaders(PROVIDERS["anthropic-official"], anthropicUserConfig());
   assert.equal(h["x-api-key"], "sk-ant-test");
   assert.equal(h["Authorization"], undefined);
-  assert.equal(h["anthropic-version"], "2026-01-01");
+  assert.equal(h["anthropic-version"], "2023-06-01");
 });
 
 test("buildHeaders honors versionHeaderOverride", () => {
@@ -230,7 +231,8 @@ test("createMessage sends the correct URL, method, auth, and body", async () => 
 
   assert.equal(seen.value.url, "https://api.deepseek.com/anthropic/v1/messages");
   assert.equal(seen.value.method, "POST");
-  assert.equal(seen.value.headers.Authorization, "Bearer sk-test-deepseek");
+  assert.equal(seen.value.headers["x-api-key"], "sk-test-deepseek");
+  assert.equal(seen.value.headers.Authorization, undefined);
   assert.equal(seen.value.headers["Content-Type"], "application/json");
 
   const parsed = JSON.parse(seen.value.body);
@@ -336,7 +338,7 @@ test("createMessage on Anthropic-official uses x-api-key (not Bearer)", async ()
 test("factory rejects mismatched protocol", () => {
   assert.throws(() => createAnthropicMessagesProvider({
     spec: PROVIDERS["openai-official"],
-    userConfig: { providerId: "openai-official", mode: "api", apiKey: "x", model: "gpt-5.4" },
+    userConfig: { providerId: "openai-official", mode: "api", apiKey: "x", model: "gpt-5.5" },
   }), /protocol must be anthropic-messages/);
 });
 

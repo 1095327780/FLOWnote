@@ -83,10 +83,13 @@ test("DeepSeek V4 Flash is the default model for the default provider", () => {
   assert.equal(spec.defaultModel, "deepseek-v4-flash");
 });
 
-test("Anthropic uses x-api-key, everyone else uses Authorization", () => {
+test("provider auth matches each vendor's documented API", () => {
   for (const spec of listProviderSpecs()) {
-    if (spec.id === "anthropic-official") {
+    if (spec.id === "anthropic-official" || spec.id === "deepseek") {
       assert.equal(spec.auth.headerName, "x-api-key");
+      assert.equal(spec.auth.scheme, "raw");
+    } else if (spec.id === "minimax") {
+      assert.equal(spec.auth.headerName, "X-Api-Key");
       assert.equal(spec.auth.scheme, "raw");
     } else if (spec.id === "opencode-legacy" || spec.id === "ollama") {
       // opencode does its own thing — no http auth header
@@ -165,7 +168,7 @@ test("resolveBaseUrl uses region-specific URL when spec.region is defined", () =
     providerId: "zhipu-glm",
     mode: "coding-plan",
     apiKey: "k",
-    model: "glm-4.7-flash",
+    model: "glm-4.7",
     region: "cn",
   });
   assert.equal(cn, "https://open.bigmodel.cn/api/anthropic");
@@ -174,7 +177,7 @@ test("resolveBaseUrl uses region-specific URL when spec.region is defined", () =
     providerId: "zhipu-glm",
     mode: "coding-plan",
     apiKey: "k",
-    model: "glm-4.7-flash",
+    model: "glm-4.7",
     region: "intl",
   });
   assert.equal(intl, "https://api.z.ai/api/anthropic");

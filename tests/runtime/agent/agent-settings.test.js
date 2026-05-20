@@ -191,7 +191,7 @@ test("switchActiveProvider resets mode/model and preserves keys", () => {
   switchActiveProvider(s, "zhipu-glm");
   assert.equal(s.direct.providerId, "zhipu-glm");
   assert.equal(s.direct.providerMode, "coding-plan");
-  assert.equal(s.direct.model, "glm-4.7-flash");
+  assert.equal(s.direct.model, "glm-5.1");
   // keys preserved
   assert.equal(s.direct.apiKeys.deepseek, "sk-ds");
   assert.equal(s.direct.apiKeys["zhipu-glm"], "sk-glm");

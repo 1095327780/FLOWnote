@@ -127,6 +127,40 @@ function parseSkillSelectorSlashCommand(text) {
   return { command: "skills" };
 }
 
+function isMobileRuntime() {
+  try {
+    const { Platform = {} } = require("obsidian");
+    return Boolean(Platform.isMobile);
+  } catch (_e) {
+    return false;
+  }
+}
+
+function getMobileOllamaModelTarget(plugin) {
+  const settings = plugin && plugin.settings;
+  const agent = settings && settings.agentProvider;
+  const direct = agent && agent.direct;
+  if (!settings || !agent || !direct) return null;
+  if (!isMobileRuntime() || String(direct.providerId || "").trim() !== "ollama") return null;
+  try {
+    const { buildMobileAgentSettingsOverride } = require("../mobile/mobile-ai-service");
+    const mobileOverride = buildMobileAgentSettingsOverride(settings);
+    if (!mobileOverride || !mobileOverride.direct) return null;
+    return {
+      agent: mobileOverride,
+      direct: mobileOverride.direct,
+      saveModel(modelId) {
+        if (!settings.mobileCapture || typeof settings.mobileCapture !== "object") {
+          settings.mobileCapture = {};
+        }
+        settings.mobileCapture.model = String(modelId || "").trim();
+      },
+    };
+  } catch (_e) {
+    return null;
+  }
+}
+
 function resolveSkillFromPrompt(userText) {
   const input = String(userText || "").trim();
   if (!input.startsWith("/")) return { skill: null, promptText: input };
@@ -274,16 +308,23 @@ async function applyModelSelection(modelID, options = {}) {
   // No OpenCode round-trip.
   const ap = this.plugin.settings.agentProvider;
   if (ap && ap.mode === "direct") {
-    const direct = ap.direct || {};
+    const mobileTarget = getMobileOllamaModelTarget(this.plugin);
+    const direct = (mobileTarget && mobileTarget.direct) || ap.direct || {};
     const previousDirectModel = String(direct.model || "");
     let registry;
     try { registry = require("../providers/registry"); } catch { registry = null; }
     const spec = registry ? registry.getProviderSpec(direct.providerId || "") : null;
-    const valid = !spec ? true : (spec.models || []).some((m) => m && m.id === normalized);
+    const select = this.elements && this.elements.modelSelect;
+    const inCurrentPicker = Boolean(select && Array.from(select.options || []).some((opt) => opt && opt.value === normalized));
+    const valid = !spec ? true : (inCurrentPicker || (spec.models || []).some((m) => m && m.id === normalized));
     if (normalized && !valid) {
       throw new Error(tr(this, "view.model.unavailable", "Model unavailable or not authorized: {model}", { model: normalized }));
     }
-    direct.model = normalized;
+    if (mobileTarget) {
+      mobileTarget.saveModel(normalized);
+    } else {
+      direct.model = normalized;
+    }
     this.selectedModel = normalized;
     await this.plugin.saveSettings();
     if (this.elements.modelSelect) {

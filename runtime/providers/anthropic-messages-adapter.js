@@ -2,8 +2,8 @@
 //
 // Implements the Provider interface defined in ./provider.js. Used by:
 //   - anthropic-official (uses x-api-key auth)
-//   - deepseek, zhipu-glm, minimax, moonshot-kimi (all use Bearer auth
-//     and the /anthropic-suffixed base URL convention)
+//   - deepseek, zhipu-glm, minimax (Anthropic-compatible endpoints with
+//     provider-specific auth and the /anthropic-suffixed base URL convention)
 //
 // Wire format: standard Anthropic Messages API.
 //   POST <baseUrl>/v1/messages
@@ -18,7 +18,7 @@ const { parseSseStream } = require("./sse-parser");
 const { streamingFetch } = require("./streaming-fetch");
 const { resolveBaseUrl } = require("./registry");
 
-const DEFAULT_VERSION_HEADER = "anthropic-version: 2026-01-01";
+const DEFAULT_VERSION_HEADER = "anthropic-version: 2023-06-01";
 const DEFAULT_USER_AGENT = "FLOWnote (Obsidian)";
 
 /**
@@ -36,8 +36,8 @@ function buildHeaders(spec, userConfig) {
     "User-Agent": userConfig.userAgentOverride || DEFAULT_USER_AGENT,
   };
 
-  // Auth: `x-api-key` (raw) for Anthropic native, `Authorization: Bearer`
-  // for everyone else. Driven by spec.auth, not provider id.
+  // Auth is driven by spec.auth, not provider id. Anthropic-compatible
+  // vendors do not all use the same header.
   const authValue = spec.auth.scheme === "bearer"
     ? `Bearer ${userConfig.apiKey || ""}`
     : (userConfig.apiKey || "");
@@ -54,6 +54,20 @@ function buildHeaders(spec, userConfig) {
     if (name && value) headers[name.trim()] = value;
   }
 
+  return headers;
+}
+
+function setAuthHeader(headers, auth, apiKey) {
+  if (!auth || !auth.headerName) return;
+  headers[auth.headerName] = auth.scheme === "bearer" ? `Bearer ${apiKey || ""}` : (apiKey || "");
+}
+
+function applyListAuthHeaders(headers, spec, userConfig) {
+  if (spec.modelsListAuth) {
+    if (spec.auth && spec.auth.headerName) delete headers[spec.auth.headerName];
+    setAuthHeader(headers, spec.modelsListAuth, userConfig.apiKey);
+    return headers;
+  }
   return headers;
 }
 
@@ -273,34 +287,37 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
   }
 
   /**
-   * Fetch the live model list. Anthropic native doesn't have a public
-   * list endpoint, but the Chinese providers using this protocol
-   * (DeepSeek, MiniMax, Moonshot) do — they expose `/v1/models` on
-   * their OpenAI-compat sibling endpoint. We use `spec.modelsListEndpoint`
-   * if defined, otherwise derive from the Anthropic-compat base URL by
-   * stripping the trailing `/anthropic` and appending `/v1/models`.
+   * Fetch the live model list. Providers can either declare an explicit
+   * endpoint (DeepSeek, Anthropic official) or a path relative to their
+   * Anthropic-compatible base URL (MiniMax). Older compat providers fall
+   * back to the OpenAI-shaped sibling endpoint by stripping `/anthropic`
+   * and appending `/v1/models`.
    *
    * Throws "not supported" if neither path is available, so the settings
    * UI can fall back to the hardcoded registry list cleanly.
    */
   async function listModels() {
+    const request = getRequest();
     let url = spec.modelsListEndpoint;
+    const base = resolveBaseUrl(spec, userConfig).replace(/\/+$/, "");
+    if (!url && spec.modelsListPath) {
+      url = `${base}/${String(spec.modelsListPath).replace(/^\/+/, "")}`;
+    }
     if (!url) {
-      const base = resolveBaseUrl(spec, userConfig).replace(/\/+$/, "");
       const stripped = base.replace(/\/anthropic$/, "");
       if (stripped === base) {
         throw new Error("listModels: provider does not advertise a model-list endpoint");
       }
       url = `${stripped}/v1/models`;
     }
-    const headers = buildHeaders(spec, userConfig);
+    const headers = applyListAuthHeaders(buildHeaders(spec, userConfig), spec, userConfig);
     // /v1/models is an OpenAI-shape endpoint — use Bearer auth even if
     // the spec was configured with x-api-key for the Messages endpoint.
-    if (spec.auth.scheme !== "bearer") {
+    if (!spec.modelsListEndpoint && !spec.modelsListPath && spec.auth.scheme !== "bearer") {
       delete headers[spec.auth.headerName];
       headers.Authorization = `Bearer ${userConfig.apiKey || ""}`;
     }
-    const res = await requestImpl({ url, method: "GET", headers });
+    const res = await request({ url, method: "GET", headers });
     const status = res && typeof res.status === "number" ? res.status : 0;
     if (status < 200 || status >= 300) {
       throw new Error(`listModels: ${status} from ${url}`);
