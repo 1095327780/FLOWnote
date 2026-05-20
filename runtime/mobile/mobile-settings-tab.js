@@ -15,12 +15,6 @@ const {
   resolveEffectiveLocaleFromSettings,
 } = require("./mobile-settings-utils");
 const {
-  PROVIDER_PRESETS,
-  getAiProviderDisplayName,
-  listCaptureModels,
-  testConnection,
-} = require("./mobile-ai-service");
-const {
   renderAgentProviderSection,
 } = require("../settings/agent-provider-section-methods");
 const { buildShortcutUrls } = require("./shortcut-url-utils");
@@ -55,30 +49,6 @@ async function copyShortcutText(text) {
     return Boolean(ok);
   }
   return false;
-}
-
-function getCaptureModelOptions(plugin, providerId, preset, currentModel) {
-  const fetchedRoot = plugin.__flownoteMobileCaptureFetchedModels || {};
-  const fetched = fetchedRoot[providerId];
-  const builtin = Array.isArray(preset.models) ? preset.models : [];
-  const ids = [];
-  for (const id of builtin) {
-    const text = String(id || "").trim();
-    if (text && !ids.includes(text)) ids.push(text);
-  }
-  if (preset.defaultModel && !ids.includes(preset.defaultModel)) ids.unshift(preset.defaultModel);
-  if (fetched && Array.isArray(fetched.models)) {
-    for (const item of fetched.models) {
-      const text = String((item && item.id) || "").trim();
-      if (text && !ids.includes(text)) ids.push(text);
-    }
-  }
-  const current = String(currentModel || "").trim();
-  if (current && !ids.includes(current)) ids.unshift(current);
-  return {
-    models: ids.map((id) => ({ id, label: id })),
-    fetchedAt: fetched && fetched.fetchedAt ? fetched.fetchedAt : 0,
-  };
 }
 
 class MobileSettingsTab extends PluginSettingTab {
@@ -129,117 +99,7 @@ class MobileSettingsTab extends PluginSettingTab {
     const mc = this.plugin.settings.mobileCapture;
     mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
     const lr = mc.linkResolver;
-    const preset = PROVIDER_PRESETS[mc.provider] || PROVIDER_PRESETS.deepseek;
     const resolverProvider = getResolverProviderPreset(lr.provider);
-
-    new Setting(containerEl)
-      .setName(t("mobile.settings.providerName", "AI Provider"))
-      .setDesc(t("mobile.settings.providerDesc", "Choose preset provider or custom endpoint."))
-      .addDropdown((d) => {
-        for (const [id, p] of Object.entries(PROVIDER_PRESETS)) {
-          d.addOption(id, getAiProviderDisplayName(id, p.name, locale));
-        }
-        d.setValue(mc.provider);
-        bindDropdownChange(d, async (providerId) => {
-          mc.provider = providerId;
-          await this.plugin.saveSettings();
-          this.display();
-        });
-      });
-
-    const apiKeySetting = new Setting(containerEl)
-      .setName(t("mobile.settings.apiKeyName", "API Key"))
-      .addText((text) => {
-        text.inputEl.type = "password";
-        text.inputEl.style.width = "100%";
-        text.setPlaceholder("sk-...").setValue(mc.apiKey).onChange(async (v) => {
-          mc.apiKey = v.trim();
-          await this.plugin.saveSettings();
-        });
-      });
-
-    {
-      const descFrag = document.createDocumentFragment();
-      descFrag.appendText(t("mobile.settings.apiKeyDesc", "Provider API key. Leave empty to skip AI cleanup."));
-      if (preset.keyUrl) {
-        descFrag.appendText(" ");
-        const link = descFrag.createEl("a", {
-          text: t("mobile.settings.providerKeyLinkPrefix", "Get key for {name}", {
-            name: getAiProviderDisplayName(mc.provider, preset.name, locale),
-          }),
-          href: preset.keyUrl,
-        });
-        link.setAttr("target", "_blank");
-      }
-      apiKeySetting.setDesc(descFrag);
-    }
-
-    const effectiveUrl = mc.baseUrl || preset.baseUrl || "(Not set)";
-    new Setting(containerEl)
-      .setName(t("mobile.settings.baseUrlName", "Base URL (optional)"))
-      .setDesc(t("mobile.settings.baseUrlDesc", "Leave empty to use preset. Current: {value}", { value: effectiveUrl }))
-      .addText((text) => {
-        text.setPlaceholder(preset.baseUrl || "https://api.example.com").setValue(mc.baseUrl).onChange(async (v) => {
-          mc.baseUrl = v.trim();
-          await this.plugin.saveSettings();
-        });
-      });
-
-    const effectiveModel = mc.model || preset.defaultModel || "(Not set)";
-    const captureModelState = getCaptureModelOptions(this.plugin, mc.provider, preset, mc.model || preset.defaultModel);
-    const fetchedAgeMin = captureModelState.fetchedAt
-      ? Math.round((Date.now() - captureModelState.fetchedAt) / 60000)
-      : null;
-    new Setting(containerEl)
-      .setName(t("mobile.settings.modelName", "Model (optional)"))
-      .setDesc(
-        fetchedAgeMin === null
-          ? t("mobile.settings.modelDesc", "Leave empty to use preset. Current: {value}", { value: effectiveModel })
-          : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin }),
-      )
-      .addDropdown((dropdown) => {
-        for (const model of captureModelState.models) {
-          dropdown.addOption(model.id, model.label);
-        }
-        dropdown.setValue(mc.model || preset.defaultModel || "");
-        bindDropdownChange(dropdown, async (modelId) => {
-          mc.model = String(modelId || "").trim();
-          await this.plugin.saveSettings();
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText(t("settings.agent.modelRefresh", "刷新"));
-        button.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /models 接口拉取最新模型列表（需要已填 API Key）。"));
-        button.onClick(async () => {
-          button.setDisabled(true);
-          const originalText = button.buttonEl.textContent;
-          button.setButtonText(t("settings.agent.modelRefreshLoading", "拉取中…"));
-          try {
-            if (!String(mc.apiKey || "").trim()) {
-              throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
-            }
-            const models = await listCaptureModels(mc, { locale });
-            if (!this.plugin.__flownoteMobileCaptureFetchedModels) {
-              this.plugin.__flownoteMobileCaptureFetchedModels = {};
-            }
-            this.plugin.__flownoteMobileCaptureFetchedModels[mc.provider] = {
-              models,
-              fetchedAt: Date.now(),
-            };
-            if (!mc.model && models.length && models[0].id) {
-              mc.model = models[0].id;
-              await this.plugin.saveSettings();
-            }
-            new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: models.length }));
-            this.display();
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
-            button.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
-            button.setDisabled(false);
-          }
-        });
-      });
 
     new Setting(containerEl)
       .setName(t("mobile.settings.aiCleanupName", "Enable AI cleanup"))
@@ -372,28 +232,6 @@ class MobileSettingsTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl)
-      .setName(t("mobile.settings.testName", "Test AI connection"))
-      .setDesc(t("mobile.settings.testDesc", "Verify current AI provider configuration."))
-      .addButton((b) => {
-        b.setButtonText(t("mobile.settings.testBtn", "Test")).onClick(async () => {
-          if (!mc.apiKey) {
-            new Notice(t("notices.needApiKeyFirst", "Please fill API key first"));
-            return;
-          }
-          b.setDisabled(true);
-          b.setButtonText(t("mobile.settings.testBusy", "Testing..."));
-          try {
-            const result = await testConnection(mc, { locale });
-            new Notice(result.ok ? `✅ ${result.message}` : `❌ ${result.message}`);
-          } catch (e) {
-            new Notice(`❌ ${e instanceof Error ? e.message : String(e)}`);
-          } finally {
-            b.setDisabled(false);
-            b.setButtonText(t("mobile.settings.testBtn", "Test"));
-          }
-        });
-      });
   }
 
   renderShortcutSection(containerEl, t) {

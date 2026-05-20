@@ -61,6 +61,7 @@
  * @property {boolean} [desktopOnly]              true for opencode-legacy
  * @property {boolean} [userMustProvideModels]    true for custom OpenAI-compat
  * @property {boolean} [userMustProvideBaseUrl]   true for custom OpenAI-compat
+ * @property {boolean} [apiKeyOptional]           true for local providers such as Ollama
  */
 
 /**

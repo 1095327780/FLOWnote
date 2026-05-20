@@ -41,6 +41,187 @@ function ensureAgentProviderSettings(plugin) {
   return plugin.settings.agentProvider;
 }
 
+function getCaptureModelOptions(plugin, providerId, preset, currentModel) {
+  const fetchedRoot = plugin.__flownoteMobileCaptureFetchedModels || {};
+  const fetched = fetchedRoot[providerId];
+  const builtin = Array.isArray(preset.models) ? preset.models : [];
+  const ids = [];
+  for (const id of builtin) {
+    const text = String(id || "").trim();
+    if (text && !ids.includes(text)) ids.push(text);
+  }
+  if (preset.defaultModel && !ids.includes(preset.defaultModel)) ids.unshift(preset.defaultModel);
+  if (fetched && Array.isArray(fetched.models)) {
+    for (const item of fetched.models) {
+      const text = String((item && item.id) || "").trim();
+      if (text && !ids.includes(text)) ids.push(text);
+    }
+  }
+  const current = String(currentModel || "").trim();
+  if (current && !ids.includes(current)) ids.unshift(current);
+  return {
+    models: ids.map((id) => ({ id, label: id })),
+    fetchedAt: fetched && fetched.fetchedAt ? fetched.fetchedAt : 0,
+  };
+}
+
+function ensureMobileCaptureSettings(plugin) {
+  if (!plugin.settings.mobileCapture || typeof plugin.settings.mobileCapture !== "object") {
+    plugin.settings.mobileCapture = {};
+  }
+  const mc = plugin.settings.mobileCapture;
+  if (!mc.provider) mc.provider = "deepseek";
+  if (typeof mc.apiKey !== "string") mc.apiKey = "";
+  if (typeof mc.baseUrl !== "string") mc.baseUrl = "";
+  if (typeof mc.model !== "string") mc.model = "";
+  return mc;
+}
+
+function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
+  const t = (key, fallback, params = {}) =>
+    tFromContext(tab || plugin, key, fallback, params);
+  let mobileAiService;
+  try {
+    mobileAiService = require("../mobile/mobile-ai-service");
+  } catch (_e) {
+    return;
+  }
+  const {
+    PROVIDER_PRESETS,
+    getAiProviderDisplayName,
+    listCaptureModels,
+  } = mobileAiService;
+  const mc = ensureMobileCaptureSettings(plugin);
+  const locale = typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : "zh-CN";
+  const preset = PROVIDER_PRESETS[mc.provider] || PROVIDER_PRESETS.deepseek;
+
+  const note = containerEl.createDiv({ cls: "oc-settings-note oc-settings-note-warning" });
+  note.createEl("div", {
+    cls: "oc-settings-note-title",
+    text: t("mobile.settings.ollamaDesktopWarningTitle", "电脑端正在使用 Ollama"),
+  });
+  note.createEl("div", {
+    cls: "oc-settings-note-body",
+    text: t(
+      "mobile.settings.ollamaDesktopWarningBody",
+      "Ollama 是电脑本机服务，手机无法直接访问电脑的 localhost。如果你需要在手机上使用 AI 聊天和快速捕获清理，请在下面配置一个手机可访问的云端接口。",
+    ),
+  });
+
+  new Setting(containerEl)
+    .setName(t("mobile.settings.providerName", "移动端 AI 提供商"))
+    .setDesc(t("mobile.settings.providerDesc", "仅在电脑端 Agent 使用 Ollama 时生效，用于手机端聊天和快速捕获清理。"))
+    .addDropdown((d) => {
+      for (const [id, p] of Object.entries(PROVIDER_PRESETS)) {
+        d.addOption(id, getAiProviderDisplayName(id, p.name, locale));
+      }
+      d.setValue(mc.provider);
+      bindDropdownChange(d, async (providerId) => {
+        mc.provider = providerId;
+        await plugin.saveSettings();
+        if (typeof refresh === "function") refresh();
+      });
+    });
+
+  const apiKeySetting = new Setting(containerEl)
+    .setName(t("mobile.settings.apiKeyName", "移动端 API Key"))
+    .addText((text) => {
+      text.inputEl.type = "password";
+      text.inputEl.style.width = "100%";
+      text
+        .setPlaceholder("sk-...")
+        .setValue(mc.apiKey)
+        .onChange(async (v) => {
+          mc.apiKey = v.trim();
+          await plugin.saveSettings();
+        });
+    });
+
+  const descFrag = document.createDocumentFragment();
+  descFrag.appendText(t("mobile.settings.apiKeyDesc", "填入手机端可访问的云端模型 API Key。留空则手机端跳过 AI 清理。"));
+  if (preset.keyUrl) {
+    descFrag.appendText(" ");
+    const link = descFrag.createEl("a", {
+      text: t("mobile.settings.providerKeyLinkPrefix", "前往 {name} 获取 →", {
+        name: getAiProviderDisplayName(mc.provider, preset.name, locale),
+      }),
+      href: preset.keyUrl,
+    });
+    link.setAttr("target", "_blank");
+  }
+  apiKeySetting.setDesc(descFrag);
+
+  new Setting(containerEl)
+    .setName(t("mobile.settings.baseUrlName", "移动端 Base URL（可选）"))
+    .setDesc(t("mobile.settings.baseUrlDesc", "留空使用预设地址。当前生效: {value}", {
+      value: mc.baseUrl || preset.baseUrl || "(无)",
+    }))
+    .addText((text) => {
+      text
+        .setPlaceholder(preset.baseUrl || "https://api.example.com")
+        .setValue(mc.baseUrl)
+        .onChange(async (v) => {
+          mc.baseUrl = v.trim();
+          await plugin.saveSettings();
+        });
+    });
+
+  const captureModelState = getCaptureModelOptions(plugin, mc.provider, preset, mc.model || preset.defaultModel);
+  const fetchedAgeMin = captureModelState.fetchedAt
+    ? Math.round((Date.now() - captureModelState.fetchedAt) / 60000)
+    : null;
+  new Setting(containerEl)
+    .setName(t("mobile.settings.modelName", "移动端模型名（可选）"))
+    .setDesc(
+      fetchedAgeMin === null
+        ? t("mobile.settings.modelDesc", "留空使用预设模型。当前生效: {value}", { value: mc.model || preset.defaultModel || "(无)" })
+        : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin }),
+    )
+    .addDropdown((dropdown) => {
+      for (const model of captureModelState.models) {
+        dropdown.addOption(model.id, model.label);
+      }
+      dropdown.setValue(mc.model || preset.defaultModel || "");
+      bindDropdownChange(dropdown, async (modelId) => {
+        mc.model = String(modelId || "").trim();
+        await plugin.saveSettings();
+      });
+    })
+    .addButton((button) => {
+      button.setButtonText(t("settings.agent.modelRefresh", "刷新"));
+      button.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /v1/models 接口拉取最新模型列表（需要已填 API Key）。"));
+      button.onClick(async () => {
+        button.setDisabled(true);
+        const originalText = button.buttonEl.textContent;
+        button.setButtonText(t("settings.agent.modelRefreshLoading", "拉取中…"));
+        try {
+          if (!String(mc.apiKey || "").trim()) {
+            throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
+          }
+          const models = await listCaptureModels(mc, { locale });
+          if (!plugin.__flownoteMobileCaptureFetchedModels) {
+            plugin.__flownoteMobileCaptureFetchedModels = {};
+          }
+          plugin.__flownoteMobileCaptureFetchedModels[mc.provider] = {
+            models,
+            fetchedAt: Date.now(),
+          };
+          if (!mc.model && models.length && models[0].id) {
+            mc.model = models[0].id;
+            await plugin.saveSettings();
+          }
+          new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: models.length }));
+          if (typeof refresh === "function") refresh();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
+          button.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
+          button.setDisabled(false);
+        }
+      });
+    });
+}
+
 /**
  * Render the section into containerEl.
  *
@@ -180,6 +361,9 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
 
   const spec = getProviderSpec(agent.direct.providerId);
   if (!spec) return;
+  if (spec.id === "ollama") {
+    renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh: reRender });
+  }
 
   // --- Mode dropdown (only if provider has more than one mode) ------------
   const modeIds = Object.keys(spec.modes || {});
@@ -256,16 +440,22 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
   // --- API key -------------------------------------------------------------
   const keyHolder = { value: getActiveApiKey(agent) };
   new Setting(containerEl)
-    .setName(t("settings.agent.apiKeyName", "API Key"))
+    .setName(spec.apiKeyOptional
+      ? t("settings.agent.apiKeyNameOptional", "API Key（可选）")
+      : t("settings.agent.apiKeyName", "API Key"))
     .setDesc(t(
-      "settings.agent.apiKeyDesc",
-      "粘贴该服务商的 API Key。切换服务商时每家 key 单独保存，互不覆盖。",
+      spec.apiKeyOptional ? "settings.agent.apiKeyDescOptional" : "settings.agent.apiKeyDesc",
+      spec.apiKeyOptional
+        ? "本地服务通常不需要 API Key；如果你的转发服务要求鉴权，可以在这里填写。"
+        : "粘贴该服务商的 API Key。切换服务商时每家 key 单独保存，互不覆盖。",
     ))
     .addText((tx) => {
       const inputEl = tx.inputEl;
       if (inputEl) inputEl.type = "password";
       tx
-        .setPlaceholder(t("settings.agent.apiKeyPlaceholder", "sk-..."))
+        .setPlaceholder(spec.apiKeyOptional
+          ? t("settings.agent.apiKeyPlaceholderOptional", "可留空")
+          : t("settings.agent.apiKeyPlaceholder", "sk-..."))
         .setValue(keyHolder.value)
         .onChange(async (v) => {
           keyHolder.value = String(v || "");
@@ -328,7 +518,9 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
       })
       .addButton((b) => {
         b.setButtonText(t("settings.agent.modelRefresh", "刷新"));
-        b.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /v1/models 接口拉取最新模型列表（需要已填 API Key）。"));
+        b.setTooltip(spec.apiKeyOptional
+          ? t("settings.agent.modelRefreshTooltipOptional", "从模型服务的 /v1/models 接口拉取本机可用模型。")
+          : t("settings.agent.modelRefreshTooltip", "从官方 /v1/models 接口拉取最新模型列表（需要已填 API Key）。"));
         b.onClick(async () => {
           b.setDisabled(true);
           const originalText = b.buttonEl.textContent;
@@ -345,7 +537,7 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
               versionHeaderOverride: agent.direct.versionHeaderOverride || "",
               stream: false,
             };
-            if (!userConfig.apiKey) {
+            if (!userConfig.apiKey && !spec.apiKeyOptional) {
               throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
             }
             const provider = buildProviderFromSpec({ spec, userConfig });
@@ -395,7 +587,7 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
             versionHeaderOverride: agent.direct.versionHeaderOverride || "",
             stream: false, // simpler + faster for the test ping
           };
-          if (!userConfig.apiKey) {
+          if (!userConfig.apiKey && !spec.apiKeyOptional) {
             throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
           }
           if (spec.userMustProvideBaseUrl && !userConfig.baseUrlOverride) {

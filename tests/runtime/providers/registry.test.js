@@ -88,7 +88,7 @@ test("Anthropic uses x-api-key, everyone else uses Authorization", () => {
     if (spec.id === "anthropic-official") {
       assert.equal(spec.auth.headerName, "x-api-key");
       assert.equal(spec.auth.scheme, "raw");
-    } else if (spec.id === "opencode-legacy") {
+    } else if (spec.id === "opencode-legacy" || spec.id === "ollama") {
       // opencode does its own thing — no http auth header
     } else {
       assert.equal(spec.auth.headerName, "Authorization");
@@ -124,6 +124,20 @@ test("custom OpenAI-compat is the open slot for user-supplied endpoints", () => 
   const spec = PROVIDERS["openai-compat-custom"];
   assert.equal(spec.userMustProvideBaseUrl, true);
   assert.equal(spec.userMustProvideModels, true);
+});
+
+test("Ollama is a local OpenAI-compatible provider with optional API key", () => {
+  const spec = PROVIDERS.ollama;
+  assert.equal(spec.protocol, "openai-chat");
+  assert.equal(spec.defaultMode, "local");
+  assert.equal(resolveBaseUrl(spec, {
+    providerId: "ollama",
+    mode: "local",
+    apiKey: "",
+    model: spec.defaultModel,
+  }), "http://localhost:11434/v1");
+  assert.equal(spec.apiKeyOptional, true);
+  assert.equal(spec.auth.headerName, "");
 });
 
 test("getProviderSpec returns the spec for a known id and undefined otherwise", () => {

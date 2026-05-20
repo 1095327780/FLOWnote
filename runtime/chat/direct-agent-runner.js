@@ -731,7 +731,29 @@ async function runDirectAgentTurn({
   skillRegistryOverride,
 }) {
   const plugin = view.plugin;
-  const settings = plugin.settings.agentProvider || {};
+  let settings = plugin.settings.agentProvider || {};
+  let isMobileRuntime = false;
+  try {
+    const { Platform = {} } = require("obsidian");
+    isMobileRuntime = Boolean(Platform.isMobile);
+  } catch (_e) {
+    // Keep desktop/direct behavior if Obsidian Platform is unavailable in tests.
+  }
+  if (
+    isMobileRuntime
+    && settings
+    && settings.direct
+    && String(settings.direct.providerId || "").trim() === "ollama"
+  ) {
+    // Lazy-load mobile-only helpers so Node tests that do not mock Obsidian
+    // can still import the direct runner.
+    const { buildMobileAgentSettingsOverride } = require("../mobile/mobile-ai-service");
+    const mobileOverride = buildMobileAgentSettingsOverride(plugin.settings);
+    if (!mobileOverride) {
+      throw new Error("移动端无法直接使用电脑端 Ollama。请在 FLOWnote 设置中为移动端单独配置可访问的云端 AI 模型。");
+    }
+    settings = mobileOverride;
+  }
 
   // ---------------------------------------------------------------------
   // 1. Resolve Provider (will throw on missing key etc. — let it propagate)

@@ -94,6 +94,28 @@ test("openai-chat listModels: skips entries with no id", async () => {
   assert.deepEqual(out.map((m) => m.id), ["another", "valid"]);
 });
 
+test("openai-chat listModels: Ollama works without API key", async () => {
+  const spec = {
+    id: "ollama",
+    displayName: "Ollama",
+    protocol: "openai-chat",
+    auth: { headerName: "", scheme: "raw" },
+    apiKeyOptional: true,
+    modes: { local: { label: "Local", baseUrl: "http://localhost:11434/v1" } },
+    defaultMode: "local",
+    models: [],
+  };
+  const userConfig = { providerId: "ollama", mode: "local", apiKey: "", model: "llama3.2" };
+  const { calls, requestImpl } = makeRequestRecorder([
+    { status: 200, json: { data: [{ id: "llama3.2" }, { id: "qwen2.5-coder:7b" }] } },
+  ]);
+  const provider = createOpenAIChatProvider({ spec, userConfig, requestImpl });
+  const out = await provider.listModels();
+  assert.equal(calls[0].url, "http://localhost:11434/v1/models");
+  assert.equal(calls[0].headers.Authorization, undefined);
+  assert.deepEqual(out.map((m) => m.id), ["llama3.2", "qwen2.5-coder:7b"]);
+});
+
 // ---------------------------------------------------------------------
 // anthropic-messages-adapter: listModels uses sibling /v1/models
 // ---------------------------------------------------------------------

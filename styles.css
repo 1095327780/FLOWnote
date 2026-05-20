@@ -3060,6 +3060,27 @@ padding: 3px 7px;
 .oc-permission-risk-warning {
   color: var(--text-warning, #b45309);
 }
+.oc-settings-note {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+.oc-settings-note-warning {
+  border-color: color-mix(in srgb, var(--text-warning, #b45309) 36%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--text-warning, #b45309) 9%, var(--background-secondary));
+}
+.oc-settings-note-title {
+  font-weight: 650;
+  color: var(--text-normal);
+  margin-bottom: 4px;
+}
+.oc-settings-note-body {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .oc-skill-mgmt-actions {
   display: flex;
   gap: 6px;

@@ -46,30 +46,6 @@ function getResolverProviderPreset(providerId) {
     || LINK_RESOLVER_PROVIDER_PRESETS.tianapi;
 }
 
-function getCaptureModelOptions(plugin, providerId, preset, currentModel) {
-  const fetchedRoot = plugin.__flownoteMobileCaptureFetchedModels || {};
-  const fetched = fetchedRoot[providerId];
-  const builtin = Array.isArray(preset.models) ? preset.models : [];
-  const ids = [];
-  for (const id of builtin) {
-    const text = String(id || "").trim();
-    if (text && !ids.includes(text)) ids.push(text);
-  }
-  if (preset.defaultModel && !ids.includes(preset.defaultModel)) ids.unshift(preset.defaultModel);
-  if (fetched && Array.isArray(fetched.models)) {
-    for (const item of fetched.models) {
-      const text = String((item && item.id) || "").trim();
-      if (text && !ids.includes(text)) ids.push(text);
-    }
-  }
-  const current = String(currentModel || "").trim();
-  if (current && !ids.includes(current)) ids.unshift(current);
-  return {
-    models: ids.map((id) => ({ id, label: id })),
-    fetchedAt: fetched && fetched.fetchedAt ? fetched.fetchedAt : 0,
-  };
-}
-
 function getResolverProviderKey(linkResolver, providerId) {
   if (providerId === "tianapi") return String(linkResolver.tianapiKey || "").trim();
   if (providerId === "showapi") return String(linkResolver.showapiAppKey || "").trim();
@@ -98,10 +74,6 @@ function isWindowsUiPlatform() {
     return /windows/i.test(navigator.userAgent);
   }
   return false;
-}
-
-function getAiProviderDisplayName(providerId, fallbackName, t) {
-  return t(`mobile.providers.${String(providerId || "").trim().toLowerCase()}`, fallbackName || String(providerId || ""));
 }
 
 async function copyShortcutText(text) {
@@ -612,120 +584,11 @@ class BasicSettingsSectionMethods {
 
   renderMobileCaptureSection(containerEl) {
     const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
-    let PROVIDER_PRESETS;
-    let listCaptureModels;
-    try {
-      const mobileAiService = require("../mobile/mobile-ai-service");
-      PROVIDER_PRESETS = mobileAiService.PROVIDER_PRESETS;
-      listCaptureModels = mobileAiService.listCaptureModels;
-    } catch (_e) {
-      return; // mobile module not available
-    }
-
     const mc = this.plugin.settings.mobileCapture;
     const locale = typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en";
     mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
     const lr = mc.linkResolver;
     const resolverProvider = getResolverProviderPreset(lr.provider);
-
-    new Setting(containerEl)
-      .setName(t("mobile.settings.providerName", "AI 提供商"))
-      .setDesc(t("mobile.settings.providerDesc", "选择预设提供商或自定义。"))
-      .addDropdown((d) => {
-        for (const [id, preset] of Object.entries(PROVIDER_PRESETS)) {
-          d.addOption(id, getAiProviderDisplayName(id, preset.name, t));
-        }
-        d.setValue(mc.provider);
-        bindDropdownChange(d, async (providerId) => {
-          mc.provider = providerId;
-          await this.plugin.saveSettings();
-          this.display();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName(t("mobile.settings.apiKeyName", "API Key"))
-      .setDesc(t("mobile.settings.apiKeyDesc", "留空则跳过 AI 清理，直接记录原文。"))
-      .addText((text) => {
-        text.inputEl.type = "password";
-        text
-          .setPlaceholder("sk-...")
-          .setValue(mc.apiKey)
-          .onChange(async (v) => {
-            mc.apiKey = v.trim();
-            await this.plugin.saveSettings();
-          });
-      });
-
-    const preset = PROVIDER_PRESETS[mc.provider] || PROVIDER_PRESETS.deepseek;
-
-    new Setting(containerEl)
-      .setName(t("mobile.settings.baseUrlName", "Base URL（可选）"))
-      .setDesc(t("mobile.settings.baseUrlDesc", "留空使用预设: {value}", { value: preset.baseUrl || "(无)" }))
-      .addText((text) => {
-        text
-          .setPlaceholder(preset.baseUrl || "https://api.example.com")
-          .setValue(mc.baseUrl)
-          .onChange(async (v) => {
-            mc.baseUrl = v.trim();
-            await this.plugin.saveSettings();
-          });
-      });
-
-    const captureModelState = getCaptureModelOptions(this.plugin, mc.provider, preset, mc.model || preset.defaultModel);
-    const fetchedAgeMin = captureModelState.fetchedAt
-      ? Math.round((Date.now() - captureModelState.fetchedAt) / 60000)
-      : null;
-    new Setting(containerEl)
-      .setName(t("mobile.settings.modelName", "模型名（可选）"))
-      .setDesc(
-        fetchedAgeMin === null
-          ? t("mobile.settings.modelDesc", "留空使用预设: {value}", { value: preset.defaultModel || "(无)" })
-          : t("settings.agent.modelDescFetched", "模型列表已于 {min} 分钟前从官方接口刷新。", { min: fetchedAgeMin }),
-      )
-      .addDropdown((dropdown) => {
-        for (const model of captureModelState.models) {
-          dropdown.addOption(model.id, model.label);
-        }
-        dropdown.setValue(mc.model || preset.defaultModel || "");
-        bindDropdownChange(dropdown, async (modelId) => {
-          mc.model = String(modelId || "").trim();
-          await this.plugin.saveSettings();
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText(t("settings.agent.modelRefresh", "刷新"));
-        button.setTooltip(t("settings.agent.modelRefreshTooltip", "从官方 /models 接口拉取最新模型列表（需要已填 API Key）。"));
-        button.onClick(async () => {
-          button.setDisabled(true);
-          const originalText = button.buttonEl.textContent;
-          button.setButtonText(t("settings.agent.modelRefreshLoading", "拉取中…"));
-          try {
-            if (!String(mc.apiKey || "").trim()) {
-              throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
-            }
-            const models = await listCaptureModels(mc, { locale });
-            if (!this.plugin.__flownoteMobileCaptureFetchedModels) {
-              this.plugin.__flownoteMobileCaptureFetchedModels = {};
-            }
-            this.plugin.__flownoteMobileCaptureFetchedModels[mc.provider] = {
-              models,
-              fetchedAt: Date.now(),
-            };
-            if (!mc.model && models.length && models[0].id) {
-              mc.model = models[0].id;
-              await this.plugin.saveSettings();
-            }
-            new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: models.length }));
-            this.display();
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            new Notice(t("settings.agent.modelRefreshFailed", "拉取失败：{msg}", { msg }));
-            button.setButtonText(originalText || t("settings.agent.modelRefresh", "刷新"));
-            button.setDisabled(false);
-          }
-        });
-      });
 
     new Setting(containerEl)
       .setName(t("mobile.settings.aiCleanupName", "启用 AI 清理"))
@@ -875,29 +738,6 @@ class BasicSettingsSectionMethods {
           });
       });
 
-    new Setting(containerEl)
-      .setName(t("mobile.settings.testName", "测试 AI 连接"))
-      .addButton((b) => {
-        b.setButtonText(t("mobile.settings.testBtn", "测试")).onClick(async () => {
-          if (!mc.apiKey) {
-            new Notice(t("notices.needApiKeyFirst", "请先填写 API Key"));
-            return;
-          }
-          b.setDisabled(true);
-          b.setButtonText(t("mobile.settings.testBusy", "测试中..."));
-          try {
-            const { testConnection } = require("../mobile/mobile-ai-service");
-            const locale = typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "zh-CN";
-            const result = await testConnection(mc, { locale });
-            new Notice(result.ok ? `✅ ${result.message}` : `❌ ${result.message}`);
-          } catch (e) {
-            new Notice(`❌ ${e instanceof Error ? e.message : String(e)}`);
-          } finally {
-            b.setDisabled(false);
-            b.setButtonText(t("mobile.settings.testBtn", "测试"));
-          }
-        });
-      });
   }
 
   renderShortcutSection(containerEl, t) {

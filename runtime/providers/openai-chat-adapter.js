@@ -35,10 +35,11 @@ function buildHeaders(spec, userConfig) {
     "Content-Type": "application/json",
     "User-Agent": userConfig.userAgentOverride || DEFAULT_USER_AGENT,
   };
+  const key = String(userConfig.apiKey || "");
   const authValue = spec.auth.scheme === "bearer"
-    ? `Bearer ${userConfig.apiKey || ""}`
-    : (userConfig.apiKey || "");
-  if (spec.auth.headerName) {
+    ? `Bearer ${key}`
+    : key;
+  if (spec.auth.headerName && (key || !spec.apiKeyOptional)) {
     headers[spec.auth.headerName] = authValue;
   }
   return headers;
@@ -445,7 +446,7 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
    */
   async function listModels() {
     const url = `${resolveBaseUrl(spec, userConfig).replace(/\/+$/, "")}/models`;
-    const res = await requestImpl({
+    const res = await getRequest()({
       url,
       method: "GET",
       headers: buildHeaders(spec, userConfig),

@@ -42,7 +42,7 @@ function resolveAgentProvider(settings, opts = {}) {
   }
 
   const apiKey = getActiveApiKey(settings);
-  if (!apiKey) {
+  if (!apiKey && !spec.apiKeyOptional) {
     const err = new Error(`No API key configured for provider "${spec.displayName}".`);
     err.code = "MISSING_API_KEY";
     err.providerId = spec.id;

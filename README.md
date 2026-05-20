@@ -20,9 +20,9 @@
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
 
-## 0.5.4 更新亮点
+## 0.5.5 更新亮点
 
-0.5.4 把 FLOWnote 从「AI 聊天侧栏 + 捕获工具」推进到「Obsidian 里的个人知识工作台」。这次合并了 0.5.1 的发布健康度修复，并加入全新的首页、iOS 快捷指令和一批移动端体验优化。
+0.5.5 把 FLOWnote 从「AI 聊天侧栏 + 捕获工具」推进到「Obsidian 里的个人知识工作台」。这次合并了 0.5.1 的发布健康度修复，加入全新的首页、iOS 快捷指令和一批移动端体验优化，并修复记忆文件位置兼容与本地 Ollama 模型配置问题。
 
 - **全新首页 Dashboard**：打开 FLOWnote 即可看到今日状态、今日日记、今日聚焦、待办进度、快捷动作、最近活动、项目进展、知识资产统计和记录热力图，不再从笔记列表里慢慢找入口。
 - **今日日记深度联动**：首页会读取真实每日笔记内容，展示今日待办并支持直接勾选；勾选后会同步修改原始 Markdown 复选框，并保持页面滚动位置。
@@ -35,6 +35,8 @@
 - **内置 AI 工作流继续完善**：新安装用户默认使用内置直连 API 模式；直连模式具备 Obsidian 原生工具链能力，包括读取、写入、搜索、每日笔记、任务、标签、反链、属性、文件移动和目录创建等。
 - **Skills 与第三方 API 能力**：支持导入完整外部 skill 文件夹；`web_request` 支持 POST、Authorization header、JSON body 和 `$SECRET` 占位符，可用于微信读书等 API 型技能。
 - **设置与 Provider 体验优化**：移动端捕获模型支持从服务商接口刷新模型列表；修复服务商、模型等设置项刷新后回跳的问题；OpenCode 桥接模式仍保留给旧用户。
+- **记忆文件位置兼容修复**：自动兼容并迁移旧版 `.ai-memory/` 记忆目录到 `ai-memory/`，同时工具读取/写入会识别旧路径，避免 iCloud/移动端同步场景下读不到记忆文件。
+- **本地 Ollama 支持**：Agent 服务商新增 Ollama 本机模式，默认连接 `http://localhost:11434/v1` 且无需 API Key；当桌面端使用 Ollama 时，可在 Ollama 配置下单独设置手机端可访问的云端模型，用于移动端聊天和快速捕获 AI 清理。
 - **界面与发布健康度清理**：移除 `styles.css` 中的 `!important` 强覆盖，整理移动端浅色模式、设置页折叠箭头、模型选择器、logo、复制按钮、滚动导航等样式细节。
 - **隐私、稳定性与测试覆盖**：补充 README 隐私、联网、Vault 访问、剪贴板、本地环境读取说明；OpenCode 子进程只转发白名单环境变量；自动化测试覆盖首页、移动端、快捷指令、直连 Agent、权限策略、skills 导入、模板管理和路径链接等核心路径。
 
@@ -286,9 +288,9 @@ Language: [简体中文](#flownote) | **English**
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
 </p>
 
-## What's New in 0.5.4
+## What's New in 0.5.5
 
-0.5.4 turns FLOWnote from an AI chat sidebar plus capture tool into a personal knowledge workspace inside Obsidian. It includes the 0.5.1 release-health fixes, plus a new dashboard home, iOS Shortcuts support, and broad mobile polish.
+0.5.5 turns FLOWnote from an AI chat sidebar plus capture tool into a personal knowledge workspace inside Obsidian. It includes the 0.5.1 release-health fixes, a new dashboard home, iOS Shortcuts support, broad mobile polish, plus fixes for memory-file location compatibility and local Ollama model setup.
 
 - **New dashboard home**: Opening FLOWnote now shows today's state, daily note, focus, task progress, quick actions, recent activity, project progress, knowledge metrics, and an activity heatmap.
 - **Daily note integration**: The home view reads real daily-note content, displays today's tasks, and lets users toggle checkboxes while syncing the original Markdown and preserving scroll position.
@@ -301,6 +303,8 @@ Language: [简体中文](#flownote) | **English**
 - **Built-in AI workflows**: New installs default to direct API mode. The direct runtime includes Obsidian-native tools for reading, writing, searching, daily notes, tasks, tags, backlinks, properties, file moves, and folder creation.
 - **Skills and API-backed workflows**: Complete external skill folders can be imported. `web_request` supports POST, Authorization headers, JSON bodies, and `$SECRET` placeholders for API-driven skills such as WeRead.
 - **Provider and settings polish**: Mobile capture models can be refreshed from provider model endpoints; provider/model settings persist across refreshes; the optional OpenCode bridge remains available for legacy users.
+- **Memory location compatibility**: FLOWnote now automatically supports and migrates the legacy `.ai-memory/` directory to `ai-memory/`, while read/write tools recognize legacy paths so memory files remain available across iCloud and mobile sync setups.
+- **Local Ollama support**: The Agent provider list now includes local Ollama via `http://localhost:11434/v1` with no API key required. When desktop uses Ollama, users can configure a separate mobile-reachable cloud model under the Ollama settings for mobile chat and quick-capture AI cleanup.
 - **UI and release health**: Removed `!important` CSS overrides, refined mobile light-mode styling, settings expand arrows, model selectors, logo display, copy buttons, and scroll behavior.
 - **Privacy, stability, and tests**: README disclosures now cover networking, vault access, clipboard use, and local environment access. Optional OpenCode child processes receive only allowlisted environment values. Tests now cover the home dashboard, mobile flows, Shortcuts URLs, direct agent runtime, permission policy, skill import, template management, and vault path links.
 

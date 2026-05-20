@@ -1,5 +1,6 @@
 const { requestUrl } = require("obsidian");
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { getProviderSpec } = require("../providers/registry");
 
 const PROVIDER_PRESETS = {
   deepseek: {
@@ -11,11 +12,30 @@ const PROVIDER_PRESETS = {
     modelsPath: "/models",
     models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
   },
+  openai: { name: "OpenAI", baseUrl: "https://api.openai.com", defaultModel: "gpt-5.4", keyUrl: "https://platform.openai.com/api-keys", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   qwen: { name: "Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode", defaultModel: "qwen-turbo", keyUrl: "https://dashscope.console.aliyun.com/apiKey", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   moonshot: { name: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.cn", defaultModel: "moonshot-v1-8k", keyUrl: "https://platform.moonshot.cn/console/api-keys", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   zhipu: { name: "Zhipu (GLM)", baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-4-flash", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", chatPath: "/v4/chat/completions", modelsPath: "/v4/models" },
   siliconflow: { name: "SiliconFlow", baseUrl: "https://api.siliconflow.cn", defaultModel: "deepseek-ai/DeepSeek-V3", keyUrl: "https://cloud.siliconflow.cn/account/ak", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   custom: { name: "Custom", baseUrl: "", defaultModel: "", keyUrl: "", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
+};
+
+const AGENT_TO_CAPTURE_PROVIDER = {
+  deepseek: "deepseek",
+  qwen: "qwen",
+  "moonshot-kimi": "moonshot",
+  "zhipu-glm": "zhipu",
+  "openai-official": "openai",
+  "openai-compat-custom": "custom",
+};
+
+const CAPTURE_TO_AGENT_PROVIDER = {
+  deepseek: "deepseek",
+  qwen: "qwen",
+  moonshot: "moonshot-kimi",
+  zhipu: "zhipu-glm",
+  openai: "openai-official",
+  custom: "openai-compat-custom",
 };
 
 const CAPTURE_SYSTEM_PROMPT = [
@@ -113,6 +133,7 @@ function getUrlFallbackPrompt(locale) {
 function getAiProviderDisplayName(providerId, fallbackName, locale = "en") {
   const id = String(providerId || "").trim().toLowerCase();
   if (id === "custom") return isZh(locale) ? "自定义" : "Custom";
+  if (id === "openai") return "OpenAI";
   if (id === "qwen") return isZh(locale) ? "通义千问" : "Qwen";
   if (id === "zhipu") return isZh(locale) ? "智谱 (GLM)" : "Zhipu (GLM)";
   return fallbackName || String(providerId || "");
@@ -155,39 +176,75 @@ function resolveEffectiveCaptureSettings(settingsOrCapture) {
     ? source.agentProvider
     : null;
   const direct = agent && agent.direct && typeof agent.direct === "object" ? agent.direct : null;
-  const providerId = String(out.provider || (direct && direct.providerId) || "deepseek").trim();
+  const activeAgentProviderId = String(direct && direct.providerId || "").trim();
+
+  if (direct && activeAgentProviderId && activeAgentProviderId !== "ollama") {
+    const mappedProviderId = AGENT_TO_CAPTURE_PROVIDER[activeAgentProviderId];
+    if (mappedProviderId) {
+      const preset = PROVIDER_PRESETS[mappedProviderId] || PROVIDER_PRESETS.deepseek;
+      out.provider = mappedProviderId;
+      out.apiKey = String(
+        (direct.apiKeys && typeof direct.apiKeys === "object" && direct.apiKeys[activeAgentProviderId])
+        || "",
+      ).trim();
+      out.model = String(direct.model || preset.defaultModel || "").trim();
+      out.baseUrl = activeAgentProviderId === "openai-compat-custom"
+        ? String(direct.baseUrlOverride || "").trim()
+        : "";
+      return out;
+    }
+  }
+
+  const providerId = String(out.provider || "deepseek").trim();
   out.provider = providerId;
-
-  if (!String(out.apiKey || "").trim() && direct && direct.apiKeys && typeof direct.apiKeys === "object") {
-    const keyForCaptureProvider = String(direct.apiKeys[providerId] || "").trim();
-    const keyForActiveProvider = String(direct.apiKeys[direct.providerId] || "").trim();
-    out.apiKey = keyForCaptureProvider || (direct.providerId === providerId ? keyForActiveProvider : "");
-  }
-
-  if (
-    providerId === "custom"
-    && !String(out.baseUrl || "").trim()
-    && direct
-    && String(direct.providerId || "").trim() === "custom"
-  ) {
-    out.baseUrl = String(direct.baseUrlOverride || "").trim();
-  }
-
-  if (
-    providerId === "custom"
-    && !String(out.model || "").trim()
-    && direct
-    && String(direct.providerId || "").trim() === "custom"
-  ) {
-    out.model = String(direct.model || "").trim();
-  }
-
   return out;
+}
+
+function buildMobileAgentSettingsOverride(pluginSettings) {
+  const settings = pluginSettings && typeof pluginSettings === "object" ? pluginSettings : {};
+  const agent = settings.agentProvider && typeof settings.agentProvider === "object" ? settings.agentProvider : null;
+  const direct = agent && agent.direct && typeof agent.direct === "object" ? agent.direct : null;
+  if (!agent || !direct || String(direct.providerId || "").trim() !== "ollama") return null;
+
+  const capture = resolveEffectiveCaptureSettings(settings);
+  const captureProviderId = String(capture.provider || "").trim();
+  const agentProviderId = CAPTURE_TO_AGENT_PROVIDER[captureProviderId];
+  if (!agentProviderId) return null;
+  const spec = getProviderSpec(agentProviderId);
+  if (!spec) return null;
+
+  const preset = PROVIDER_PRESETS[captureProviderId] || {};
+  const apiKey = String(capture.apiKey || "").trim();
+  const baseUrlOverride = captureProviderId === "custom" ? String(capture.baseUrl || "").trim() : "";
+  if (!apiKey && !spec.apiKeyOptional) return null;
+  if (agentProviderId === "openai-compat-custom" && !baseUrlOverride) return null;
+
+  const model = String(capture.model || preset.defaultModel || spec.defaultModel || "").trim();
+  if (!model) return null;
+
+  const providerMode = spec.modes && spec.modes.api ? "api" : spec.defaultMode;
+  return {
+    ...agent,
+    mode: "direct",
+    direct: {
+      ...(agent.direct || {}),
+      providerId: agentProviderId,
+      providerMode,
+      model,
+      baseUrlOverride,
+      region: "",
+      stream: direct.stream,
+      apiKeys: {
+        ...(direct.apiKeys || {}),
+        [agentProviderId]: apiKey,
+      },
+    },
+  };
 }
 
 function hasAiConfig(mcSettings) {
   const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
-  return Boolean(ai.baseUrl && ai.apiKey);
+  return Boolean(ai.baseUrl && (ai.apiKey || ai.preset.apiKeyOptional));
 }
 
 function pickFirstText(values) {
@@ -202,20 +259,21 @@ function pickFirstText(values) {
 
 async function requestAiCompletion(messages, mcSettings, options = {}) {
   const locale = normalizeSupportedLocale(options.locale || "en");
-  const ai = resolveAiConfig(mcSettings || {});
-  if (!ai.baseUrl || !ai.apiKey) {
+  const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
+  if (!ai.baseUrl || (!ai.apiKey && !ai.preset.apiKeyOptional)) {
     throw new Error(isZh(locale)
       ? "AI 服务未配置：缺少 Base URL 或 API Key"
       : "AI is not configured: missing Base URL or API Key");
+  }
+  const headers = { "Content-Type": "application/json" };
+  if (ai.apiKey || !ai.preset.apiKeyOptional) {
+    headers.Authorization = `Bearer ${ai.apiKey}`;
   }
 
   const response = await requestUrl({
     url: getChatCompletionsUrl(ai),
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ai.apiKey}`,
-    },
+    headers,
     body: JSON.stringify({
       model: ai.model,
       temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
@@ -244,19 +302,20 @@ async function requestAiCompletion(messages, mcSettings, options = {}) {
 async function listCaptureModels(mcSettings, options = {}) {
   const locale = normalizeSupportedLocale(options.locale || "en");
   const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
-  if (!ai.baseUrl || !ai.apiKey) {
+  if (!ai.baseUrl || (!ai.apiKey && !ai.preset.apiKeyOptional)) {
     throw new Error(isZh(locale)
       ? "AI 服务未配置：缺少 Base URL 或 API Key"
       : "AI is not configured: missing Base URL or API Key");
+  }
+  const headers = { "Content-Type": "application/json" };
+  if (ai.apiKey || !ai.preset.apiKeyOptional) {
+    headers.Authorization = `Bearer ${ai.apiKey}`;
   }
 
   const response = await requestUrl({
     url: getModelsUrl(ai),
     method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ai.apiKey}`,
-    },
+    headers,
     throw: false,
     timeout: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 30000,
   });
@@ -321,6 +380,7 @@ module.exports = {
   getChatCompletionsUrl,
   getModelsUrl,
   resolveEffectiveCaptureSettings,
+  buildMobileAgentSettingsOverride,
   hasAiConfig,
   pickFirstText,
   requestAiCompletion,

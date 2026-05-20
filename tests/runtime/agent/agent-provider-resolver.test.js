@@ -43,16 +43,26 @@ test("resolveAgentProvider builds the right Provider for each preset", () => {
     { id: "qwen",              protocol: "openai-chat" },
     { id: "doubao",            protocol: "openai-chat" },
     { id: "openai-official",   protocol: "openai-chat" },
+    { id: "ollama",            protocol: "openai-chat", noKey: true },
   ];
-  for (const { id, protocol } of presets) {
+  for (const { id, protocol, noKey } of presets) {
     const s = defaultAgentSettings();
     switchActiveProvider(s, id);
-    setApiKeyFor(s, id, `k-${id}`);
+    if (!noKey) setApiKeyFor(s, id, `k-${id}`);
     const provider = resolveAgentProvider(s, { requestImpl: fakeRequestImpl });
     assert.equal(provider.id, id, `provider id mismatch for ${id}`);
     assert.equal(provider.spec.protocol, protocol, `protocol mismatch for ${id}`);
-    assert.equal(provider.userConfig.apiKey, `k-${id}`);
+    assert.equal(provider.userConfig.apiKey, noKey ? "" : `k-${id}`);
   }
+});
+
+test("resolveAgentProvider allows Ollama without API key", () => {
+  const s = defaultAgentSettings();
+  switchActiveProvider(s, "ollama");
+  const provider = resolveAgentProvider(s, { requestImpl: fakeRequestImpl });
+  assert.equal(provider.id, "ollama");
+  assert.equal(provider.userConfig.apiKey, "");
+  assert.equal(provider.userConfig.model, "llama3.2");
 });
 
 test("resolveAgentProvider throws MISSING_API_KEY when key not set", () => {

@@ -62,9 +62,21 @@ test("buildHeaders sets Authorization: Bearer for openai-chat providers", () => 
   assert.equal(h["Content-Type"], "application/json");
 });
 
+test("buildHeaders omits Authorization for Ollama when API key is empty", () => {
+  const h = buildHeaders(PROVIDERS.ollama, {
+    providerId: "ollama",
+    mode: "local",
+    apiKey: "",
+    model: "llama3.2",
+  });
+  assert.equal(h.Authorization, undefined);
+  assert.equal(h["Content-Type"], "application/json");
+});
+
 test("buildEndpointUrl appends /chat/completions", () => {
   assert.equal(buildEndpointUrl("https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions");
   assert.equal(buildEndpointUrl("https://api.openai.com/v1/"), "https://api.openai.com/v1/chat/completions");
+  assert.equal(buildEndpointUrl("http://localhost:11434/v1"), "http://localhost:11434/v1/chat/completions");
 });
 
 // ---------------------------------------------------------------------------

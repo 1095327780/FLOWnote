@@ -164,10 +164,10 @@ test("listCaptureModels should call provider model endpoint", async () => {
   }
 });
 
-test("capture settings should keep mobile key first and only fall back when empty", () => {
+test("capture AI follows agent provider unless desktop agent is Ollama", () => {
   const fixture = loadMobileModulesWithMockObsidian();
   try {
-    const fromMobile = fixture.resolveEffectiveCaptureSettings({
+    const fromAgent = fixture.resolveEffectiveCaptureSettings({
       mobileCapture: {
         provider: "deepseek",
         apiKey: "sk-mobile",
@@ -176,24 +176,69 @@ test("capture settings should keep mobile key first and only fall back when empt
         direct: {
           providerId: "deepseek",
           apiKeys: { deepseek: "sk-agent" },
+          model: "deepseek-v4-pro",
         },
       },
     });
-    assert.equal(fromMobile.apiKey, "sk-mobile");
+    assert.equal(fromAgent.provider, "deepseek");
+    assert.equal(fromAgent.apiKey, "sk-agent");
+    assert.equal(fromAgent.model, "deepseek-v4-pro");
 
-    const fallback = fixture.resolveEffectiveCaptureSettings({
+    const ollamaMobileOverride = fixture.resolveEffectiveCaptureSettings({
       mobileCapture: {
-        provider: "deepseek",
-        apiKey: "",
+        provider: "qwen",
+        apiKey: "sk-mobile",
+        model: "qwen-plus",
       },
       agentProvider: {
         direct: {
-          providerId: "deepseek",
-          apiKeys: { deepseek: "sk-agent" },
+          providerId: "ollama",
+          apiKeys: {},
+          model: "llama3.2",
         },
       },
     });
-    assert.equal(fallback.apiKey, "sk-agent");
+    assert.equal(ollamaMobileOverride.provider, "qwen");
+    assert.equal(ollamaMobileOverride.apiKey, "sk-mobile");
+    assert.equal(ollamaMobileOverride.model, "qwen-plus");
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("Ollama desktop agent can use mobile override settings for chat", () => {
+  const fixture = loadMobileModulesWithMockObsidian();
+  try {
+    const override = fixture.buildMobileAgentSettingsOverride({
+      mobileCapture: {
+        provider: "qwen",
+        apiKey: "sk-mobile",
+        model: "qwen-plus",
+      },
+      agentProvider: {
+        mode: "direct",
+        direct: {
+          providerId: "ollama",
+          providerMode: "local",
+          model: "llama3.2",
+          apiKeys: {},
+        },
+      },
+    });
+    assert.equal(override.mode, "direct");
+    assert.equal(override.direct.providerId, "qwen");
+    assert.equal(override.direct.providerMode, "api");
+    assert.equal(override.direct.model, "qwen-plus");
+    assert.equal(override.direct.apiKeys.qwen, "sk-mobile");
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("mobile capture presets do not expose desktop-local Ollama", () => {
+  const fixture = loadMobileModulesWithMockObsidian();
+  try {
+    assert.equal(Object.prototype.hasOwnProperty.call(fixture.PROVIDER_PRESETS, "ollama"), false);
   } finally {
     fixture.restore();
   }

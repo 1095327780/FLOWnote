@@ -232,6 +232,31 @@ const PROVIDERS = {
     defaultModel: "gpt-5.4",
   },
 
+  "ollama": {
+    id: "ollama",
+    displayName: "Ollama（本机）",
+    protocol: "openai-chat",
+    modes: {
+      "local": {
+        label: "本机 Ollama",
+        baseUrl: "http://localhost:11434/v1",
+      },
+    },
+    defaultMode: "local",
+    auth: { headerName: "", scheme: "raw" },
+    apiKeyOptional: true,
+    models: [
+      { id: "llama3.2", label: "Llama 3.2", contextWindow: 128_000, tier: "mid", isDefault: true },
+      { id: "gpt-oss:20b", label: "gpt-oss:20b", contextWindow: 128_000, tier: "mid" },
+      { id: "qwen2.5-coder:7b", label: "Qwen2.5 Coder 7B", contextWindow: 128_000, tier: "fast" },
+      { id: "deepseek-r1:8b", label: "DeepSeek-R1 8B", contextWindow: 128_000, tier: "mid" },
+    ],
+    defaultModel: "llama3.2",
+    quirks: {
+      streamingTolerant: true,
+    },
+  },
+
   "openai-compat-custom": {
     id: "openai-compat-custom",
     displayName: "自定义 OpenAI-compat",
