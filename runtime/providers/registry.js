@@ -1,8 +1,8 @@
 // Built-in provider catalog. Data only — no HTTP, no I/O.
 // Adapters consume these specs to instantiate concrete Provider objects.
 //
-// Spec sheet for each provider is in
-// docs/tech-design/0.5.0-provider-abstraction.md (Appendix A).
+// Keep provider specs self-contained so the public repository does not depend
+// on internal planning notes.
 
 /** @typedef {import('./provider').ProviderConfig} ProviderConfig */
 

@@ -5,8 +5,7 @@
 // Catches the most common regression: a tool gets renamed or removed
 // and the skills referencing it silently stop working. The full
 // behavioural test (does the agent actually call the right tools given
-// a user prompt?) requires real LLM I/O and is outside this suite —
-// see docs/m2-acceptance-2026-05-15.md for that workflow.
+// a user prompt?) requires real LLM I/O and is outside this suite.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
