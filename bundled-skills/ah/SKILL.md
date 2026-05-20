@@ -23,7 +23,7 @@ description: 阿浩知识库统一入口与技能路由中枢。用于用户不�
 
 ```
 [AI 内部执行]
-1. 尝试读取 Meta/.ai-memory/STATUS.md
+1. 尝试读取 Meta/ai-memory/STATUS.md
    - 如文件不存在（首次使用），**视为空状态**，直接进入"情况 B：无待处理任务"。
      不要重复探测、不要发起 vault_search / vault_list 寻找替代文件——记住"文件不存在 = 空状态"即可。
    - 如读取成功，进入第 2 步。
@@ -31,7 +31,7 @@ description: 阿浩知识库统一入口与技能路由中枢。用于用户不�
 3. 如果有，在欢迎消息中显示；否则进入"情况 B"。
 ```
 
-> 全局状态文件路径固定为 `Meta/.ai-memory/STATUS.md`。该文件由 ah-review 等下游技能在结束阶段写入。
+> 全局状态文件路径固定为 `Meta/ai-memory/STATUS.md`。该文件由 ah-review 等下游技能在结束阶段写入。
 > 当用户首次使用知识库时它不存在是正常情况，**不要把"文件不存在"当成错误反复重试**。
 
 ---
@@ -189,7 +189,7 @@ description: 阿浩知识库统一入口与技能路由中枢。用于用户不�
 
 ## 📋 执行步骤
 
-1. **读取全局状态** — `Read Meta/.ai-memory/STATUS.md`（文件不存在则视为空状态，跳过第 2 步直接到第 3 步，**不要发起任何 vault_search / vault_list 替代探测**）
+1. **读取全局状态** — `Read Meta/ai-memory/STATUS.md`（文件不存在则视为空状态，跳过第 2 步直接到第 3 步，**不要发起任何 vault_search / vault_list 替代探测**）
 2. **生成待处理提示** — 根据全局状态生成待处理事项
 3. **识别意图** — 匹配对应技能
 4. **加载技能** — `Read skills/ah-xxx/SKILL.md`

@@ -666,7 +666,10 @@ function normalizeToolPath(value) {
 function isInternalMemoryReadProbe(toolName, input) {
   if (String(toolName || "").trim().toLowerCase() !== "vault_read") return false;
   const path = normalizeToolPath(input && input.path);
-  return path === "Meta/.ai-memory/STATUS.md" || path.startsWith("Meta/.ai-memory/");
+  return path === "Meta/ai-memory/STATUS.md"
+    || path.startsWith("Meta/ai-memory/")
+    || path === "Meta/.ai-memory/STATUS.md"
+    || path.startsWith("Meta/.ai-memory/");
 }
 
 function isExpectedInternalToolNoise(tu) {

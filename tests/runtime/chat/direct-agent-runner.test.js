@@ -230,7 +230,7 @@ test("runDirectAgentTurn marks expected missing memory reads as hidden UI noise"
     [
       ev.msgStart(),
       ev.toolUseStart(0, "tu-1", "vault_read"),
-      ev.toolUseJson(0, "{\"path\":\"Meta/.ai-memory/STATUS.md\"}"),
+      ev.toolUseJson(0, "{\"path\":\"Meta/ai-memory/STATUS.md\"}"),
       ev.blockStop(0),
       ev.msgDelta("tool_use"),
       ev.msgStop(),

@@ -15,6 +15,8 @@
 
 const OLD_DIR = ".opencode/skills";
 const NEW_DIR = ".flownote/skills";
+const OLD_MEMORY_DIR = "Meta/.ai-memory";
+const NEW_MEMORY_DIR = "Meta/ai-memory";
 
 /**
  * @param {Object} plugin   Obsidian plugin instance (must expose `.app.vault`
@@ -57,6 +59,27 @@ async function migrateSkillDir(plugin, opts = {}) {
     }
   }
 
+  return { migrated: true, copied };
+}
+
+async function migrateMemoryDir(plugin, opts = {}) {
+  if (!plugin || !plugin.app || !plugin.app.vault) {
+    return { migrated: false, reason: "no plugin/vault" };
+  }
+  const adapter = plugin.app.vault.adapter;
+  if (!adapter || typeof adapter.exists !== "function") {
+    return { migrated: false, reason: "no vault adapter" };
+  }
+  const oldDir = opts.oldDir || OLD_MEMORY_DIR;
+  const newDir = opts.newDir || NEW_MEMORY_DIR;
+
+  const newExists = await adapter.exists(newDir);
+  if (newExists) return { migrated: false, reason: "target exists" };
+
+  const oldExists = await adapter.exists(oldDir);
+  if (!oldExists) return { migrated: false, reason: "source missing" };
+
+  const copied = await copyDirRecursive(adapter, oldDir, newDir);
   return { migrated: true, copied };
 }
 
@@ -125,7 +148,10 @@ function joinPath(a, b) {
 
 module.exports = {
   migrateSkillDir,
+  migrateMemoryDir,
   copyDirRecursive,
   OLD_DIR,
   NEW_DIR,
+  OLD_MEMORY_DIR,
+  NEW_MEMORY_DIR,
 };

@@ -7,6 +7,7 @@
 // pre-check.
 
 const { buildTool } = require("../tool-registry");
+const { resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
   "Create a folder in the user's Obsidian vault. Recursive — intermediate " +
@@ -70,7 +71,7 @@ function createVaultCreateDirTool({ app, normalizePath } = {}) {
     },
 
     async *execute(input, _ctx) {
-      const path = normalize(input.path);
+      const path = resolveWritablePath(normalize(input.path));
       if (!path) {
         yield {
           type: "result",

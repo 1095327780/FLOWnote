@@ -34,7 +34,7 @@ description: 旧笔记处理引导。用于处理初始化迁移后的遗留笔�
 
 ```
 [AI 内部执行]
-1. 读取 Meta/.ai-memory/STATUS.md
+1. 读取 Meta/ai-memory/STATUS.md
 2. 检查"初始化迁移"区域的待处理数量
 3. 扫描每日笔记和归档的实际文件
 4. 统计已处理/未处理数量
@@ -381,7 +381,7 @@ description: 旧笔记处理引导。用于处理初始化迁移后的遗留笔�
 [AI 内部执行]
 
 1. 从每日笔记或归档中移除已处理的文件
-2. 更新 Meta/.ai-memory/STATUS.md：
+2. 更新 Meta/ai-memory/STATUS.md：
    - 减少"初始化迁移"中的待处理数量
    - 如果产生新的待办（如 ah-card 制卡），添加到对应区域
 3. 更新处理进度
@@ -417,7 +417,7 @@ description: 旧笔记处理引导。用于处理初始化迁移后的遗留笔�
 
 > 详见 `references/状态更新规范.md` 的完整规范
 
-AI 在处理完毕时更新 Meta/.ai-memory/STATUS.md，同步最新的处理进度。如果所有旧笔记都处理完了，向用户展示处理总结并祝贺！
+AI 在处理完毕时更新 Meta/ai-memory/STATUS.md，同步最新的处理进度。如果所有旧笔记都处理完了，向用户展示处理总结并祝贺！
 
 ---
 

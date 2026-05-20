@@ -7,6 +7,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
   "Write content to a note in the user's Obsidian vault. " +
@@ -90,7 +91,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         return { behavior: "allow" };
       }
       const mode = (input && input.mode) || "create";
-      const normalized = normalize(input.path);
+      const normalized = resolveWritablePath(normalize(input.path));
       const existing = vault.getFileByPath(normalized);
 
       // create on a new path → allow silently (no risk of overwriting)
@@ -113,7 +114,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
 
     async *execute(input, ctx) {
       const mode = input.mode || "create";
-      const normalized = normalize(input.path);
+      const normalized = resolveWritablePath(normalize(input.path));
       const content = input.content;
       const existing = vault.getFileByPath(normalized);
       const recordWrite = (finalContent) => {

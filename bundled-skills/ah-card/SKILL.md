@@ -15,7 +15,7 @@ description: 卢曼卡片笔记法制卡引导。自动识别输入源类型（�
 
 启动后立即执行：
 
-1. 读取 `Meta/.ai-memory/STATUS.md` 检查待制卡事项。
+1. 读取 `Meta/ai-memory/STATUS.md` 检查待制卡事项。
 2. 分析用户输入，判定输入源类型。
 3. 按判定结果分流到对应路径。
 

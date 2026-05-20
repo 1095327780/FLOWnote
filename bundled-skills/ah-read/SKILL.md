@@ -62,14 +62,14 @@ description: |
 
 **启动时必须**：
 ```
-1. 读取 Meta/.ai-memory/STATUS.md
+1. 读取 Meta/ai-memory/STATUS.md
 2. 检查"阅读整理"区域是否有该书的进度
 3. 如果有，提示用户是否继续
 ```
 
 **结束时必须**：
 ```
-1. 更新 Meta/.ai-memory/STATUS.md 中的"阅读整理"区域
+1. 更新 Meta/ai-memory/STATUS.md 中的"阅读整理"区域
 2. 如果产生了待制卡的洞见，同时在"卡片笔记"区域添加条目
 3. 更新"AI 启动提示"区域
 ```
@@ -82,7 +82,7 @@ description: |
 ### 1. 进度必须持久化
 
 **每次会话必须**：
-1. **首先**检查阅读进度文件 `Meta/.ai-memory/reading/《书名》.md`
+1. **首先**检查阅读进度文件 `Meta/ai-memory/reading/《书名》.md`
 2. 如果存在，读取进度文件，告诉用户当前进度，询问是否继续
 3. 如果不存在，按 `ah-memory` 接口规范先创建目录与最小文件结构，再继续
 
@@ -144,7 +144,7 @@ description: |
 ### 0.1 检查进度文件
 
 ```
-首先检查：Meta/.ai-memory/reading/
+首先检查：Meta/ai-memory/reading/
 是否存在该书的进度文件？
 ```
 
@@ -236,7 +236,7 @@ python3 ".opencode/skills/ah-read/assets/extract_weread_outline.py" headings "<�
 
 > **分类完成后，必须立即创建/更新进度文件！**
 
-阅读进度文件路径固定：`Meta/.ai-memory/reading/《书名》.md`
+阅读进度文件路径固定：`Meta/ai-memory/reading/《书名》.md`
 
 ---
 
@@ -539,7 +539,7 @@ python3 ".opencode/skills/ah-read/assets/extract_weread_outline.py" headings "<�
 
 ```
 [AI 内部执行]
-1. 读取 Meta/.ai-memory/STATUS.md
+1. 读取 Meta/ai-memory/STATUS.md
 2. 更新"阅读整理"区域：状态改为"文献笔记已完成"或"待整理卡片笔记"
 3. 在"卡片笔记"区域添加新条目（如果有洞见需要制卡）
 4. 保存全局状态文件
@@ -556,7 +556,7 @@ python3 ".opencode/skills/ah-read/assets/extract_weread_outline.py" headings "<�
 
 📄 已生成文件：
 - 文献笔记：02-培养层/文献笔记/《{{书名}}》.md
-- 阅读进度：Meta/.ai-memory/reading/《{{书名}}》.md
+- 阅读进度：Meta/ai-memory/reading/《{{书名}}》.md
 
 📝 本次整理：
 - 处理章节：{{N}} 个
@@ -626,7 +626,7 @@ python3 ".opencode/skills/ah-read/assets/extract_weread_outline.py" ranges "<文
 - 大章节判断由 AI 完成，优先依据：`第一章/第二章`、`第一幕/第二幕`、`场景一/场景二`、`1.1/2.3` 等模式。
 - 当大章节数量 `<= 5` 时，脚本自动输出下一层候选标题，供 AI 二次判断。
 - 分批处理时只读取章节范围对应行，避免全文上下文膨胀。
-- 阅读进度文件路径固定：`Meta/.ai-memory/reading/《书名》.md`。
+- 阅读进度文件路径固定：`Meta/ai-memory/reading/《书名》.md`。
 - 文献笔记路径固定：`02-培养层/文献笔记/《书名》.md`。
 - 文献笔记 Frontmatter 字段来源固定：
   - 用户输入：来源、作者、评分、标签
@@ -649,7 +649,7 @@ python3 ".opencode/skills/ah-read/assets/extract_weread_outline.py" ranges "<文
 - [ ] 文献笔记中"我的理解"是否100%来自用户对话原话？
 - [ ] 每章完成后，是否更新了进度文件？
 - [ ] 最后是否用 Write 工具写入了文献笔记？
-- [ ] 是否已回写 `Meta/.ai-memory/STATUS.md`？
+- [ ] 是否已回写 `Meta/ai-memory/STATUS.md`？
 - [ ] 用户要做卡片笔记时，是否调用了 `ah-card`？
 
 ---

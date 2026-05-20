@@ -6,6 +6,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { resolveReadablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
   "Read the contents of a note from the user's Obsidian vault. " +
@@ -86,7 +87,7 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
     },
 
     async *execute(input, ctx) {
-      const normalized = normalize(input.path);
+      const normalized = resolveReadablePath(vault, normalize(input.path));
       const file = vault.getFileByPath(normalized);
       if (!file) {
         yield {

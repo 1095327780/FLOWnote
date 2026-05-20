@@ -10,6 +10,7 @@
 //   * `limit` — max entries returned; truncation noted in the result
 
 const { buildTool } = require("../tool-registry");
+const { resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
   "List files (and optionally folders) inside the user's Obsidian vault. " +
@@ -190,7 +191,7 @@ function createVaultListTool({ vault, normalizePath } = {}) {
     },
 
     async *execute(input, _ctx) {
-      const root = normalize(input && input.path ? input.path : "");
+      const root = resolveWritablePath(normalize(input && input.path ? input.path : ""));
       const recursive = input && input.recursive !== undefined ? input.recursive : true;
       const includeFolders = !!(input && input.include_folders);
       const limit = Number.isInteger(input && input.limit) ? input.limit : DEFAULT_LIMIT;

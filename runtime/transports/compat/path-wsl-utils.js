@@ -156,6 +156,7 @@ function createPathWslMethods(deps = {}) {
     if (!uncRoot) return;
 
     const mirrorItems = [
+      "Meta/ai-memory",
       "Meta/.ai-memory",
       "Meta/模板",
       "skills",

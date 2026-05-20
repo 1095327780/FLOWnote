@@ -2,7 +2,7 @@
 
 ## STATUS.md 位置
 
-固定路径：`Meta/.ai-memory/STATUS.md`
+固定路径：`Meta/ai-memory/STATUS.md`
 
 ## 最小结构
 

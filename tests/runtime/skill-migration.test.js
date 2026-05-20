@@ -3,9 +3,12 @@ const assert = require("node:assert/strict");
 
 const {
   migrateSkillDir,
+  migrateMemoryDir,
   copyDirRecursive,
   OLD_DIR,
   NEW_DIR,
+  OLD_MEMORY_DIR,
+  NEW_MEMORY_DIR,
 } = require("../../runtime/skill-migration");
 
 // A minimal in-memory Obsidian adapter — enough for migration logic.
@@ -220,4 +223,53 @@ test("migrateSkillDir returns 'no vault adapter' when adapter missing exists()",
   const r = await migrateSkillDir(plugin);
   assert.equal(r.migrated, false);
   assert.equal(r.reason, "no vault adapter");
+});
+
+// ---------------------------------------------------------------------------
+// migrateMemoryDir
+// ---------------------------------------------------------------------------
+
+test("migrateMemoryDir skips when visible memory target already exists", async () => {
+  const adapter = makeAdapter({
+    "Meta/.ai-memory/STATUS.md": "old memory",
+    "Meta/ai-memory/STATUS.md": "current memory",
+  });
+  const plugin = makePlugin(adapter, {});
+
+  const result = await migrateMemoryDir(plugin);
+
+  assert.equal(result.migrated, false);
+  assert.equal(result.reason, "target exists");
+  assert.equal(adapter._files.get("Meta/ai-memory/STATUS.md"), "current memory");
+  assert.equal(adapter._files.get("Meta/.ai-memory/STATUS.md"), "old memory");
+});
+
+test("migrateMemoryDir skips when legacy hidden memory source is missing", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter, {});
+
+  const result = await migrateMemoryDir(plugin);
+
+  assert.equal(result.migrated, false);
+  assert.equal(result.reason, "source missing");
+});
+
+test("migrateMemoryDir copies hidden memory tree to visible memory dir and preserves source", async () => {
+  const adapter = makeAdapter({
+    "Meta/.ai-memory/STATUS.md": "status",
+    "Meta/.ai-memory/reading/book.md": "reading progress",
+    "Meta/.ai-memory/projects/project.md": "project memory",
+  });
+  const plugin = makePlugin(adapter, {});
+
+  const result = await migrateMemoryDir(plugin);
+
+  assert.equal(result.migrated, true);
+  assert.equal(result.copied, 3);
+  assert.equal(adapter._files.get("Meta/ai-memory/STATUS.md"), "status");
+  assert.equal(adapter._files.get("Meta/ai-memory/reading/book.md"), "reading progress");
+  assert.equal(adapter._files.get("Meta/ai-memory/projects/project.md"), "project memory");
+  assert.equal(adapter._files.get("Meta/.ai-memory/STATUS.md"), "status");
+  assert.equal(OLD_MEMORY_DIR, "Meta/.ai-memory");
+  assert.equal(NEW_MEMORY_DIR, "Meta/ai-memory");
 });

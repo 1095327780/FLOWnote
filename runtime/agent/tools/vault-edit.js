@@ -13,6 +13,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { resolveReadablePath, resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
   "Perform an exact string replacement inside a note in the user's Obsidian " +
@@ -116,9 +117,11 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       // path before editing it. A successful vault_write also satisfies
       // the gate (the model just wrote the file, so it knows the
       // content).
-      const normalized = normalize(input.path);
+      const requestedPath = normalize(input.path);
+      const normalized = resolveWritablePath(requestedPath);
+      const readable = resolveReadablePath(vault, requestedPath);
       if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.has === "function") {
-        if (!ctx.fileStateCache.has(normalized)) {
+        if (!ctx.fileStateCache.has(normalized) && !ctx.fileStateCache.has(readable)) {
           return {
             ok: false,
             error:
@@ -136,7 +139,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       if (grants && grants["vault_edit:*"]) {
         return { behavior: "allow" };
       }
-      const normalized = normalize(input.path);
+      const normalized = resolveWritablePath(normalize(input.path));
       return {
         behavior: "ask",
         summary: `edit → ${normalized}`,
@@ -149,7 +152,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
     },
 
     async *execute(input, ctx) {
-      const normalized = normalize(input.path);
+      const normalized = resolveReadablePath(vault, normalize(input.path));
       const file = vault.getFileByPath(normalized);
       if (!file) {
         yield {

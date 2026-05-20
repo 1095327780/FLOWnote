@@ -36,6 +36,7 @@ function createModuleLoaderMethods(options = {}) {
         SkillService: skillService && skillService.SkillService ? skillService.SkillService : null,
         copyDirectoryRecursive: skillService && skillService.copyDirectoryRecursive ? skillService.copyDirectoryRecursive : null,
         migrateSkillDir: skillMigration && skillMigration.migrateSkillDir ? skillMigration.migrateSkillDir : null,
+        migrateMemoryDir: skillMigration && skillMigration.migrateMemoryDir ? skillMigration.migrateMemoryDir : null,
         normalizeSettings: settingsUtils && settingsUtils.normalizeSettings ? settingsUtils.normalizeSettings : (raw) => raw || {},
         normalizeSettingsInPlace: settingsUtils && settingsUtils.normalizeSettingsInPlace
           ? settingsUtils.normalizeSettingsInPlace

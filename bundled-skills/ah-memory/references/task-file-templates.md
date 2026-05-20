@@ -2,7 +2,7 @@
 
 ## 阅读进度文件
 
-路径：`Meta/.ai-memory/reading/《书名》.md`
+路径：`Meta/ai-memory/reading/《书名》.md`
 
 - 标题：阅读整理进度标题
 - 基本信息：作者、开始时间、整理模式
@@ -15,7 +15,7 @@
 
 ## 卡片进度文件
 
-路径：`Meta/.ai-memory/cards/《来源》.md`
+路径：`Meta/ai-memory/cards/《来源》.md`
 
 - 标题：制卡进度标题
 - 待制卡洞见：待处理清单
@@ -23,7 +23,7 @@
 
 ## 项目进度文件
 
-路径：`Meta/.ai-memory/projects/项目名.md`
+路径：`Meta/ai-memory/projects/项目名.md`
 
 - 标题：项目进度标题
 - 当前状态：状态与下一步动作
@@ -31,7 +31,7 @@
 
 ## 回顾记录文件
 
-路径：`Meta/.ai-memory/reviews/history.md`
+路径：`Meta/ai-memory/reviews/history.md`
 
 - 标题：回顾历史
 - 记录项：日期 + 回顾动作 + 去向结果

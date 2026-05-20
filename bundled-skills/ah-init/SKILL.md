@@ -38,17 +38,17 @@ description: 知识库初始化与索引管理。用于首次搭建知识库、�
    - `03-连接层/`
    - `04-创造层/项目/`
    - `04-创造层/归档/`
-   - `Meta/.ai-memory/`
-   - `Meta/.ai-memory/reading/`
-   - `Meta/.ai-memory/cards/`
-   - `Meta/.ai-memory/projects/`
-   - `Meta/.ai-memory/reviews/`
+   - `Meta/ai-memory/`
+   - `Meta/ai-memory/reading/`
+   - `Meta/ai-memory/cards/`
+   - `Meta/ai-memory/projects/`
+   - `Meta/ai-memory/reviews/`
    - `Meta/索引/`
 2. 扫描并确认连接层领域页（优先复用已有设置）。
 3. 扫描并确认培养层主题笔记（扁平结构，无子目录）。
 4. 按用户确认结果生成基础页面：领域页、主题笔记、HOME、项目总览。
 5. 迁移旧笔记（保留原内容，按规则分类）。
-6. 初始化 `Meta/.ai-memory/STATUS.md`。
+6. 初始化 `Meta/ai-memory/STATUS.md`。
 7. 生成知识库索引 `Meta/索引/kb-manifest.md`。
 
 ## 模式 B：索引更新
@@ -76,7 +76,7 @@ description: 知识库初始化与索引管理。用于首次搭建知识库、�
 
 - 目录初始化不能只建父目录，必须把下游技能依赖的子目录一次建齐。
 - 捕获层最小可用结构固定为：`每日笔记/`、`划线笔记/`、`周记/`、`月记/`、`年记/`。
-- 记忆系统最小可用结构固定为：`Meta/.ai-memory/STATUS.md` + `reading/` + `cards/` + `projects/` + `reviews/`。
+- 记忆系统最小可用结构固定为：`Meta/ai-memory/STATUS.md` + `reading/` + `cards/` + `projects/` + `reviews/`。
 - 项目系统初始化时，若 `04-创造层/项目/📍 项目总览.md` 不存在，必须创建最小索引文件。
 - 连接层初始化规则：
   - 先扫描 `03-连接层/*.md` 作为“已有领域页”。
@@ -104,7 +104,7 @@ description: 知识库初始化与索引管理。用于首次搭建知识库、�
 - [ ] 已正确判定运行模式
 - [ ] 已完成目录校验（初始化模式）
 - [ ] 已完成捕获层子目录初始化（每日/划线/周/月/年）
-- [ ] 已完成 `.ai-memory` 子目录初始化（reading/cards/projects/reviews）
+- [ ] 已完成 `ai-memory` 子目录初始化（reading/cards/projects/reviews）
 - [ ] 已完成领域页确认（已有复用或用户确认新建）
 - [ ] 已完成主题笔记确认（扁平结构，无子目录）
 - [ ] 已完成迁移与页面初始化（初始化模式）

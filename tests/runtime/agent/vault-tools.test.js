@@ -128,6 +128,20 @@ test("vault_read normalizes backslashes and duplicated slashes", async () => {
   assert.equal(r.content, "ok");
 });
 
+test("vault_read maps legacy hidden memory path to the visible memory path", async () => {
+  const tool = createVaultReadTool({ vault: fakeVault({ "Meta/ai-memory/STATUS.md": "visible memory" }) });
+  const r = lastResult(await collectExecute(tool, { path: "Meta/.ai-memory/STATUS.md" }));
+  assert.equal(r.content, "visible memory");
+  assert.ok(!r.isError);
+});
+
+test("vault_read can still read legacy hidden memory path if migration has not run", async () => {
+  const tool = createVaultReadTool({ vault: fakeVault({ "Meta/.ai-memory/STATUS.md": "legacy memory" }) });
+  const r = lastResult(await collectExecute(tool, { path: "Meta/.ai-memory/STATUS.md" }));
+  assert.equal(r.content, "legacy memory");
+  assert.ok(!r.isError);
+});
+
 test("vault_read slices by offset/limit (1-indexed, inclusive)", async () => {
   const tool = createVaultReadTool({ vault: fakeVault({ "x.md": "1\n2\n3\n4\n5" }) });
   const r = lastResult(await collectExecute(tool, { path: "x.md", offset: 2, limit: 2 }));
@@ -226,6 +240,15 @@ test("vault_write create: writes a new file and confirms bytes", async () => {
   const r = lastResult(await collectExecute(tool, { path: "new.md", content: "hi", mode: "create" }));
   assert.match(r.content, /Created "new.md"/);
   assert.equal(vault._files.get("new.md"), "hi");
+});
+
+test("vault_write maps legacy hidden memory writes to the visible memory path", async () => {
+  const vault = fakeVault();
+  const tool = createVaultWriteTool({ vault });
+  const r = lastResult(await collectExecute(tool, { path: "Meta/.ai-memory/STATUS.md", content: "memory", mode: "create" }));
+  assert.match(r.content, /Created "Meta\/ai-memory\/STATUS\.md"/);
+  assert.equal(vault._files.get("Meta/ai-memory/STATUS.md"), "memory");
+  assert.equal(vault._files.has("Meta/.ai-memory/STATUS.md"), false);
 });
 
 test("vault_write create on existing path returns an error result", async () => {

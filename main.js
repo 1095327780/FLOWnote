@@ -434,6 +434,21 @@ class FLOWnoteAssistantPlugin extends Plugin {
         }
       }
 
+      // One-time silent migration: Meta/.ai-memory → Meta/ai-memory.
+      // Obsidian can skip dot-prefixed folders in its loaded-file index,
+      // especially on mobile/iCloud-backed vaults, so the canonical memory
+      // directory is now visible. Keep the old directory intact.
+      if (typeof runtime.migrateMemoryDir === "function") {
+        try {
+          const result = await runtime.migrateMemoryDir(this);
+          if (result && result.migrated) {
+            this.log(`migrated Meta/.ai-memory → Meta/ai-memory (${result.copied} files copied)`);
+          }
+        } catch (e) {
+          this.log(`memory dir migration failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
       this.sessionStore = new runtime.SessionStore(this);
 
       const vaultPath = this.getVaultPath();
