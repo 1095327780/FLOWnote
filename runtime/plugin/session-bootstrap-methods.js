@@ -6,6 +6,7 @@ const {
   hasPersistedPluginData,
   markAgentModeNoticeSeen,
 } = require("../release-notice");
+const { setRuntimeLocale } = require("../runtime-locale-state");
 
 const RUNTIME_SCHEMA_VERSION = 1;
 
@@ -272,6 +273,7 @@ const sessionBootstrapMethods = {
     if (this.skillService) this.skillService.updateSettings(this.settings);
     if (this.opencodeClient) this.opencodeClient.updateSettings(this.settings);
     await this.persistState();
+    setRuntimeLocale(typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en");
     try {
       const view = typeof this.getAssistantView === "function" ? this.getAssistantView() : null;
       if (view && typeof view.updateModelSelectOptions === "function") {

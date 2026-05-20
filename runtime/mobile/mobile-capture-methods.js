@@ -169,6 +169,23 @@ const mobileCaptureMethodsMixin = {
   async onloadMobile() {
     const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
 
+    // Hydrate the persisted language before registering mobile commands
+    // and ribbon entries. The full runtime is loaded later, but command
+    // labels are captured at registration time and must survive restart.
+    try {
+      const raw = (await this.loadData()) || {};
+      const persisted = raw && typeof raw === "object"
+        ? (raw.settings || raw)
+        : {};
+      this.settings = normalizeMobileSettings(persisted);
+      setRuntimeLocale(typeof this.getEffectiveLocale === "function"
+        ? this.getEffectiveLocale() : "en");
+    } catch (e) {
+      if (typeof this.log === "function") {
+        this.log(`mobile early settings hydration failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
     // Stage 1: capture-only essentials + assistant entry. Register both
     // user-facing entrypoints FIRST so they're guaranteed to appear in
     // the mobile "more options" panel even if Stage 2 (full runtime

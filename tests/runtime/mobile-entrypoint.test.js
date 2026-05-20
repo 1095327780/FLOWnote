@@ -2,9 +2,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
 
-function loadMobilePluginFixture() {
+function loadMobilePluginFixture(options = {}) {
   const originalLoad = Module._load;
   const noticeMessages = [];
+  const persistedData = options.persistedData || {};
 
   class PluginMock {
     constructor(app, manifest) {
@@ -38,7 +39,7 @@ function loadMobilePluginFixture() {
     }
 
     async loadData() {
-      return {};
+      return persistedData;
     }
 
     async saveData() {}
@@ -194,6 +195,45 @@ test("mobile onload should use mixin entrypoint and register mobile surfaces", a
     assert.equal(plugin._ribbons.length >= 1, true);
     assert.equal(plugin._tabs.length, 1, "fallback settings tab must register when Stage 2 fails");
     assert.equal(fixture.noticeMessages.length, 0);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("mobile onload should register commands using persisted English after restart", async () => {
+  const fixture = loadMobilePluginFixture({
+    persistedData: {
+      settings: {
+        uiLanguage: "en",
+        mobileCapture: {},
+      },
+    },
+  });
+  try {
+    const app = {
+      vault: {
+        adapter: { basePath: "/tmp/vault" },
+        configDir: ".obsidian",
+      },
+      workspace: {
+        detachLeavesOfType() {},
+      },
+    };
+    const manifest = {
+      id: "flownote",
+      dir: process.cwd(),
+      version: "0.0.0-test",
+    };
+
+    const plugin = new fixture.PluginClass(app, manifest);
+    await plugin.onload();
+
+    const quickCaptureCommand = plugin._commands.find((cmd) => cmd && cmd.id === "mobile-quick-capture");
+    const assistantCommand = plugin._commands.find((cmd) => cmd && cmd.id === "flownote-open-assistant");
+    assert.equal(quickCaptureCommand.name, "Quick Idea Capture");
+    assert.equal(assistantCommand.name, "FLOWnote Assistant");
+    assert.equal(plugin._ribbons.some((entry) => entry.title === "Quick Idea Capture"), true);
+    assert.equal(plugin._ribbons.some((entry) => entry.title === "FLOWnote Assistant"), true);
   } finally {
     fixture.restore();
   }
