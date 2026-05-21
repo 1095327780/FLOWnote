@@ -24,22 +24,38 @@ test("describeToday appends the Chinese weekday label", () => {
   assert.equal(describeToday(d), "2026-05-15 (星期五)");
 });
 
+test("describeToday supports English weekday labels", () => {
+  const d = new Date(2026, 4, 15, 12, 0, 0);
+  assert.equal(describeToday(d, "en"), "2026-05-15 (Friday)");
+});
+
 test("buildSystemPrompt omits the Context block when no opts given", () => {
   const out = buildSystemPrompt([]);
   assert.doesNotMatch(out, /Context:/);
 });
 
 test("buildSystemPrompt includes currentDate when opts.todayLabel is set", () => {
-  const out = buildSystemPrompt([], { todayLabel: "2026-05-15 (星期五)" });
+  const out = buildSystemPrompt([], { todayLabel: "2026-05-15 (星期五)", locale: "zh-CN" });
   assert.match(out, /# currentDate/);
   assert.match(out, /2026-05-15 \(星期五\)/);
   assert.match(out, /相对时间/);
 });
 
 test("buildSystemPrompt includes vault block when opts.vaultName is set", () => {
-  const out = buildSystemPrompt([], { vaultName: "shanghao" });
+  const out = buildSystemPrompt([], { vaultName: "shanghao", locale: "zh-CN" });
   assert.match(out, /# vault/);
   assert.match(out, /当前 Obsidian 库名：shanghao/);
+});
+
+test("buildSystemPrompt supports English context blocks", () => {
+  const out = buildSystemPrompt([], {
+    todayLabel: "2026-05-15 (Friday)",
+    vaultName: "My Vault",
+    locale: "en",
+  });
+  assert.match(out, /Today is 2026-05-15 \(Friday\)/);
+  assert.match(out, /Resolve relative dates/);
+  assert.match(out, /Current Obsidian vault: My Vault/);
 });
 
 test("buildSystemPrompt appends the skill listing after Context", () => {

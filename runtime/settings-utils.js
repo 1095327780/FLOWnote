@@ -1,5 +1,6 @@
 const LINK_RESOLVER_PROVIDER_IDS = ["tianapi", "showapi", "gugudata"];
 const { normalizeToolPermissionMode } = require("./agent/permission-policy");
+const { normalizeSupportedLocale } = require("./i18n-locale-utils");
 
 const LINK_RESOLVER_DEFAULTS = {
   enabled: true,
@@ -63,7 +64,7 @@ function normalizeLinkResolver(raw) {
 // these in settings → "笔记位置". The agent system prompt is rebuilt
 // per turn with whatever values are live in `settings.notePaths`, so a
 // path change takes effect immediately (no restart, no skill rewrite).
-const DEFAULT_NOTE_PATHS = {
+const DEFAULT_NOTE_PATHS_ZH = {
   dailyNotes:       "01-捕获层/每日笔记",
   weeklyReviews:    "01-捕获层/周记",
   monthlyReviews:   "01-捕获层/月记",
@@ -76,12 +77,34 @@ const DEFAULT_NOTE_PATHS = {
   archive:          "04-创造层/归档",
 };
 
-function normalizeNotePaths(raw) {
+const DEFAULT_NOTE_PATHS_EN = {
+  dailyNotes:       "01-Capture/Daily Notes",
+  weeklyReviews:    "01-Capture/Weekly Reviews",
+  monthlyReviews:   "01-Capture/Monthly Reviews",
+  yearlyReviews:    "01-Capture/Yearly Reviews",
+  permanentNotes:   "02-Cultivate/Permanent Notes",
+  topicNotes:       "02-Cultivate/Topic Notes",
+  literatureNotes:  "02-Cultivate/Literature Notes",
+  domainPages:      "03-Connect",
+  activeProjects:   "04-Create/Projects",
+  archive:          "04-Create/Archives",
+};
+
+const DEFAULT_NOTE_PATHS = DEFAULT_NOTE_PATHS_ZH;
+
+function getDefaultNotePathsByLocale(locale) {
+  return normalizeSupportedLocale(locale || "zh-CN", "zh-CN") === "en"
+    ? { ...DEFAULT_NOTE_PATHS_EN }
+    : { ...DEFAULT_NOTE_PATHS_ZH };
+}
+
+function normalizeNotePaths(raw, defaults = DEFAULT_NOTE_PATHS) {
   const data = raw && typeof raw === "object" ? raw : {};
-  const out = { ...DEFAULT_NOTE_PATHS };
-  for (const key of Object.keys(DEFAULT_NOTE_PATHS)) {
+  const base = defaults && typeof defaults === "object" ? defaults : DEFAULT_NOTE_PATHS;
+  const out = { ...base };
+  for (const key of Object.keys(DEFAULT_NOTE_PATHS_ZH)) {
     const v = String(data[key] || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
-    out[key] = v || DEFAULT_NOTE_PATHS[key];
+    out[key] = v || base[key] || DEFAULT_NOTE_PATHS_ZH[key];
   }
   return out;
 }
@@ -148,6 +171,10 @@ function normalizeSkillSecrets(raw) {
 }
 
 function normalizeSettings(raw, options = {}) {
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const hasExplicitNotePaths = Boolean(source.notePaths && typeof source.notePaths === "object");
+  const hasExplicitMobileCapture = Boolean(source.mobileCapture && typeof source.mobileCapture === "object");
+  const localeDefaults = getDefaultNotePathsByLocale(options && options.locale);
   const merged = Object.assign({}, DEFAULT_SETTINGS, migrateLegacySettings(raw));
   const incomingAgentModePreference = normalizeAgentProviderModePreference(
     merged.agentProviderModePreference,
@@ -164,7 +191,12 @@ function normalizeSettings(raw, options = {}) {
   if (!["auto", "native"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
     merged.launchStrategy = "auto";
   }
-  merged.notePaths = normalizeNotePaths(merged.notePaths);
+  merged.notePaths = normalizeNotePaths(
+    hasExplicitNotePaths ? merged.notePaths : null,
+    !hasExplicitNotePaths && !(options && options.existingInstall)
+      ? localeDefaults
+      : DEFAULT_NOTE_PATHS,
+  );
 
   merged.requestTimeoutMs = Math.max(10000, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
   merged.cliPath = String(merged.cliPath || "").trim();
@@ -179,22 +211,30 @@ function normalizeSettings(raw, options = {}) {
 
   // --- mobileCapture normalization ---
   const mcDefaults = DEFAULT_SETTINGS.mobileCapture;
-  if (!merged.mobileCapture || typeof merged.mobileCapture !== "object") {
-    merged.mobileCapture = { ...mcDefaults };
+  const mobileLocale = (options && options.existingInstall)
+    ? "zh-CN"
+    : normalizeSupportedLocale(options && options.locale, "zh-CN");
+  const localizedMcDefaults = {
+    ...mcDefaults,
+    dailyNotePath: mobileLocale === "en" ? DEFAULT_NOTE_PATHS_EN.dailyNotes : mcDefaults.dailyNotePath,
+    ideaSectionHeader: mobileLocale === "en" ? "## Records" : mcDefaults.ideaSectionHeader,
+  };
+  if (!hasExplicitMobileCapture) {
+    merged.mobileCapture = { ...localizedMcDefaults };
   } else {
-    merged.mobileCapture = Object.assign({}, mcDefaults, merged.mobileCapture);
+    merged.mobileCapture = Object.assign({}, localizedMcDefaults, merged.mobileCapture);
   }
   const mc = merged.mobileCapture;
-  mc.provider = String(mc.provider || mcDefaults.provider).trim();
+  mc.provider = String(mc.provider || localizedMcDefaults.provider).trim();
   mc.apiKey = String(mc.apiKey || "").trim();
   mc.baseUrl = String(mc.baseUrl || "").trim();
   mc.model = String(mc.model || "").trim();
-  mc.dailyNotePath = String(mc.dailyNotePath || mcDefaults.dailyNotePath).trim();
+  mc.dailyNotePath = String(mc.dailyNotePath || localizedMcDefaults.dailyNotePath).trim();
   if (mc.dailyNotePath === "01-捕获层/记录") mc.dailyNotePath = "01-捕获层/每日笔记";
   if (mc.dailyNotePath === "01-Capture/Records") mc.dailyNotePath = "01-Capture/Daily Notes";
-  mc.ideaSectionHeader = String(mc.ideaSectionHeader || mcDefaults.ideaSectionHeader).trim();
-  mc.enableAiCleanup = typeof mc.enableAiCleanup === "boolean" ? mc.enableAiCleanup : mcDefaults.enableAiCleanup;
-  mc.enableUrlSummary = typeof mc.enableUrlSummary === "boolean" ? mc.enableUrlSummary : mcDefaults.enableUrlSummary;
+  mc.ideaSectionHeader = String(mc.ideaSectionHeader || localizedMcDefaults.ideaSectionHeader).trim();
+  mc.enableAiCleanup = typeof mc.enableAiCleanup === "boolean" ? mc.enableAiCleanup : localizedMcDefaults.enableAiCleanup;
+  mc.enableUrlSummary = typeof mc.enableUrlSummary === "boolean" ? mc.enableUrlSummary : localizedMcDefaults.enableUrlSummary;
   mc.linkResolver = normalizeLinkResolver(mc.linkResolver);
 
   // --- agentProvider normalization + migration ---
@@ -259,8 +299,11 @@ function normalizeAgentProviderModePreference(value) {
 module.exports = {
   DEFAULT_SETTINGS,
   DEFAULT_NOTE_PATHS,
+  DEFAULT_NOTE_PATHS_ZH,
+  DEFAULT_NOTE_PATHS_EN,
   LINK_RESOLVER_DEFAULTS,
   LINK_RESOLVER_PROVIDER_IDS,
+  getDefaultNotePathsByLocale,
   migrateLegacySettings,
   normalizeLinkResolver,
   normalizeNotePaths,

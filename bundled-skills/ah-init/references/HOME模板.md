@@ -1,35 +1,178 @@
 ---
-类型: 知识库主页
-创建日期: YYYY-MM-DD
+type: home
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+version: 4.2
+cssclasses:
+  - flownote-home
 ---
 
-# 🏠 知识库主页
+# FLOWnote 知识库主页
 
-> 写一句话说明当前知识库状态与本周重点。
+> [!info]+ 插件提示
+> 这个主页依赖 **Dataview** 插件来自动统计每日笔记、项目和最近活动；如果你想显示顶部横幅，也可以安装 **Banners** 插件。首次创建主页时会加入这段提示，后续更新不会重新插入；如果你已经配置完成，可以直接删除。
 
-## 🗂️ 快速导航
+<!-- FLOWNOTE_HOME_AUTOMATED_START -->
 
-- [[01-捕获层]] — 每日笔记、周记、月记
-- [[02-培养层]] — 永久笔记、文献笔记、主题笔记
-- [[03-连接层]] — 领域页
-- [[04-创造层]] — 项目
+## 今日入口
 
-## 🌱 我的领域
+```dataviewjs
+const cfg = {
+  daily: "01-捕获层/每日笔记",
+  highlights: "01-捕获层/划线笔记",
+  permanent: "02-培养层/永久笔记",
+  literature: "02-培养层/文献笔记",
+  topics: "02-培养层/主题笔记",
+  domains: "03-连接层",
+  projects: "04-创造层/项目",
+  archives: "04-创造层/归档",
+  memory: "Meta/ai-memory"
+};
 
-- [[03-连接层/🌱 领域名称|领域名称]] — 一句状态说明
+const today = dv.date("today");
+const todayPath = `${cfg.daily}/${today.toFormat("yyyy-MM-dd")}`;
+const todayPage = dv.page(todayPath);
+const tasks = todayPage?.file?.tasks ?? [];
+const openTasks = tasks.filter(t => !t.completed);
+const doneTasks = tasks.filter(t => t.completed);
+const capturesToday = todayPage ? todayPage.file.lists.length : 0;
 
-## 📍 我的主题
+dv.header(3, `${today.toFormat("yyyy-MM-dd")} · 第 ${today.weekNumber} 周`);
+dv.paragraph(`[[${todayPath}|打开今日日记]] · 待办 ${openTasks.length} · 已完成 ${doneTasks.length} · 今日记录 ${capturesToday}`);
 
-- [[02-培养层/主题笔记/📍 主题名称|主题名称]]
+if (openTasks.length) {
+  dv.taskList(openTasks.slice(0, 8), false);
+} else {
+  dv.paragraph("今天还没有未完成待办。");
+}
+```
 
-## 🚀 活跃项目
+## 目录入口
 
-- [[04-创造层/项目/项目路径/📍 项目总览|项目名]] — 一句进展说明
+```dataviewjs
+const folders = [
+  ["捕获", "每日笔记", "01-捕获层/每日笔记"],
+  ["捕获", "划线笔记", "01-捕获层/划线笔记"],
+  ["捕获", "周记", "01-捕获层/周记"],
+  ["捕获", "月记", "01-捕获层/月记"],
+  ["培养", "永久笔记", "02-培养层/永久笔记"],
+  ["培养", "文献笔记", "02-培养层/文献笔记"],
+  ["培养", "主题笔记", "02-培养层/主题笔记"],
+  ["连接", "领域页", "03-连接层"],
+  ["创造", "项目", "04-创造层/项目"],
+  ["创造", "归档", "04-创造层/归档"]
+];
 
-## 📊 知识库统计
+function pageCount(folder) {
+  return dv.pages(`"${folder}"`).where(p => p.file.ext === "md").length;
+}
 
-写关键统计：永久笔记、文献笔记、领域页、主题笔记、活跃项目数量。
+dv.table(
+  ["层级", "目录", "笔记数", "路径"],
+  folders.map(([layer, name, folder]) => [
+    layer,
+    name,
+    pageCount(folder),
+    `\`${folder}\``
+  ])
+);
+```
 
----
+## 进行中的项目
 
-写一个下一步动作提示（例如用哪个技能继续推进）。
+```dataviewjs
+const projectRoot = "04-创造层/项目";
+const overviewNames = new Set(["📍 项目总览", "Project Overview"]);
+
+function projectFolderName(page) {
+  const rel = page.file.path
+    .replace(`${projectRoot}/`, "")
+    .replace(/\/(📍 项目总览|Project Overview)\.md$/, "");
+  return rel.split("/").filter(Boolean).join(" / ");
+}
+
+const projects = dv.pages(`"${projectRoot}"`)
+  .where(p => p.file.ext === "md")
+  .where(p => overviewNames.has(p.file.name))
+  .where(p => p.file.path !== `${projectRoot}/📍 项目总览.md`)
+  .where(p => p.file.path !== `${projectRoot}/Project Overview.md`)
+  .where(p => !p.file.path.includes("/归档/"))
+  .where(p => !p.file.path.includes("/Archives/"))
+  .sort(p => p.file.mtime, "desc");
+
+if (!projects.length) {
+  dv.paragraph("暂无进行中的项目。");
+} else {
+  dv.table(
+    ["项目", "状态", "优先级", "更新"],
+    projects.map(p => [
+      dv.fileLink(p.file.path, false, projectFolderName(p)),
+      p.status ?? p.状态 ?? "进行中",
+      p.priority ?? p.优先级 ?? "—",
+      p.file.mtime.toFormat("MM-dd")
+    ])
+  );
+}
+```
+
+## 最近活动
+
+```dataviewjs
+const hiddenPrefixes = [".", "Meta/ai-memory", "Meta/.ai-memory", "Clippings/", "04-创造层/归档/"];
+const pages = dv.pages()
+  .where(p => p.file.ext === "md")
+  .where(p => !hiddenPrefixes.some(prefix => p.file.path.startsWith(prefix)))
+  .where(p => p.file.path !== dv.current().file.path)
+  .sort(p => p.file.mtime, "desc")
+  .slice(0, 12);
+
+dv.list(pages.map(p => `${p.file.link} · ${p.file.mtime.toFormat("MM-dd HH:mm")}`));
+```
+
+## 知识地图
+
+```dataviewjs
+const cfg = {
+  daily: "01-捕获层/每日笔记",
+  highlights: "01-捕获层/划线笔记",
+  permanent: "02-培养层/永久笔记",
+  literature: "02-培养层/文献笔记",
+  topics: "02-培养层/主题笔记",
+  domains: "03-连接层",
+  projects: "04-创造层/项目"
+};
+
+const overviewNames = new Set(["📍 项目总览", "Project Overview"]);
+const count = (folder) => dv.pages(`"${folder}"`).where(p => p.file.ext === "md").length;
+const projects = dv.pages(`"${cfg.projects}"`)
+  .where(p => p.file.ext === "md" && overviewNames.has(p.file.name))
+  .where(p => p.file.path !== `${cfg.projects}/📍 项目总览.md`)
+  .where(p => p.file.path !== `${cfg.projects}/Project Overview.md`)
+  .where(p => !p.file.path.includes("/归档/"))
+  .length;
+
+dv.table(
+  ["每日笔记", "划线笔记", "永久笔记", "文献笔记", "主题", "领域", "项目"],
+  [[
+    count(cfg.daily),
+    count(cfg.highlights),
+    count(cfg.permanent),
+    count(cfg.literature),
+    count(cfg.topics),
+    count(cfg.domains),
+    projects
+  ]]
+);
+```
+
+## AI 工作流
+
+| 场景 | 命令 | 场景 | 命令 |
+|---|---|---|---|
+| 创建今日日记 | `/ah-note` | 快速捕获到日记 | `/ah-capture` |
+| 生成永久笔记 | `/ah-card` | 整理阅读笔记 | `/ah-read` |
+| 创建项目 | `/ah-project` | 每日回顾 | `/ah-review` |
+| 周回顾 | `/ah-week` | 月回顾 | `/ah-month` |
+| 更新主页和索引 | `/ah-init` | 不清楚用哪个 | `/ah` |
+
+<!-- FLOWNOTE_HOME_AUTOMATED_END -->

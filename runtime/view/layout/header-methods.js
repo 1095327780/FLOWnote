@@ -60,8 +60,8 @@ function renderHeader(header) {
       this.render();
     });
   };
-  renderPanelButton("home", "layout-dashboard", "首页");
-  renderPanelButton("chat", "message-square", "聊天");
+  renderPanelButton("home", "layout-dashboard", tr(this, "view.header.home", "Home"));
+  renderPanelButton("chat", "message-square", tr(this, "view.header.chat", "Chat"));
 
   const actions = header.createDiv({ cls: "oc-header-actions" });
   actions.createDiv({

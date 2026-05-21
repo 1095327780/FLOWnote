@@ -11,6 +11,7 @@ const {
   listSkillManagementEntries,
   listSkillSecretRefs,
   extractSkillSecretRefsFromText,
+  isBundledSkillSlug,
   validateSlug,
   renderSkillMarkdown,
 } = require("../../runtime/settings/skill-management");
@@ -206,6 +207,22 @@ test("listSkillManagementEntries falls back to embedded skills when vault roots 
   assert.equal(out.some((s) => s.slug === "ah" && s.embedded && s.readOnly), true);
 });
 
+test("listSkillManagementEntries marks installed bundled skills read-only even in primary root", async () => {
+  const adapter = makeAdapter({
+    ".flownote/skills/ah/SKILL.md": `---\nname: ah\ndescription: Builtin\n---\nbody`,
+    ".flownote/skills/custom-workflow/SKILL.md": `---\nname: Custom\ndescription: User skill\n---\nbody`,
+  });
+  const plugin = makePlugin(adapter, ".flownote/skills");
+  const out = await listSkillManagementEntries(plugin);
+  const builtin = out.find((s) => s.slug === "ah");
+  const custom = out.find((s) => s.slug === "custom-workflow");
+  assert.equal(isBundledSkillSlug("ah"), true);
+  assert.equal(builtin.readOnly, true);
+  assert.equal(builtin.bundled, true);
+  assert.equal(custom.readOnly, false);
+  assert.equal(custom.bundled, false);
+});
+
 test("listSkillSecretRefs detects env-style API key placeholders across skill roots", async () => {
   const adapter = makeAdapter({
     ".flownote/skills/weread-skills/SKILL.md":
@@ -325,6 +342,19 @@ test("saveSkill clears agent-side skill cache so the next turn re-scans", async 
   assert.equal(plugin.__flownoteSkillCache, null);
 });
 
+test("saveSkill refuses bundled skill slugs", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter);
+  await assert.rejects(
+    () => saveSkill(plugin, { slug: "ah", name: "ah", description: "builtin", body: "" }),
+    /内置 Skills/,
+  );
+  await assert.rejects(
+    () => saveSkill(plugin, { slug: "custom-ah", name: "custom", description: "d", body: "" }, "ah"),
+    /内置 Skills/,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // deleteSkill
 // ---------------------------------------------------------------------------
@@ -346,6 +376,18 @@ test("deleteSkill returns false when the folder doesn't exist", async () => {
   const plugin = makePlugin(adapter);
   const ok = await deleteSkill(plugin, "no-such-skill");
   assert.equal(ok, false);
+});
+
+test("deleteSkill refuses bundled skill slugs", async () => {
+  const adapter = makeAdapter({
+    ".flownote/skills/ah/SKILL.md": `---\nname: ah\ndescription: builtin\n---\nbody`,
+  });
+  const plugin = makePlugin(adapter);
+  await assert.rejects(
+    () => deleteSkill(plugin, "ah"),
+    /内置 Skills/,
+  );
+  assert.equal(adapter._files.has(".flownote/skills/ah/SKILL.md"), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -374,7 +416,7 @@ test("importSkillsFromFileList imports multiple complete skill folders", async (
     makeImportFile("external-skills/weread/SKILL.md", "---\nname: WeRead\ndescription: d\n---\nbody"),
     makeImportFile("external-skills/weread/references/api.md", "api docs"),
     makeImportFile("external-skills/weread/assets/logo.png", binary, { binary: true, type: "image/png" }),
-    makeImportFile("external-skills/ah-note/SKILL.md", "---\nname: AH Note\ndescription: d\n---"),
+    makeImportFile("external-skills/my-note/SKILL.md", "---\nname: My Note\ndescription: d\n---"),
     makeImportFile("external-skills/.DS_Store", "junk"),
   ]);
 
@@ -388,7 +430,20 @@ test("importSkillsFromFileList imports multiple complete skill folders", async (
   assert.equal(adapter._files.get("skills/weread/SKILL.md").includes("WeRead"), true);
   assert.equal(adapter._files.get("skills/weread/references/api.md"), "api docs");
   assert.equal(adapter._files.has(".flownote/skills/.DS_Store"), false);
-  assert.equal(adapter._files.has(".flownote/skills/ah-note/SKILL.md"), true);
+  assert.equal(adapter._files.has(".flownote/skills/my-note/SKILL.md"), true);
+});
+
+test("importSkillsFromFileList skips bundled skill slugs", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter);
+  const result = await importSkillsFromFileList(plugin, [
+    makeImportFile("bundle/ah/SKILL.md", "---\nname: ah\ndescription: overwritten\n---"),
+  ]);
+
+  assert.equal(result.imported, 0);
+  assert.equal(result.skipped, 1);
+  assert.match(result.skippedSkills[0].reason, /内置 Skills/);
+  assert.equal(adapter._files.has(".flownote/skills/ah/SKILL.md"), false);
 });
 
 test("importSkillsFromFileList imports a wrapper folder such as .claude/skills", async () => {

@@ -9,6 +9,19 @@
 
 const { getProviderSpec } = require("../../providers/registry");
 const { getActiveApiKey } = require("../../agent/agent-settings");
+const { normalizeSupportedLocale } = require("../../i18n-locale-utils");
+
+function getPluginLocale(plugin) {
+  if (plugin && typeof plugin.getEffectiveLocale === "function") {
+    return normalizeSupportedLocale(plugin.getEffectiveLocale(), "en");
+  }
+  const raw = plugin && plugin.settings ? String(plugin.settings.uiLanguage || "") : "";
+  return normalizeSupportedLocale(raw === "auto" ? "" : raw, "en");
+}
+
+function agentText(plugin, zh, en) {
+  return getPluginLocale(plugin) === "zh-CN" ? zh : en;
+}
 
 /**
  * @typedef {Object} AgentSummary
@@ -45,23 +58,23 @@ function summarizeActiveAgent(plugin) {
 
   const direct = settings.direct || {};
   const spec = getProviderSpec(direct.providerId || "");
-  const providerLabel = (spec && spec.displayName) || direct.providerId || "未配置";
+  const providerLabel = (spec && spec.displayName) || direct.providerId || agentText(plugin, "未配置", "Not configured");
   const modelId = String(direct.model || "");
   const modelInfo = spec ? (spec.models || []).find((m) => m && m.id === modelId) : null;
-  const modelLabel = (modelInfo && modelInfo.label) || modelId || "未选择模型";
+  const modelLabel = (modelInfo && modelInfo.label) || modelId || agentText(plugin, "未选择模型", "No model selected");
   const hasApiKey = Boolean(getActiveApiKey(settings));
 
   let configComplete = true;
   let missingReason = "";
   if (!spec) {
     configComplete = false;
-    missingReason = "未选择服务商";
+    missingReason = agentText(plugin, "未选择服务商", "No provider selected");
   } else if (!modelId) {
     configComplete = false;
-    missingReason = "未选择模型";
+    missingReason = agentText(plugin, "未选择模型", "No model selected");
   } else if (!hasApiKey) {
     configComplete = false;
-    missingReason = "未填写 API Key";
+    missingReason = agentText(plugin, "未填写 API Key", "API Key missing");
   }
 
   return {

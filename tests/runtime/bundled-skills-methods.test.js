@@ -290,7 +290,8 @@ test("resetMetaTemplateBaseline should switch Meta template filename by locale",
     assert.equal(zhReset.errors.length, 0);
 
     const metaZh = path.join(fixture.vaultPath, "Meta", "模板", "示例模板.md");
-    const metaEn = path.join(fixture.vaultPath, "Meta", "模板", "Sample-Template.md");
+    const metaEn = path.join(fixture.vaultPath, "Meta", "Templates", "Sample-Template.md");
+    const staleMetaEnInZhDir = path.join(fixture.vaultPath, "Meta", "模板", "Sample-Template.md");
     assert.equal(fs.existsSync(metaZh), true);
     assert.equal(fs.existsSync(metaEn), false);
 
@@ -300,9 +301,9 @@ test("resetMetaTemplateBaseline should switch Meta template filename by locale",
     });
     assert.equal(enReset.errors.length, 0);
     assert.equal(fs.existsSync(metaEn), true);
-    assert.equal(fs.existsSync(metaZh), false);
+    assert.equal(fs.existsSync(metaZh), true);
+    assert.equal(fs.existsSync(staleMetaEnInZhDir), false);
     assert.equal(fs.readFileSync(metaEn, "utf8"), "fallback-template-en\n");
-    assert.equal(Number(enReset.cleanedStaleCount || 0) > 0, true);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

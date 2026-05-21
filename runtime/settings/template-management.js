@@ -30,6 +30,7 @@ const EMBEDDED_BUNDLED_SKILLS_FILES = embeddedBundledSkillsModule
 
 const DEFAULT_META_TEMPLATES_DIR = "Meta/模板";
 const TEMPLATE_MAP_FILE = "template-map.json";
+const { normalizeSupportedLocale } = require("../i18n-locale-utils");
 
 function joinPath(a, b) {
   return `${String(a).replace(/\/+$/, "")}/${String(b).replace(/^\/+/, "")}`;
@@ -75,6 +76,38 @@ async function readTemplateMap(plugin) {
   return { entries, metaTemplatesDir };
 }
 
+function resolveTemplateLocale(plugin) {
+  const locale = typeof plugin?.getEffectiveLocale === "function"
+    ? plugin.getEffectiveLocale()
+    : plugin?.settings?.uiLanguage;
+  return normalizeSupportedLocale(locale, "zh-CN");
+}
+
+function metaTemplatesDirByLocale(baseDir, locale) {
+  return normalizeSupportedLocale(locale, "zh-CN") === "en"
+    ? "Meta/Templates"
+    : (String(baseDir || "").trim() || DEFAULT_META_TEMPLATES_DIR);
+}
+
+function resolveTemplateEntryByLocale(raw, locale) {
+  const base = raw && typeof raw === "object" ? raw : {};
+  const normalizedLocale = normalizeSupportedLocale(locale, "zh-CN");
+  const variant = base.locales && typeof base.locales === "object"
+    ? base.locales[normalizedLocale]
+    : null;
+  const targets = Array.isArray(variant && variant.targets) && variant.targets.length
+    ? variant.targets
+    : base.targets;
+  return {
+    id: String(base.id || "").trim(),
+    metaSource: String((variant && variant.metaSource) || base.metaSource || "").trim(),
+    fallback: String((variant && variant.fallback) || base.fallback || "").trim(),
+    targets: Array.isArray(targets)
+      ? targets.map((t) => String(t || "").trim()).filter(Boolean)
+      : [],
+  };
+}
+
 /**
  * Read the bundled fallback content for a template. Returns "" if the
  * fallback path doesn't resolve in the embedded bundle. This is the
@@ -115,19 +148,16 @@ function skillsRoot(plugin) {
 async function listTemplates(plugin) {
   const adapter = plugin && plugin.app && plugin.app.vault && plugin.app.vault.adapter;
   if (!adapter) return [];
+  const locale = resolveTemplateLocale(plugin);
   const { entries, metaTemplatesDir } = await readTemplateMap(plugin);
+  const localizedMetaTemplatesDir = metaTemplatesDirByLocale(metaTemplatesDir, locale);
   const root = skillsRoot(plugin);
   const out = [];
   for (const raw of entries) {
-    if (!raw || typeof raw !== "object") continue;
-    const id = String(raw.id || "").trim();
-    const metaSource = String(raw.metaSource || "").trim();
-    const fallback = String(raw.fallback || "").trim();
-    const targets = Array.isArray(raw.targets)
-      ? raw.targets.map((t) => String(t || "").trim()).filter(Boolean)
-      : [];
+    const entry = resolveTemplateEntryByLocale(raw, locale);
+    const { id, metaSource, fallback, targets } = entry;
     if (!id || !metaSource) continue;
-    const userPath = joinPath(metaTemplatesDir, metaSource);
+    const userPath = joinPath(localizedMetaTemplatesDir, metaSource);
     const skillTargetPaths = targets.map((t) => joinPath(root, t));
     let hasUserCopy = false;
     try { hasUserCopy = await adapter.exists(userPath); } catch { hasUserCopy = false; }

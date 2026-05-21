@@ -47,6 +47,8 @@ const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
+const { getDefaultNotePathsByLocale } = require("../settings-utils");
+const { getDefaultMetaPathsByLocale } = require("../note-path-locale-migration");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
@@ -69,9 +71,26 @@ function getLocalISODate(now) {
 
 const ZH_WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
-function describeToday(now) {
+function getRunnerLocale(viewOrPlugin) {
+  const plugin = viewOrPlugin && viewOrPlugin.plugin ? viewOrPlugin.plugin : viewOrPlugin;
+  if (plugin && typeof plugin.getEffectiveLocale === "function") {
+    return plugin.getEffectiveLocale() === "zh-CN" ? "zh-CN" : "en";
+  }
+  const raw = plugin && plugin.settings ? String(plugin.settings.uiLanguage || "") : "";
+  return /^zh/i.test(raw) ? "zh-CN" : "en";
+}
+
+function runnerText(locale, zh, en) {
+  return locale === "zh-CN" ? zh : en;
+}
+
+function describeToday(now, locale = "zh-CN") {
   const d = now instanceof Date ? now : new Date();
-  return `${getLocalISODate(d)} (星期${ZH_WEEKDAY[d.getDay()]})`;
+  if (locale === "zh-CN") {
+    return `${getLocalISODate(d)} (星期${ZH_WEEKDAY[d.getDay()]})`;
+  }
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+  return `${getLocalISODate(d)} (${weekday})`;
 }
 
 const BASE_SYSTEM_PROMPT = [
@@ -213,11 +232,20 @@ const BASE_SYSTEM_PROMPT = [
 function buildSystemPrompt(skillManifests, opts) {
   const parts = [BASE_SYSTEM_PROMPT];
   const ctxLines = [];
+  const locale = opts && opts.locale === "zh-CN" ? "zh-CN" : "en";
   if (opts && opts.todayLabel) {
-    ctxLines.push(`# currentDate\n今天是 ${opts.todayLabel}。涉及"今天 / 昨天 / 本周"等相对时间时，以这个日期为准。`);
+    ctxLines.push(runnerText(
+      locale,
+      `# currentDate\n今天是 ${opts.todayLabel}。涉及"今天 / 昨天 / 本周"等相对时间时，以这个日期为准。`,
+      `# currentDate\nToday is ${opts.todayLabel}. Resolve relative dates such as "today", "yesterday", and "this week" against this date.`,
+    ));
   }
   if (opts && typeof opts.vaultName === "string" && opts.vaultName) {
-    ctxLines.push(`# vault\n当前 Obsidian 库名：${opts.vaultName}`);
+    ctxLines.push(runnerText(
+      locale,
+      `# vault\n当前 Obsidian 库名：${opts.vaultName}`,
+      `# vault\nCurrent Obsidian vault: ${opts.vaultName}`,
+    ));
   }
   if (ctxLines.length > 0) {
     parts.push(`Context:\n${ctxLines.join("\n\n")}`);
@@ -226,8 +254,10 @@ function buildSystemPrompt(skillManifests, opts) {
   // note kind lives in. The bundled SKILL.md files reference defaults
   // like `01-捕获层/每日笔记/` inline; this block tells the model to
   // treat those as DEFAULTS and prefer the user's configured paths.
-  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths);
+  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths, locale);
   if (notePathBlock) parts.push(notePathBlock);
+  const metaPathBlock = formatMetaPathConventions(locale);
+  if (metaPathBlock) parts.push(metaPathBlock);
 
   const listing = formatSkillListing(skillManifests);
   if (listing) {
@@ -241,18 +271,6 @@ function buildSystemPrompt(skillManifests, opts) {
 // override to the model in a "Note path overrides" block of the system
 // prompt — the model is instructed to use the override whenever a skill
 // references the default path.
-const DEFAULT_NOTE_PATH_LAYOUT = {
-  dailyNotes:       "01-捕获层/每日笔记",
-  weeklyReviews:    "01-捕获层/周记",
-  monthlyReviews:   "01-捕获层/月记",
-  yearlyReviews:    "01-捕获层/年记",
-  permanentNotes:   "02-培养层/永久笔记",
-  topicNotes:       "02-培养层/主题笔记",
-  literatureNotes:  "02-培养层/文献笔记",
-  domainPages:      "03-连接层",
-  activeProjects:   "04-创造层/项目",
-  archive:          "04-创造层/归档",
-};
 const NOTE_PATH_LABELS = {
   dailyNotes:       "Daily notes 每日笔记",
   weeklyReviews:    "Weekly reviews 周记",
@@ -266,16 +284,17 @@ const NOTE_PATH_LABELS = {
   archive:          "Archive 归档",
 };
 
-function formatNotePathOverrides(notePaths) {
+function formatNotePathOverrides(notePaths, locale = "en") {
   const live = (notePaths && typeof notePaths === "object") ? notePaths : {};
+  const defaultLayout = getDefaultNotePathsByLocale(locale);
   // Always emit the full table so the model has a single source of
   // truth, even if every value matches the default — it's only ~10
   // lines and dramatically reduces "AI guessed the wrong path" cases.
   const lines = [
     "Note path conventions (USE THESE EXACT FOLDERS when reading or writing the listed note kinds; OVERRIDE any path mentioned inside a skill body):",
   ];
-  for (const key of Object.keys(DEFAULT_NOTE_PATH_LAYOUT)) {
-    const dflt = DEFAULT_NOTE_PATH_LAYOUT[key];
+  for (const key of Object.keys(defaultLayout)) {
+    const dflt = defaultLayout[key];
     const v = String((live[key] || "")).replace(/\\/g, "/").replace(/\/+$/, "").trim() || dflt;
     const label = NOTE_PATH_LABELS[key] || key;
     const tag = v !== dflt ? "  (user-customized)" : "";
@@ -284,6 +303,31 @@ function formatNotePathOverrides(notePaths) {
   lines.push(
     "",
     "When a skill body contains a hardcoded path like \"01-捕获层/每日笔记/\" or \"02-培养层/永久笔记/\", that path is the DEFAULT. If the table above lists a different value for that note kind, use the table's value. Never invent a new folder.",
+  );
+  return lines.join("\n");
+}
+
+const META_PATH_LABELS = {
+  templates: "Templates 模板",
+  indexes: "Indexes 索引",
+  indexPages: "Index pages 索引页",
+  systemDocs: "System docs 系统文档",
+  homeViews: "Home views Home视图",
+  activeFlow: "Active flow 主动流",
+};
+
+function formatMetaPathConventions(locale = "en") {
+  const metaLayout = getDefaultMetaPathsByLocale(locale);
+  const lines = [
+    "Meta path conventions (USE THESE EXACT FOLDERS for FLOWnote system resources):",
+  ];
+  for (const key of Object.keys(metaLayout)) {
+    const label = META_PATH_LABELS[key] || key;
+    lines.push(`  - ${label}: ${metaLayout[key]}`);
+  }
+  lines.push(
+    "",
+    "For the knowledge index, read `kb-manifest.md` from the Indexes/索引 folder listed above before broad vault search.",
   );
   return lines.join("\n");
 }
@@ -452,6 +496,24 @@ async function ensureSkillRegistry(plugin) {
 
   let manifests = [];
   const seenSkillKeys = new Set();
+  const embeddedManifests = buildEmbeddedSkillManifests();
+  const bundledSkillKeys = new Set();
+  let skippedVaultBundled = 0;
+
+  // Bundled skills are product-owned and immutable from the user's point
+  // of view. Prefer the embedded copy so stale or manually edited vault
+  // copies cannot change built-in behavior. User-added skills still load
+  // normally as long as they don't collide with a bundled identity.
+  for (const embedded of embeddedManifests) {
+    if (!embedded || !embedded.name) continue;
+    const keys = skillIdentityKeys(embedded);
+    manifests.push(embedded);
+    for (const key of keys) {
+      seenSkillKeys.add(key);
+      bundledSkillKeys.add(key);
+    }
+  }
+
   for (const skillRoot of skillRoots) {
     let loaded = [];
     try {
@@ -464,31 +526,17 @@ async function ensureSkillRegistry(plugin) {
     }
     for (const manifest of loaded) {
       const keys = skillIdentityKeys(manifest);
+      if (keys.some((key) => bundledSkillKeys.has(key))) {
+        skippedVaultBundled += 1;
+        continue;
+      }
       if (keys.some((key) => seenSkillKeys.has(key))) continue;
       manifests.push(manifest);
       for (const key of keys) seenSkillKeys.add(key);
     }
   }
-  // Merge in any embedded skills the vault scan missed. We don't
-  // replace the vault version when present (the user may have customized
-  // it on disk), but we backfill anything missing.
-  //
-  // Why this matters specifically: on iOS, Obsidian Sync sometimes
-  // skips individual files inside a synced dotfolder — e.g. the 2-char
-  // `ah/` directory gets dropped while `ah-card/`, `ah-archive/` etc
-  // sync correctly. Without this merge the user types `/ah`, the agent
-  // doesn't see `ah` in its registry, and skill_invoke fails.
-  let injectedFromEmbed = 0;
-  for (const embedded of buildEmbeddedSkillManifests()) {
-    if (!embedded || !embedded.name) continue;
-    const keys = skillIdentityKeys(embedded);
-    if (keys.some((key) => seenSkillKeys.has(key))) continue;
-    manifests.push(embedded);
-    for (const key of keys) seenSkillKeys.add(key);
-    injectedFromEmbed += 1;
-  }
-  if (injectedFromEmbed > 0 && typeof plugin.log === "function") {
-    plugin.log(`[direct-agent] vault skill scan missing ${injectedFromEmbed} skill(s); backfilled from embedded bundle`);
+  if (skippedVaultBundled > 0 && typeof plugin.log === "function") {
+    plugin.log(`[direct-agent] ignored ${skippedVaultBundled} vault copy/copies of bundled skill(s); using embedded read-only versions`);
   }
   const registry = new SkillRegistry(manifests);
   plugin.__flownoteSkillCache = { root: cacheKey, registry };
@@ -750,7 +798,12 @@ async function runDirectAgentTurn({
     const { buildMobileAgentSettingsOverride } = require("../mobile/mobile-ai-service");
     const mobileOverride = buildMobileAgentSettingsOverride(plugin.settings);
     if (!mobileOverride) {
-      throw new Error("移动端无法直接使用电脑端 Ollama。请在 FLOWnote 设置中为移动端单独配置可访问的云端 AI 模型。");
+      const locale = getRunnerLocale(view);
+      throw new Error(runnerText(
+        locale,
+        "移动端无法直接使用电脑端 Ollama。请在 FLOWnote 设置中为移动端单独配置可访问的云端 AI 模型。",
+        "Mobile cannot directly use the desktop Ollama service. Configure a cloud AI model for mobile in FLOWnote settings.",
+      ));
     }
     settings = mobileOverride;
   }
@@ -772,13 +825,14 @@ async function runDirectAgentTurn({
   }
   const skillRegistry = skillRegistryOverride || (await ensureSkillRegistry(plugin));
   const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry, plugin);
+  const locale = getRunnerLocale(view);
   const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
     ? String(view.app.vault.getName() || "")
     : "";
   const notePaths = (plugin.settings && plugin.settings.notePaths) || null;
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    { todayLabel: describeToday(), vaultName, notePaths },
+    { todayLabel: describeToday(new Date(), locale), vaultName, notePaths, locale },
   );
 
   // ---------------------------------------------------------------------
@@ -1011,13 +1065,21 @@ async function runDirectAgentTurn({
   // useful, surface a clear message instead of a silent empty bubble.
   let finalText = state.text;
   if (!finalText && stopReason === "max_tokens") {
-    finalText = (
+    const modelLabel = activeModelInfo ? activeModelInfo.label : provider.userConfig.model;
+    finalText = runnerText(
+      locale,
       "⚠️ 模型在还没产生输出之前就用尽了本轮的输出额度。\n\n" +
-      "已经按当前模型（" + (activeModelInfo ? activeModelInfo.label : provider.userConfig.model) +
-      "）的硬上限 " + maxTokensPerTurn + " tokens 请求，超过这个就是该模型的固有限制。\n\n" +
-      "建议：\n" +
-      "• 换支持更大输出的模型（如 DeepSeek V4 Flash/Pro 支持 384K 输出）\n" +
-      "• 拆分任务：先让模型只输出 [总结部分]，再单独写回文件"
+        "已经按当前模型（" + modelLabel +
+        "）的硬上限 " + maxTokensPerTurn + " tokens 请求，超过这个就是该模型的固有限制。\n\n" +
+        "建议：\n" +
+        "• 换支持更大输出的模型（如 DeepSeek V4 Flash/Pro 支持 384K 输出）\n" +
+        "• 拆分任务：先让模型只输出 [总结部分]，再单独写回文件",
+      "The model used up this turn's output budget before producing content.\n\n" +
+        "FLOWnote already requested the current model's hard limit (" + modelLabel +
+        ") of " + maxTokensPerTurn + " tokens. Anything beyond that is a model limit.\n\n" +
+        "Suggestions:\n" +
+        "• Switch to a model with a larger output limit.\n" +
+        "• Split the task into smaller steps, then write each part back separately.",
     );
   }
 

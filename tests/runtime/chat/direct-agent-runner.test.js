@@ -489,6 +489,36 @@ test("ensureSkillRegistry loads configured root first, then common supplemental 
   assert.equal(registry.get("dup").description, "Custom wins");
 });
 
+test("ensureSkillRegistry prefers embedded bundled skills over vault copies", async () => {
+  const logs = [];
+  const plugin = {
+    settings: { skillsDir: ".flownote/skills" },
+    log: (line) => logs.push(line),
+    app: {
+      vault: {
+        listSkillDirs(root) {
+          if (root !== ".flownote/skills") return [];
+          return [
+            { dirPath: ".flownote/skills/ah", filePath: ".flownote/skills/ah/SKILL.md" },
+            { dirPath: ".flownote/skills/custom-one", filePath: ".flownote/skills/custom-one/SKILL.md" },
+          ];
+        },
+        readFile: async (path) => {
+          if (path.includes("/ah/")) return "---\nname: ah\ndescription: User edited builtin\n---\nwrong body";
+          if (path.includes("/custom-one/")) return "---\nname: custom-one\ndescription: Custom\n---\ncustom body";
+          throw new Error("missing");
+        },
+      },
+    },
+  };
+
+  const registry = await ensureSkillRegistry(plugin);
+  assert.notEqual(registry.get("ah").description, "User edited builtin");
+  assert.match(registry.get("ah").filePath, /^<embedded>\/ah\/SKILL\.md$/);
+  assert.equal(registry.get("custom-one").description, "Custom");
+  assert.equal(logs.some((line) => /ignored 1 vault copy/.test(line)), true);
+});
+
 // ---------------------------------------------------------------------------
 // runDirectAgentTurn injects skill listing + currentDate into system prompt
 // ---------------------------------------------------------------------------

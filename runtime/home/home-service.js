@@ -3,6 +3,9 @@ const {
   findOrCreateDailyNote,
   formatDateStr,
 } = require("../mobile/daily-note-service");
+const {
+  getDefaultNotePathsByLocale,
+} = require("../settings-utils");
 
 const DEFAULT_HOME_SETTINGS = {
   projectPath: "04-创造层/项目",
@@ -12,11 +15,21 @@ const DEFAULT_HOME_SETTINGS = {
 };
 const DAILY_TASK_HEADING_PATTERNS = [/任务/, /Tasks/i];
 
+function getNotePathSettings(settings = {}) {
+  const locale = settings && settings.uiLanguage === "en" ? "en" : "zh-CN";
+  return {
+    ...getDefaultNotePathsByLocale(locale),
+    ...(settings && settings.notePaths && typeof settings.notePaths === "object" ? settings.notePaths : {}),
+  };
+}
+
 function normalizeHomeSettings(settings = {}) {
   const raw = settings && typeof settings === "object" ? settings : {};
   const home = raw.home && typeof raw.home === "object" ? raw.home : {};
+  const notePaths = getNotePathSettings(raw);
+  const defaultProjectPath = notePaths.activeProjects || DEFAULT_HOME_SETTINGS.projectPath;
   return {
-    projectPath: normalizePath(String(home.projectPath || DEFAULT_HOME_SETTINGS.projectPath).trim() || DEFAULT_HOME_SETTINGS.projectPath),
+    projectPath: normalizePath(String(home.projectPath || defaultProjectPath).trim() || defaultProjectPath),
     recentLimit: Math.min(24, Math.max(3, Number(home.recentLimit) || DEFAULT_HOME_SETTINGS.recentLimit)),
     weeklyWindowDays: Math.min(31, Math.max(1, Number(home.weeklyWindowDays) || DEFAULT_HOME_SETTINGS.weeklyWindowDays)),
     heatmapDays: Math.min(366, Math.max(28, Number(home.heatmapDays) || DEFAULT_HOME_SETTINGS.heatmapDays)),
@@ -27,7 +40,8 @@ function resolveDailyNotePath(settings = {}, dateStr = formatDateStr()) {
   const mc = settings && settings.mobileCapture && typeof settings.mobileCapture === "object"
     ? settings.mobileCapture
     : {};
-  const dailyNotePath = normalizePath(String(mc.dailyNotePath || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记");
+  const notePaths = getNotePathSettings(settings);
+  const dailyNotePath = normalizePath(String(mc.dailyNotePath || notePaths.dailyNotes || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记");
   return normalizePath(`${dailyNotePath}/${dateStr}.md`);
 }
 
@@ -319,6 +333,17 @@ function resolveProjectRoots(settings = {}) {
     homeSettings.projectPath,
     "04-创造层/项目",
     "04-创造层/Projects",
+    "04-Create/Projects",
+  ]);
+}
+
+function resolveArchiveRoots(settings = {}) {
+  const notePaths = getNotePathSettings(settings);
+  return uniqueNormalizedPaths([
+    notePaths.archive,
+    "04-创造层/归档",
+    "04-创造层/Archives",
+    "04-Create/Archives",
   ]);
 }
 
@@ -327,11 +352,39 @@ function projectRootForPath(path, roots) {
   return roots.find((root) => value.startsWith(`${root}/`)) || "";
 }
 
+function relativePartsUnderRoot(path, root) {
+  return String(path || "")
+    .slice(String(root || "").length)
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter(Boolean);
+}
+
 function projectCategoryFromPath(path, root) {
-  const relative = String(path || "").slice(String(root || "").length).replace(/^\/+/, "");
-  const parts = relative.split("/").filter(Boolean);
+  const parts = relativePartsUnderRoot(path, root);
   if (parts.length <= 2) return "";
   return parts[0].replace(/^\d{2}-/, "").trim();
+}
+
+function pathHasArchiveSegment(path) {
+  return String(path || "")
+    .split("/")
+    .some((part) => /^(归档|archives?|archive)$/i.test(String(part || "").trim()));
+}
+
+function isArchivePath(path, settings = {}) {
+  const value = normalizePath(String(path || ""));
+  if (!value) return false;
+  if (resolveArchiveRoots(settings).some((root) => pathUnder(value, root))) return true;
+  const projectRoots = resolveProjectRoots(settings);
+  return Boolean(projectRootForPath(value, projectRoots) && pathHasArchiveSegment(value));
+}
+
+function isProjectOverviewFile(path, root) {
+  const value = String(path || "");
+  if (!/(^|\/)(📍 项目总览|Project Overview)\.md$/i.test(value)) return false;
+  const parts = relativePartsUnderRoot(value, root);
+  return parts.length >= 2;
 }
 
 function normalizeProjectStatus(status) {
@@ -352,7 +405,8 @@ async function listProjects(app, settings = {}, options = {}) {
   const projectFiles = safeFiles(app)
     .filter((file) => {
       const path = String(file.path || "");
-      return projectRootForPath(path, roots) && /(^|\/)📍 项目总览\.md$/.test(path);
+      const root = projectRootForPath(path, roots);
+      return root && !isArchivePath(path, settings) && isProjectOverviewFile(path, root);
     });
 
   const projects = [];
@@ -414,6 +468,35 @@ function parseDateKey(value) {
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
   return date;
+}
+
+function parseDateLikeMs(value) {
+  const text = String(value || "").trim();
+  if (!text || /Y{2,4}-M{2}-D{2}/i.test(text)) return 0;
+  const dateOnly = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const month = Number(dateOnly[2]);
+    const day = Number(dateOnly[3]);
+    const hour = Number(dateOnly[4] || 0);
+    const minute = Number(dateOnly[5] || 0);
+    const second = Number(dateOnly[6] || 0);
+    const date = new Date(year, month - 1, day, hour, minute, second);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return date.getTime();
+    }
+  }
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function startOfWeekMs(nowMs, weekStartsOn = 1) {
+  const date = new Date(Number(nowMs || Date.now()));
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay();
+  const diff = (day - Number(weekStartsOn || 0) + 7) % 7;
+  date.setDate(date.getDate() - diff);
+  return date.getTime();
 }
 
 function addDateDays(date, days) {
@@ -516,39 +599,114 @@ async function getDailyActivityHeatmap(app, settings = {}, options = {}) {
 }
 
 function isSystemPath(path) {
-  return /(^|\/)(\.git|\.obsidian|\.opencode|node_modules|release|runtime\/vendor)(\/|$)/.test(String(path || ""));
+  const value = String(path || "");
+  if (/(^|\/)\.[^/]+(\/|$)/.test(value)) return true;
+  return /(^|\/)(node_modules|release|runtime\/vendor)(\/|$)/.test(value)
+    || /(^|\/)Meta\/(模板|Templates)(\/|$)/i.test(value);
 }
 
-function classifyFile(path) {
+function pathUnder(path, root) {
+  const value = normalizePath(String(path || ""));
+  const base = normalizePath(String(root || "").replace(/\/+$/, ""));
+  return Boolean(base && (value === `${base}.md` || value.startsWith(`${base}/`)));
+}
+
+function classifyFile(path, settings = {}) {
   const value = String(path || "");
-  if (value.includes("01-捕获层/每日笔记/")) return "每日笔记";
-  if (value.includes("02-培养层/永久笔记/")) return "永久笔记";
-  if (value.includes("02-培养层/文献笔记/")) return "文献笔记";
-  if (value.includes("02-培养层/主题笔记/")) return "主题页";
-  if (value.includes("03-连接层/")) return "领域页";
-  if (value.includes("04-创造层/项目/")) return "项目";
-  return "笔记";
+  const paths = getNotePathSettings(settings);
+  const locale = settings && settings.uiLanguage === "en" ? "en" : "zh-CN";
+  const labels = locale === "en"
+    ? {
+      dailyNotes: "Daily note",
+      permanentNotes: "Permanent note",
+      literatureNotes: "Literature note",
+      topicNotes: "Topic page",
+      domainPages: "Domain page",
+      activeProjects: "Project",
+      note: "Note",
+    }
+    : {
+      dailyNotes: "每日笔记",
+      permanentNotes: "永久笔记",
+      literatureNotes: "文献笔记",
+      topicNotes: "主题页",
+      domainPages: "领域页",
+      activeProjects: "项目",
+      note: "笔记",
+    };
+  if (pathUnder(value, paths.dailyNotes)) return labels.dailyNotes;
+  if (pathUnder(value, paths.permanentNotes)) return labels.permanentNotes;
+  if (pathUnder(value, paths.literatureNotes)) return labels.literatureNotes;
+  if (pathUnder(value, paths.topicNotes)) return labels.topicNotes;
+  if (pathUnder(value, paths.domainPages)) return labels.domainPages;
+  if (pathUnder(value, paths.activeProjects)) return labels.activeProjects;
+  return labels.note;
+}
+
+function isProjectRootOverviewPath(path, settings = {}) {
+  const roots = resolveProjectRoots(settings);
+  const root = projectRootForPath(path, roots);
+  if (!root) return false;
+  const value = String(path || "");
+  return /(^|\/)(📍 项目总览|Project Overview)\.md$/i.test(value) && !isProjectOverviewFile(value, root);
+}
+
+function isMemoryPath(path) {
+  const value = normalizePath(String(path || ""));
+  return /^Meta\/(?:\.?ai-memory)(?:\/|$)/i.test(value);
+}
+
+function isDashboardCountablePath(path, settings = {}) {
+  const value = normalizePath(String(path || ""));
+  if (!value) return false;
+  if (isSystemPath(value) || isMemoryPath(value) || isArchivePath(value, settings)) return false;
+  if (isProjectRootOverviewPath(value, settings)) return false;
+  return true;
+}
+
+function createdTimeFromContentOrFile(content, file) {
+  const path = String(file && file.path || "");
+  const basename = String(file && file.basename || displayNameFromPath(path)).replace(/\.md$/i, "");
+  const filenameDate = parseDateLikeMs(basename);
+  if (filenameDate && /(^|\/)\d{4}-\d{2}-\d{2}\.md$/i.test(path)) return filenameDate;
+
+  const frontmatter = parseFrontmatter(content);
+  const created = frontmatterValue(frontmatter, [
+    "创建时间",
+    "created",
+    "Created",
+    "date",
+    "Date",
+    "created_at",
+    "start_date",
+    "开始日期",
+  ], "");
+  const frontmatterDate = parseDateLikeMs(created);
+  if (frontmatterDate) return frontmatterDate;
+
+  return Number(file && file.stat && file.stat.ctime ? file.stat.ctime : 0);
 }
 
 function listRecentFiles(app, settings = {}) {
   const homeSettings = normalizeHomeSettings(settings);
   return safeFiles(app)
-    .filter((file) => !isSystemPath(file.path))
+    .filter((file) => isDashboardCountablePath(file.path, settings))
     .sort((a, b) => Number(b.stat && b.stat.mtime ? b.stat.mtime : 0) - Number(a.stat && a.stat.mtime ? a.stat.mtime : 0))
     .slice(0, homeSettings.recentLimit)
     .map((file) => ({
       file,
       path: file.path,
       title: String(file.basename || displayNameFromPath(file.path)).replace(/\.md$/i, ""),
-      type: classifyFile(file.path),
+      type: classifyFile(file.path, settings),
       mtime: Number(file.stat && file.stat.mtime ? file.stat.mtime : 0),
     }));
 }
 
 async function getDashboardStats(app, settings = {}, options = {}) {
   const homeSettings = normalizeHomeSettings(settings);
-  const files = safeFiles(app).filter((file) => !isSystemPath(file.path));
+  const files = safeFiles(app).filter((file) => isDashboardCountablePath(file.path, settings));
   const now = Number(options.now || Date.now());
+  const weekStart = startOfWeekMs(now, 1);
   const since = now - homeSettings.weeklyWindowDays * 24 * 60 * 60 * 1000;
   const todayState = await getTodayState(app, settings, options);
   const activeProjects = await listActiveProjects(app, settings);
@@ -562,23 +720,25 @@ async function getDashboardStats(app, settings = {}, options = {}) {
     weeklyNew: 0,
     recentActive: 0,
   };
+  const notePaths = getNotePathSettings(settings);
   let openTasks = 0;
   let doneTasks = 0;
 
   for (const file of files) {
     const path = String(file.path || "");
-    if (path.includes("01-捕获层/每日笔记/")) counts.dailyNotes += 1;
-    if (path.includes("02-培养层/永久笔记/")) counts.evergreenNotes += 1;
-    if (path.includes("02-培养层/文献笔记/")) counts.literatureNotes += 1;
-    if (path.includes("02-培养层/主题笔记/")) counts.topicNotes += 1;
-    if (path.includes("03-连接层/")) counts.domainNotes += 1;
-    const ctime = Number(file.stat && file.stat.ctime ? file.stat.ctime : 0);
+    const content = path.endsWith(".md") ? await readFileText(app, file) : "";
+    if (pathUnder(path, notePaths.dailyNotes)) counts.dailyNotes += 1;
+    if (pathUnder(path, notePaths.permanentNotes)) counts.evergreenNotes += 1;
+    if (pathUnder(path, notePaths.literatureNotes)) counts.literatureNotes += 1;
+    if (pathUnder(path, notePaths.topicNotes)) counts.topicNotes += 1;
+    if (pathUnder(path, notePaths.domainPages)) counts.domainNotes += 1;
+    const ctime = createdTimeFromContentOrFile(content, file);
     const mtime = Number(file.stat && file.stat.mtime ? file.stat.mtime : 0);
-    if (ctime >= since) counts.weeklyNew += 1;
+    if (ctime >= weekStart && ctime <= now) counts.weeklyNew += 1;
     if (mtime >= since) counts.recentActive += 1;
 
     if (path.endsWith(".md")) {
-      const tasks = taskStatsFromContent(await readFileText(app, file));
+      const tasks = taskStatsFromContent(content);
       openTasks += tasks.open;
       doneTasks += tasks.done;
     }

@@ -4,6 +4,19 @@ const { summarizeActiveAgent } = require("./agent-summary");
 
 const OPENCODE_DOCS_URL = "https://opencode.ai/docs";
 
+function getViewLocale(view) {
+  const plugin = view && view.plugin;
+  if (plugin && typeof plugin.getEffectiveLocale === "function") {
+    return plugin.getEffectiveLocale() === "zh-CN" ? "zh-CN" : "en";
+  }
+  const raw = plugin && plugin.settings ? String(plugin.settings.uiLanguage || "") : "";
+  return raw === "zh-CN" ? "zh-CN" : "en";
+}
+
+function viewText(view, zh, en) {
+  return getViewLocale(view) === "zh-CN" ? zh : en;
+}
+
 function normalizeDiagnosticsResult(result) {
   const raw = result && typeof result === "object" ? result : {};
   const connection = raw.connection && typeof raw.connection === "object" ? raw.connection : {};
@@ -77,15 +90,19 @@ function renderDirectConnectionStatus(popover, view, summary) {
   };
 
   if (!summary.configComplete) {
-    title.setText(`Direct 模式 · 未就绪`);
-    appendLine(`服务商：${summary.providerLabel}`);
-    if (summary.missingReason) appendLine(`待补全：${summary.missingReason}`);
-    appendLine("打开 Obsidian → 设置 → FLOWnote 完成配置。");
+    title.setText(viewText(view, "Direct 模式 · 未就绪", "Direct Mode · Not Ready"));
+    appendLine(viewText(view, `服务商：${summary.providerLabel}`, `Provider: ${summary.providerLabel}`));
+    if (summary.missingReason) appendLine(viewText(view, `待补全：${summary.missingReason}`, `Missing: ${summary.missingReason}`));
+    appendLine(viewText(view, "打开 Obsidian → 设置 → FLOWnote 完成配置。", "Open Obsidian → Settings → FLOWnote to finish setup."));
     return;
   }
-  title.setText(`${summary.providerLabel} 已就绪`);
-  appendLine(`模型：${summary.modelLabel || summary.modelId}`);
-  appendLine(`API Key 已配置。点击「测试连接」按钮可发起一次真实请求验证。`);
+  title.setText(viewText(view, `${summary.providerLabel} 已就绪`, `${summary.providerLabel} Ready`));
+  appendLine(viewText(view, `模型：${summary.modelLabel || summary.modelId}`, `Model: ${summary.modelLabel || summary.modelId}`));
+  appendLine(viewText(
+    view,
+    "API Key 已配置。点击「测试连接」按钮可发起一次真实请求验证。",
+    "API Key is configured. Use Test Connection in settings to verify it with a real request."
+  ));
 }
 
 function renderConnectionStatusPopoverContent(view, result) {
@@ -129,18 +146,20 @@ function renderConnectionStatusPopoverContent(view, result) {
     if (!value) return;
     const panel = body.createDiv({ cls: "oc-copyable-panel oc-copyable-panel--compact" });
     const actions = panel.createDiv({ cls: "oc-copyable-actions" });
-    const copyBtn = actions.createEl("button", { text: "复制详情" });
+    const copyBtn = actions.createEl("button", { text: viewText(view, "复制详情", "Copy Details") });
     copyBtn.type = "button";
     copyBtn.addEventListener("click", async () => {
       const copied = await copyText(value);
-      new Notice(copied ? "详情已复制" : "复制失败，请手动选择文本复制");
+      new Notice(copied
+        ? viewText(view, "详情已复制", "Details copied")
+        : viewText(view, "复制失败，请手动选择文本复制", "Copy failed. Select the text manually."));
     });
     const area = panel.createEl("textarea", {
       cls: "oc-copyable-textarea",
       attr: {
         readonly: "true",
         spellcheck: "false",
-        "aria-label": "连接诊断详情",
+        "aria-label": viewText(view, "连接诊断详情", "Connection diagnostics"),
       },
     });
     area.value = value;
@@ -153,55 +172,55 @@ function renderConnectionStatusPopoverContent(view, result) {
     connectionCheckCommands().forEach((cmd) => appendCommand(cmd));
   };
   const appendWindowsInstallGuide = () => {
-    appendLine("请在 Windows 本机用 Node.js 安装 OpenCode，不要使用 WSL：");
+    appendLine(viewText(view, "请在 Windows 本机用 Node.js 安装 OpenCode，不要使用 WSL：", "Install OpenCode with Node.js on native Windows, not WSL:"));
     windowsInstallGuideCommands().forEach((cmd) => appendCommand(cmd));
-    appendLink("官方安装文档", OPENCODE_DOCS_URL);
+    appendLink(viewText(view, "官方安装文档", "Official install docs"), OPENCODE_DOCS_URL);
   };
 
   if (!hasResult) {
-    title.setText("正在检测 OpenCode 连接状态");
-    appendLine("点击绿色状态点会自动刷新连接状态。");
-    appendLine("如果长时间无法连接，可先检查本机安装：");
+    title.setText(viewText(view, "正在检测 OpenCode 连接状态", "Checking OpenCode Connection"));
+    appendLine(viewText(view, "点击绿色状态点会自动刷新连接状态。", "Click the status dot to refresh the connection."));
+    appendLine(viewText(view, "如果长时间无法连接，可先检查本机安装：", "If it stays disconnected, check the local installation first:"));
     appendCheckCommands();
     return;
   }
 
   if (normalized.connection.ok) {
-    title.setText("OpenCode成功连接");
-    appendLine(`连接模式：${normalized.connection.mode.toUpperCase()}`);
-    if (normalized.executable.path) appendLine(`执行路径：${normalized.executable.path}`);
+    title.setText(viewText(view, "OpenCode成功连接", "OpenCode Connected"));
+    appendLine(viewText(view, `连接模式：${normalized.connection.mode.toUpperCase()}`, `Connection mode: ${normalized.connection.mode.toUpperCase()}`));
+    if (normalized.executable.path) appendLine(viewText(view, `执行路径：${normalized.executable.path}`, `Executable path: ${normalized.executable.path}`));
     return;
   }
 
   if (isLikelyMissingOpenCode(normalized)) {
-    title.setText("OpenCode连接失败：未检测到可用安装");
+    title.setText(viewText(view, "OpenCode连接失败：未检测到可用安装", "OpenCode Connection Failed: No Usable Install Found"));
     if (typeof process !== "undefined" && process && process.platform === "win32") {
       appendWindowsInstallGuide();
-      appendLine("安装后重启 Obsidian，再点击状态点刷新连接。");
+      appendLine(viewText(view, "安装后重启 Obsidian，再点击状态点刷新连接。", "Restart Obsidian after installing, then click the status dot to refresh."));
     } else {
-      appendLine("请先在终端检查 OpenCode 是否安装正常：");
+      appendLine(viewText(view, "请先在终端检查 OpenCode 是否安装正常：", "Check whether OpenCode is installed correctly in a terminal:"));
       appendCheckCommands();
     }
     appendCopyableDetails([
-      normalized.executable.hint ? `提示：${normalized.executable.hint}` : "",
-      normalized.connection.error ? `错误：${normalized.connection.error}` : "",
+      normalized.executable.hint ? viewText(view, `提示：${normalized.executable.hint}`, `Hint: ${normalized.executable.hint}`) : "",
+      normalized.connection.error ? viewText(view, `错误：${normalized.connection.error}`, `Error: ${normalized.connection.error}`) : "",
     ].filter(Boolean).join("\n\n"));
     return;
   }
 
   if (isLikelyWindowsWslInstallIssue(normalized)) {
-    title.setText("OpenCode连接失败：检测到 WSL 安装");
-    appendLine("请使用达.js进行安装。");
+    title.setText(viewText(view, "OpenCode连接失败：检测到 WSL 安装", "OpenCode Connection Failed: WSL Install Detected"));
+    appendLine(viewText(view, "请改用 Windows 本机 Node.js 安装。", "Install with native Windows Node.js instead."));
     appendWindowsInstallGuide();
-    appendLine("安装后重启 Obsidian，再点击状态点刷新连接。");
-    appendCopyableDetails(normalized.connection.error ? `错误：${normalized.connection.error}` : "");
+    appendLine(viewText(view, "安装后重启 Obsidian，再点击状态点刷新连接。", "Restart Obsidian after installing, then click the status dot to refresh."));
+    appendCopyableDetails(normalized.connection.error ? viewText(view, `错误：${normalized.connection.error}`, `Error: ${normalized.connection.error}`) : "");
     return;
   }
 
-  title.setText("OpenCode连接失败");
-  appendLine("可先执行以下命令检查连接：");
+  title.setText(viewText(view, "OpenCode连接失败", "OpenCode Connection Failed"));
+  appendLine(viewText(view, "可先执行以下命令检查连接：", "Run these commands to check the connection:"));
   appendCheckCommands();
-  appendCopyableDetails(normalized.connection.error ? `错误：${normalized.connection.error}` : "");
+  appendCopyableDetails(normalized.connection.error ? viewText(view, `错误：${normalized.connection.error}`, `Error: ${normalized.connection.error}`) : "");
 }
 
 function closeConnectionStatusPopover(view) {
@@ -546,7 +565,7 @@ function applyStatus(result) {
       dot.setAttribute("title", label);
     } else {
       dot.addClass("warn");
-      const label = `${summary.providerLabel} · ${summary.missingReason || "未就绪"}`;
+      const label = `${summary.providerLabel} · ${summary.missingReason || viewText(this, "未就绪", "Not ready")}`;
       dot.setAttribute("aria-label", label);
       dot.setAttribute("title", label);
     }

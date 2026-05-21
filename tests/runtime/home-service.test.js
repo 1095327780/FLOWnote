@@ -149,6 +149,9 @@ test("listActiveProjects reads real project overview files and task counts", asy
   const service = loadHomeServiceWithMockObsidian();
   try {
     const app = createApp([
+      makeFile("04-创造层/项目/📍 项目总览.md", `# 📍 项目总览
+这个文件只是项目根目录总览，不是单独项目。
+`, { mtime: 40 }),
       makeFile("04-创造层/项目/26-02 Flow工作法Obsidian插件/📍 项目总览.md", `---
 状态: 进行中
 优先级: 高
@@ -164,6 +167,13 @@ test("listActiveProjects reads real project overview files and task counts", asy
 ---
 # 已完成
 `, { mtime: 30 }),
+      makeFile("04-创造层/项目/归档/24-12 旧项目/📍 项目总览.md", `---
+状态: 进行中
+优先级: 高
+---
+# 旧项目
+- [ ] 不应计入进行中
+`, { mtime: 50 }),
     ]);
     const projects = await service.listActiveProjects(app, {});
     assert.equal(projects.length, 1);
@@ -180,6 +190,7 @@ test("listProjects includes inactive projects and derives category tags", async 
   const service = loadHomeServiceWithMockObsidian();
   try {
     const app = createApp([
+      makeFile("04-创造层/项目/📍 项目总览.md", "# 📍 项目总览", { mtime: 60 }),
       makeFile("04-创造层/项目/02-产品开发/26-02 Flow工作法Obsidian插件/📍 项目总览.md", `---
 状态: 进行中
 优先级: 高
@@ -193,6 +204,11 @@ test("listProjects includes inactive projects and derives category tags", async 
 # 📍 已完成项目
 - [x] 发布
 `, { mtime: 30 }),
+      makeFile("04-创造层/归档/24-10 归档项目/📍 项目总览.md", `---
+状态: 进行中
+---
+# 📍 归档项目
+`, { mtime: 70 }),
     ]);
     const projects = await service.listProjects(app, {});
     assert.equal(projects.length, 2);
@@ -253,22 +269,76 @@ test("getDashboardStats counts note assets and weekly activity", async () => {
       makeFile("02-培养层/永久笔记/原子化笔记让知识可以灵活组合.md", "- [x] done", { ctime: now, mtime: now }),
       makeFile("02-培养层/文献笔记/《卡片笔记写作法》阅读笔记.md", "", { ctime: now - 2 * 86400000, mtime: now }),
       makeFile("02-培养层/主题笔记/📍 知识管理.md", "", { ctime: now - 20 * 86400000, mtime: now - 20 * 86400000 }),
+      makeFile("04-创造层/项目/📍 项目总览.md", "", { ctime: now, mtime: now }),
+      makeFile(".flownote/skills/ah-note/SKILL.md", "", { ctime: now, mtime: now }),
+      makeFile(".agents/skills/ah-note/SKILL.md", "", { ctime: now, mtime: now }),
+      makeFile("Meta/模板/每日笔记模板.md", "", { ctime: now, mtime: now }),
+      makeFile("Meta/ai-memory/STATUS.md", "- [ ] 不应计入首页统计", { ctime: now, mtime: now }),
+      makeFile("Meta/ai-memory/projects/Flow.md", "- [x] 不应计入首页统计", { ctime: now, mtime: now }),
       makeFile("04-创造层/项目/26-02 Flow工作法Obsidian插件/📍 项目总览.md", `---
 状态: 进行中
 优先级: 高
 ---
 - [ ] 移动端适配
 `, { ctime: now - 1 * 86400000, mtime: now }),
+      makeFile("04-创造层/项目/归档/24-12 旧项目/📍 项目总览.md", `---
+状态: 进行中
+优先级: 高
+---
+- [ ] 不应计入首页统计
+`, { ctime: now, mtime: now }),
+      makeFile("04-创造层/归档/归档资料.md", "- [ ] 不应计入首页统计", { ctime: now, mtime: now }),
     ]);
     const stats = await service.getDashboardStats(app, {}, { now, dateStr: "2026-05-19" });
     assert.equal(stats.today.exists, true);
     assert.equal(stats.activeProjects, 1);
     assert.equal(stats.highPriorityProjects, 1);
     assert.equal(stats.knowledgeAssets, 3);
-    assert.equal(stats.weeklyNew, 4);
+    assert.equal(stats.weeklyNew, 3);
     assert.equal(stats.tasks.open, 2);
     assert.equal(stats.tasks.done, 1);
     assert.equal(stats.tasks.completionRate, 33);
+  } finally {
+    service.restore();
+  }
+});
+
+test("getDashboardStats and recent files respect English note paths", async () => {
+  const service = loadHomeServiceWithMockObsidian();
+  try {
+    const now = new Date("2026-05-19T12:00:00").getTime();
+    const settings = {
+      uiLanguage: "en",
+      mobileCapture: { dailyNotePath: "01-Capture/Daily Notes" },
+      notePaths: {
+        dailyNotes: "01-Capture/Daily Notes",
+        permanentNotes: "02-Cultivate/Permanent Notes",
+        literatureNotes: "02-Cultivate/Literature Notes",
+        topicNotes: "02-Cultivate/Topic Notes",
+        domainPages: "03-Connect",
+        activeProjects: "04-Create/Projects",
+      },
+    };
+    const app = createApp([
+      makeFile("01-Capture/Daily Notes/2026-05-19.md", "# Today\n- [ ] task", { ctime: now, mtime: now }),
+      makeFile("02-Cultivate/Permanent Notes/Atomic notes compose knowledge.md", "- [x] done", { ctime: now, mtime: now }),
+      makeFile("02-Cultivate/Literature Notes/Book notes.md", "", { ctime: now, mtime: now }),
+      makeFile("02-Cultivate/Topic Notes/Knowledge management.md", "", { ctime: now, mtime: now }),
+      makeFile("04-Create/Projects/26-02 FLOWnote/Project Overview.md", `---
+status: active
+priority: high
+---
+- [ ] ship
+`, { ctime: now, mtime: now }),
+    ]);
+    const stats = await service.getDashboardStats(app, settings, { now, dateStr: "2026-05-19" });
+    const recent = service.listRecentFiles(app, settings);
+
+    assert.equal(stats.today.exists, true);
+    assert.equal(stats.activeProjects, 1);
+    assert.equal(stats.knowledgeAssets, 3);
+    assert.equal(stats.dailyNotes, 1);
+    assert.equal(recent.find((item) => item.path.includes("Daily Notes")).type, "Daily note");
   } finally {
     service.restore();
   }

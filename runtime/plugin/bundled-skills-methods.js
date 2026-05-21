@@ -373,6 +373,14 @@ function createBundledSkillsMethods(options = {}) {
       }
     },
 
+    resolveMetaTemplatesDir(templateMap, locale = "en") {
+      const normalizedLocale = this.resolveBundledSkillLocale(locale);
+      if (normalizedLocale === "en") return path.join("Meta", "Templates");
+      return templateMap && templateMap.metaTemplatesDir
+        ? templateMap.metaTemplatesDir
+        : DEFAULT_META_TEMPLATES_DIR;
+    },
+
     resolveTemplateEntryByLocale(entry, locale = "en") {
       if (!entry || typeof entry !== "object") {
         return {
@@ -440,7 +448,7 @@ function createBundledSkillsMethods(options = {}) {
     resolveTemplateSource(vaultPath, bundledRoot, templateMap, entry, locale = "en") {
       const normalizedLocale = this.resolveBundledSkillLocale(locale);
       const localizedEntry = this.resolveTemplateEntryByLocale(entry, normalizedLocale);
-      const metaRoot = path.join(vaultPath, templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR);
+      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, normalizedLocale));
       const metaBase = path.join(metaRoot, localizedEntry.metaSource);
       const fallbackBase = path.join(bundledRoot, localizedEntry.fallback);
 
@@ -556,7 +564,7 @@ function createBundledSkillsMethods(options = {}) {
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
       const targetRoot = String(options.targetRoot || "")
         || path.join(vaultPath, this.settings.skillsDir);
-      const metaRoot = path.join(vaultPath, templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR);
+      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, skillLocale));
       const entries = Array.isArray(templateMap.entries) ? templateMap.entries : [];
 
       const errors = Array.isArray(templateMap.errors) ? [...templateMap.errors] : [];
@@ -718,7 +726,7 @@ function createBundledSkillsMethods(options = {}) {
       const skillLocale = this.resolveBundledSkillLocale(options.locale);
       const bundledRoot = this.getBundledSkillsRoot();
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
-      const metaRoot = path.join(vaultPath, templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR);
+      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, skillLocale));
       const entries = Array.isArray(templateMap.entries) ? templateMap.entries : [];
 
       const errors = Array.isArray(templateMap.errors) ? [...templateMap.errors] : [];

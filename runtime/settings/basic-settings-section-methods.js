@@ -7,6 +7,14 @@ const {
   normalizeLinkResolver,
   normalizeResolverProviderId,
 } = require("../settings-utils");
+const {
+  planNotePathLocaleMigration,
+  planMetaPathLocaleMigration,
+  applyNotePathLocaleMigration,
+  applyMetaPathLocaleMigration,
+  mergeMigrationResults,
+  summarizeNotePathMigrationResult,
+} = require("../note-path-locale-migration");
 const { buildShortcutUrls } = require("../mobile/shortcut-url-utils");
 
 const FLOWNOTE_QUICK_CAPTURE_SHORTCUT_URL = "https://www.icloud.com/shortcuts/12b0291f16ff46cfa0280e18b0859118";
@@ -148,6 +156,8 @@ class BasicSettingsSectionMethods {
                   "界面语言已更新。命令名和 Ribbon 提示将在重载插件后生效。",
                 ));
                 if (previousLocale === nextLocale) return;
+                const explicitLocale = selectedLanguage === "zh-CN" || selectedLanguage === "en";
+                if (!explicitLocale) return;
                 const languageLabel = nextLocale === "zh-CN"
                   ? t("settings.language.optionZhCN", "简体中文")
                   : t("settings.language.optionEn", "English");
@@ -168,6 +178,9 @@ class BasicSettingsSectionMethods {
                   replaceAll: true,
                   skipConflictPrompt: true,
                 });
+                if (typeof this.promptAndRunNotePathLocaleMigration === "function") {
+                  await this.promptAndRunNotePathLocaleMigration(previousLocale, nextLocale, t);
+                }
               });
           });
       },
@@ -210,9 +223,10 @@ class BasicSettingsSectionMethods {
       });
     }
 
-    // --- Group: 笔记位置 ---
-    this.renderSettingsGroup(containerEl, {
+    // --- Collapsible: 笔记位置 ---
+    this.renderCollapsibleGroup(containerEl, {
       heading: t("settings.notePaths.heading", "笔记位置"),
+      openByDefault: false,
       render: (group) => { this.renderNotePathsSection(group, t); },
     });
 
@@ -448,11 +462,39 @@ class BasicSettingsSectionMethods {
    */
   renderCollapsibleGroup(parent, opts) {
     const wrap = parent.createEl("details", { cls: "oc-settings-collapsible" });
-    if (opts.openByDefault) wrap.open = true;
     const summary = wrap.createEl("summary", { cls: "oc-settings-collapsible-summary" });
     summary.createDiv({ cls: "oc-settings-collapsible-summary-text", text: String(opts.heading || "") });
     const group = wrap.createDiv({ cls: "oc-settings-group" });
-    if (typeof opts.render === "function") opts.render(group);
+
+    let rendered = false;
+    const renderOnce = () => {
+      if (rendered || typeof opts.render !== "function") return;
+      rendered = true;
+      try {
+        const result = opts.render(group);
+        if (result && typeof result.catch === "function") {
+          result.catch((e) => {
+            if (this.plugin && typeof this.plugin.log === "function") {
+              this.plugin.log(`settings collapsible render failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          });
+        }
+      } catch (e) {
+        if (this.plugin && typeof this.plugin.log === "function") {
+          this.plugin.log(`settings collapsible render failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    };
+
+    if (opts.openByDefault) {
+      wrap.open = true;
+      renderOnce();
+    } else {
+      wrap.open = false;
+      wrap.addEventListener("toggle", () => {
+        if (wrap.open) renderOnce();
+      });
+    }
   }
 
   async reinstallBundledContentWithPrompt(buttonEl, options = {}) {
@@ -800,10 +842,86 @@ class BasicSettingsSectionMethods {
     });
   }
 
+  async promptAndRunNotePathLocaleMigration(previousLocale, nextLocale, t) {
+    if (typeof this.showConfirmModal !== "function") return null;
+    const notePlan = planNotePathLocaleMigration(this.plugin.settings || {}, previousLocale, nextLocale);
+    const metaPlan = planMetaPathLocaleMigration(previousLocale, nextLocale);
+    const allItems = [
+      ...(Array.isArray(notePlan && notePlan.items) ? notePlan.items.map((item) => ({ ...item, kind: "note" })) : []),
+      ...(Array.isArray(metaPlan && metaPlan.items) ? metaPlan.items : []),
+    ];
+    if (!allItems.length) {
+      if (notePlan && notePlan.skippedCustomPath && notePlan.skippedCustomPath.length) {
+        new Notice(t(
+          "settings.language.migrationNoDefaultPaths",
+          "语言已切换，但没有可自动迁移的默认目录；你自定义过的笔记位置已保持不变。",
+        ));
+      }
+      return null;
+    }
+
+    const targetLanguage = nextLocale === "zh-CN"
+      ? t("settings.language.optionZhCN", "简体中文")
+      : t("settings.language.optionEn", "English");
+    const firstConfirm = await this.showConfirmModal({
+      title: t("settings.language.migrationPromptTitle", "是否迁移笔记目录？"),
+      description: t(
+        "settings.language.migrationPromptDesc",
+        "FLOWnote 可以把仍使用默认名称的笔记目录和 Meta 系统目录迁移为 {language} 目录。自定义路径不会处理；已存在的目标目录不会覆盖或合并。",
+        { language: targetLanguage },
+      ),
+      submitText: t("settings.language.migrationPromptConfirm", "继续查看"),
+      cancelText: t("settings.language.migrationPromptCancel", "不迁移"),
+    });
+    if (!firstConfirm) return null;
+
+    const preview = allItems
+      .slice(0, 8)
+      .map((item) => `${item.source} → ${item.target}`)
+      .join("\n");
+    const more = allItems.length > 8
+      ? `\n${t("settings.language.migrationPreviewMore", "还有 {count} 个目录…", { count: allItems.length - 8 })}`
+      : "";
+    const secondConfirm = await this.showConfirmModal({
+      title: t("settings.language.migrationSecondTitle", "二次确认：迁移目录"),
+      description: t(
+        "settings.language.migrationSecondDesc",
+        "即将迁移 {count} 个默认目录到 {language}。\n\n{preview}{more}\n\n不会覆盖已存在目录；迁移失败的项目会保留原路径。确认执行？",
+        {
+          count: allItems.length,
+          language: targetLanguage,
+          preview,
+          more,
+        },
+      ),
+      submitText: t("settings.language.migrationSecondConfirm", "确认迁移目录"),
+      cancelText: t("settings.language.migrationSecondCancel", "取消"),
+    });
+    if (!secondConfirm) return null;
+
+    const noteResult = await applyNotePathLocaleMigration(this.app, this.plugin.settings, notePlan);
+    const metaResult = await applyMetaPathLocaleMigration(this.app, metaPlan);
+    const result = mergeMigrationResults(noteResult, metaResult);
+    this.plugin.__flownoteSkillCache = null;
+    await this.plugin.saveSettings();
+    const summary = summarizeNotePathMigrationResult(result);
+    new Notice(t(
+      "settings.language.migrationResult",
+      "目录迁移完成：已迁移 {migrated}，源目录不存在 {skippedMissingSource}，目标已存在 {skippedTargetExists}，自定义路径跳过 {skippedCustomPath}，错误 {errors}。",
+      summary,
+    ));
+    this.display();
+    return result;
+  }
+
   renderNotePathsSection(containerEl, t) {
-    const { DEFAULT_NOTE_PATHS } = require("../settings-utils");
+    const { getDefaultNotePathsByLocale } = require("../settings-utils");
+    const locale = typeof this.plugin.getEffectiveLocale === "function"
+      ? this.plugin.getEffectiveLocale()
+      : "zh-CN";
+    const localeDefaults = getDefaultNotePathsByLocale(locale);
     if (!this.plugin.settings.notePaths) {
-      this.plugin.settings.notePaths = { ...DEFAULT_NOTE_PATHS };
+      this.plugin.settings.notePaths = { ...localeDefaults };
     }
     const paths = this.plugin.settings.notePaths;
 
@@ -820,13 +938,9 @@ class BasicSettingsSectionMethods {
       ["archive",         "归档", "Archive"],
     ];
 
-    const locale = typeof this.plugin.getEffectiveLocale === "function"
-      ? this.plugin.getEffectiveLocale()
-      : "zh-CN";
-
     for (const [key, zhLabel, enLabel] of fields) {
       const label = locale === "en" ? enLabel : zhLabel;
-      const defaultValue = DEFAULT_NOTE_PATHS[key];
+      const defaultValue = localeDefaults[key];
       new Setting(containerEl)
         .setName(label)
         .setDesc(t(

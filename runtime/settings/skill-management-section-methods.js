@@ -40,7 +40,7 @@ async function renderSkillManagementSection(containerEl) {
       text: tr(
         this,
         "settings.skills.intro",
-        "编辑器只修改技能根目录里的 SKILL.md；如果技能带 references、assets、scripts 等资源，请用「导入文件夹」保留完整目录。",
+        "内置 Skills 由 FLOWnote 自动安装和更新，不能修改；这里仅支持新增、导入和编辑你自己的自定义 Skills。",
       ),
     });
     const headerRow = host.createDiv({ cls: "oc-skill-mgmt-header" });
@@ -162,7 +162,9 @@ async function renderSkillManagementSection(containerEl) {
       slug.setText(`/${skill.slug}`);
       const source = main.createDiv({ cls: "oc-skill-mgmt-source" });
       if (skill.embedded) {
-        source.setText(tr(this, "settings.skills.sourceEmbedded", "来源：内置回退（只读）"));
+        source.setText(tr(this, "settings.skills.sourceEmbedded", "来源：内置 Skills（只读，插件自动更新）"));
+      } else if (skill.bundled) {
+        source.setText(tr(this, "settings.skills.sourceBundled", "来源：内置 Skills · {dir}（只读，插件自动更新）", { dir: skill.dirPath }));
       } else if (skill.readOnly) {
         source.setText(tr(this, "settings.skills.sourceReadonly", "来源：{dir}（只读）", { dir: skill.dirPath }));
       } else {

@@ -3,9 +3,10 @@ const assert = require("node:assert/strict");
 
 const { summarizeActiveAgent } = require("../../runtime/view/layout/agent-summary");
 
-function makePlugin({ mode, providerId, model, apiKey } = {}) {
+function makePlugin({ mode, providerId, model, apiKey, uiLanguage = "zh-CN" } = {}) {
   return {
     settings: {
+      uiLanguage,
       agentProvider: {
         mode,
         direct: {
@@ -79,9 +80,22 @@ test("summarizeActiveAgent: direct mode with unknown provider flags missingReaso
   assert.match(s.missingReason, /服务商/);
 });
 
+test("summarizeActiveAgent: direct mode localizes missingReason in English", () => {
+  const plugin = makePlugin({
+    mode: "direct",
+    providerId: "deepseek",
+    model: "",
+    apiKey: "sk-test",
+    uiLanguage: "en",
+  });
+  const s = summarizeActiveAgent(plugin);
+  assert.equal(s.configComplete, false);
+  assert.match(s.missingReason, /model/i);
+});
+
 test("summarizeActiveAgent: undefined plugin doesn't crash", () => {
   const s = summarizeActiveAgent(undefined);
-  // Defaults to direct + 未配置
+  // Defaults to direct mode with an incomplete configuration.
   assert.equal(s.mode, "direct");
   assert.equal(s.configComplete, false);
 });

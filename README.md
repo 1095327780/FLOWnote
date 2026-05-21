@@ -20,6 +20,21 @@
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
 
+## 0.5.7 更新亮点
+
+0.5.7 重点打磨 FLOWnote 的跨语言体验、本地模型支持和首页数据可信度，让英文用户可以完整使用，也让使用本机 Ollama 的用户更清楚地配置桌面端与移动端模型。
+
+- **多语言体验补齐**：界面、设置项、命令提示、首页文案、内置 Skills 和核心模板进一步补齐英文版本；新英文库会使用英文目录，中文老用户升级后不会被自动改目录。
+- **语言切换更安全**：手动切换中英文时，会先询问是否重装对应语言的 Skills/模板，再二次确认是否迁移默认目录；自定义路径不会被自动移动或覆盖。
+- **Meta 与首页模板国际化**：Meta 系统目录、模板名称、首页模板和索引相关内容跟随语言切换，避免英文环境里继续出现中文系统文件名。
+- **Ollama 本机模型支持优化**：服务商可选择 Ollama 本机模式，模型列表只读取用户本机实际安装的模型；本地服务通常无需 API Key，减少配置成本。
+- **Ollama 与移动端分离配置**：当桌面端使用 Ollama 时，设置页会提示手机无法直接访问电脑的 `localhost`，并提供单独的移动端云模型配置，用于移动端聊天和快速捕获 AI 清理。
+- **模型错误提示更清楚**：如果本地模型不支持工具调用，会提示用户更换支持工具调用、上下文能力更强的模型，而不是暴露难懂的底层报错。
+- **首页数据准确性修复**：首页项目统计会排除归档、记忆目录和根级项目总览文件；进行中的项目会显示真实项目目录名，点击仍进入对应项目总览。
+- **首页目录入口重做**：快速入口改成目录看板，不再使用会误创建文件的目录链接，也不再把“收集箱”作为核心入口；捕获内容默认围绕每日笔记流转。
+- **内置 Skills 只读化**：FLOWnote 内置 Skills 由插件自动更新，设置页不能再编辑、删除或导入覆盖；用户仍可新增、导入和编辑自己的自定义 Skills。
+- **设置页更清爽**：笔记位置、Skills 管理、模板管理等低频配置默认折叠，需要时再展开，减少新用户第一次配置时的信息压力。
+
 ## 0.5.6 更新亮点
 
 0.5.6 把 FLOWnote 从「AI 聊天侧栏 + 捕获工具」推进到「Obsidian 里的个人知识工作台」。这次合并了 0.5.1 的发布健康度修复，加入全新的首页、iOS 快捷指令和一批移动端体验优化，并修复记忆文件位置兼容与本地 Ollama 模型配置问题。
@@ -287,6 +302,21 @@ Language: [简体中文](#flownote) | **English**
 <p align="center">
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
 </p>
+
+## What's New in 0.5.7
+
+0.5.7 focuses on language readiness, local-model support, and more trustworthy dashboard data. English users get a complete FLOWnote experience, while Ollama users get clearer desktop/mobile model configuration.
+
+- **Improved multilingual support**: UI text, settings, command hints, home content, bundled Skills, and core templates now have broader English coverage. New English vaults use English folders, while existing Chinese users are not migrated automatically.
+- **Safer language switching**: Switching between Chinese and English asks before reinstalling localized Skills/templates, then asks again before migrating default folders. Customized paths are not moved or overwritten.
+- **Localized Meta and home templates**: Meta system folders, template names, home templates, and index-related resources follow the selected language to avoid Chinese system filenames in English setups.
+- **Better local Ollama support**: Ollama can be selected as a local provider, and the model list reads only models actually installed on the user's machine. Local Ollama normally does not require an API key.
+- **Separate mobile model for Ollama users**: When desktop uses Ollama, FLOWnote explains that mobile cannot access the desktop `localhost` service and provides a separate cloud-model configuration for mobile chat and quick-capture cleanup.
+- **Clearer model failure messages**: If a local model does not support tool calling, FLOWnote now tells users to switch to a tool-capable model instead of surfacing low-level provider errors.
+- **More accurate home dashboard data**: Project stats now exclude archived content, memory folders, and root-level overview files. Active projects display their real project folder names while still linking to the project overview note.
+- **Directory entry redesign**: The home quick-entry area is now a directory dashboard instead of folder wikilinks that can accidentally create files. Capture flow is centered on daily notes rather than an inbox concept.
+- **Bundled Skills are read-only**: FLOWnote bundled Skills are maintained by the plugin and cannot be edited, deleted, or overwritten from Settings. Users can still add, import, and edit their own custom Skills.
+- **Cleaner settings page**: Note locations, Skills management, and template management are collapsed by default, reducing setup noise for new users.
 
 ## What's New in 0.5.6
 

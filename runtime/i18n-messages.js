@@ -40,6 +40,17 @@ const I18N_MESSAGES = {
         reinstallPromptDesc: "当前语言已切换为 {language}。是否现在重装对应语言版本的内置 Skills 与模板？",
         reinstallPromptConfirm: "立即重装",
         reinstallPromptCancel: "稍后",
+        migrationNoDefaultPaths: "语言已切换，但没有可自动迁移的默认目录；你自定义过的笔记位置已保持不变。",
+        migrationPromptTitle: "是否迁移笔记目录？",
+        migrationPromptDesc: "FLOWnote 可以把仍使用默认名称的笔记目录和 Meta 系统目录迁移为 {language} 目录。自定义路径不会处理；已存在的目标目录不会覆盖或合并。",
+        migrationPromptConfirm: "继续查看",
+        migrationPromptCancel: "不迁移",
+        migrationPreviewMore: "还有 {count} 个目录…",
+        migrationSecondTitle: "二次确认：迁移目录",
+        migrationSecondDesc: "即将迁移 {count} 个默认目录到 {language}。\n\n{preview}{more}\n\n不会覆盖已存在目录；迁移失败的项目会保留原路径。确认执行？",
+        migrationSecondConfirm: "确认迁移目录",
+        migrationSecondCancel: "取消",
+        migrationResult: "目录迁移完成：已迁移 {migrated}，源目录不存在 {skippedMissingSource}，目标已存在 {skippedTargetExists}，自定义路径跳过 {skippedCustomPath}，错误 {errors}。",
       },
       mobile: {
         intro: "配置 AI 服务和日记路径，用于移动端快速捕获想法。",
@@ -92,7 +103,7 @@ const I18N_MESSAGES = {
         skillInjectModeOff: "关闭注入（只发送用户输入）",
         advancedHeading: "高级设置",
         skillsDirName: "内置 Skills 安装目录",
-        skillsDirDesc: "默认 .opencode/skills。插件会自动安装/更新内置 skills，你也可以在该目录新增或修改 skills；斜杠命令会直接读取此目录。",
+        skillsDirDesc: "默认 .opencode/skills。这里仅调整内置 Skills 与自定义 Skills 的安装/读取目录；内置 Skills 由插件自动安装和更新，不能直接修改。",
         reinstallSkillsName: "重新安装内置 Skills 与模板",
         reinstallSkillsDesc: "按当前界面语言安装/更新内置 skills，并将 Meta/模板 同步到各 skill 资源目录。遇到同名冲突会询问替换或忽略。",
         reinstallSkillsNow: "立即重装",
@@ -222,6 +233,8 @@ const I18N_MESSAGES = {
     },
     view: {
       header: {
+        home: "首页",
+        chat: "聊天",
         runtime: "聊天运行时",
       },
       welcome: {
@@ -459,6 +472,17 @@ const I18N_MESSAGES = {
         reinstallPromptDesc: "UI language is now {language}. Reinstall bundled Skills & Templates for this language now?",
         reinstallPromptConfirm: "Reinstall Now",
         reinstallPromptCancel: "Later",
+        migrationNoDefaultPaths: "Language updated, but there are no default folders to migrate. Your customized note paths were left unchanged.",
+        migrationPromptTitle: "Migrate note and Meta folders?",
+        migrationPromptDesc: "FLOWnote can rename folders that still use default names, including Meta system folders, into the {language} layout. Customized paths are not touched, and existing target folders are never overwritten or merged.",
+        migrationPromptConfirm: "Review Migration",
+        migrationPromptCancel: "Do Not Migrate",
+        migrationPreviewMore: "{count} more folders…",
+        migrationSecondTitle: "Confirm Folder Migration",
+        migrationSecondDesc: "FLOWnote is about to migrate {count} default folders to {language}.\n\n{preview}{more}\n\nExisting target folders will not be overwritten. Failed items keep their original paths. Continue?",
+        migrationSecondConfirm: "Migrate Folders",
+        migrationSecondCancel: "Cancel",
+        migrationResult: "Folder migration complete: migrated {migrated}, missing source {skippedMissingSource}, target existed {skippedTargetExists}, custom paths skipped {skippedCustomPath}, errors {errors}.",
       },
       mobile: {
         intro: "Configure AI and note paths for quick mobile idea capture.",
@@ -511,7 +535,7 @@ const I18N_MESSAGES = {
         skillInjectModeOff: "Disable Injection (Send only user input)",
         advancedHeading: "Advanced Settings",
         skillsDirName: "Bundled Skills Install Directory",
-        skillsDirDesc: "Default is .opencode/skills. Bundled skills are installed/updated automatically, and any skills you add or edit in this directory are available to slash commands.",
+        skillsDirDesc: "Default is .opencode/skills. This only changes where bundled and custom skills are installed/read. Bundled skills are installed and updated by FLOWnote and cannot be edited directly.",
         reinstallSkillsName: "Reinstall Bundled Skills & Templates",
         reinstallSkillsDesc: "Install/update bundled skills for the current UI language and sync Meta/Templates into each skill resource folder. If conflicts exist, you can replace or skip.",
         reinstallSkillsNow: "Reinstall Now",
@@ -641,6 +665,8 @@ const I18N_MESSAGES = {
     },
     view: {
       header: {
+        home: "Home",
+        chat: "Chat",
         runtime: "Chat Runtime",
       },
       welcome: {
@@ -838,5 +864,8 @@ const I18N_MESSAGES = {
     },
   },
 };
+
+
+require("./i18n-message-overrides").applyI18nMessageOverrides(I18N_MESSAGES);
 
 module.exports = { I18N_MESSAGES };

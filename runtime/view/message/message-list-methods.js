@@ -14,13 +14,20 @@ const {
 // flows. Order is by frequency-of-use, not alphabetical.
 // Each entry has a category color that tints the card's bottom border.
 const SUGGEST_CARDS = [
-  { cmd: "/ah-note",    title: "今日聚焦",      hint: "开启今日的日记 + 任务", emoji: "🌅", accent: "var(--m-accent)" },
-  { cmd: "/ah-card",    title: "新建永久笔记",  hint: "把灵感做成卡片",        emoji: "📝", accent: "var(--m-accent-warm)" },
-  { cmd: "/ah-capture", title: "速记一段",      hint: "倒进收件箱再整理",      emoji: "💡", accent: "var(--m-accent-lime)" },
-  { cmd: "/ah-read",    title: "记录文献",      hint: "B 站 / 书 / 文章",       emoji: "📚", accent: "var(--m-accent-violet)" },
-  { cmd: "/ah-review",  title: "本周回顾",      hint: "回看本周的笔记节奏",    emoji: "🔁", accent: "var(--m-accent-warm)" },
-  { cmd: "/ah",         title: "总入口",        hint: "不确定？让 AI 路由",     emoji: "🌳", accent: "var(--m-accent)" },
+  { cmd: "/ah-note",    titleZh: "今日聚焦",      titleEn: "Today Focus",      hintZh: "开启今日的日记 + 任务", hintEn: "Start today's note and tasks", emoji: "🌅", accent: "var(--m-accent)" },
+  { cmd: "/ah-card",    titleZh: "新建永久笔记",  titleEn: "Permanent Note",   hintZh: "把灵感做成卡片",        hintEn: "Turn an idea into a card", emoji: "📝", accent: "var(--m-accent-warm)" },
+  { cmd: "/ah-capture", titleZh: "速记一段",      titleEn: "Quick Capture",    hintZh: "倒进收件箱再整理",      hintEn: "Drop it into the inbox", emoji: "💡", accent: "var(--m-accent-lime)" },
+  { cmd: "/ah-read",    titleZh: "记录文献",      titleEn: "Reading Note",     hintZh: "B 站 / 书 / 文章",       hintEn: "Video / book / article", emoji: "📚", accent: "var(--m-accent-violet)" },
+  { cmd: "/ah-review",  titleZh: "本周回顾",      titleEn: "Weekly Review",    hintZh: "回看本周的笔记节奏",    hintEn: "Review this week's rhythm", emoji: "🔁", accent: "var(--m-accent-warm)" },
+  { cmd: "/ah",         titleZh: "总入口",        titleEn: "Main Router",      hintZh: "不确定？让 AI 路由",     hintEn: "Not sure? Let AI route it", emoji: "🌳", accent: "var(--m-accent)" },
 ];
+
+function isZhContext(viewCtx) {
+  if (viewCtx && viewCtx.plugin && typeof viewCtx.plugin.getEffectiveLocale === "function") {
+    return viewCtx.plugin.getEffectiveLocale() === "zh-CN";
+  }
+  return false;
+}
 
 function insertSuggestionCommand(viewCtx, card) {
   const inputEl = viewCtx.elements && viewCtx.elements.input;
@@ -37,6 +44,7 @@ function renderSuggestionCards(viewCtx, wrap, isMobile) {
   const grid = wrap.createDiv({
     cls: isMobile ? "oc-mobile-suggest-grid" : "oc-suggest-grid",
   });
+  const useZh = isZhContext(viewCtx);
   for (const card of SUGGEST_CARDS) {
     const item = grid.createEl("button", {
       cls: isMobile ? "oc-mobile-suggest-card" : "oc-suggest-card",
@@ -53,11 +61,11 @@ function renderSuggestionCards(viewCtx, wrap, isMobile) {
     });
     item.createDiv({
       cls: isMobile ? "oc-mobile-suggest-title" : "oc-suggest-title",
-      text: card.title,
+      text: useZh ? card.titleZh : card.titleEn,
     });
     item.createDiv({
       cls: isMobile ? "oc-mobile-suggest-hint" : "oc-suggest-hint",
-      text: card.hint,
+      text: useZh ? card.hintZh : card.hintEn,
     });
     item.addEventListener("click", () => insertSuggestionCommand(viewCtx, card));
   }

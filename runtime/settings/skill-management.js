@@ -31,6 +31,7 @@ const EMBEDDED_BUNDLED_SKILLS_FILES =
   embeddedBundledSkillsModule && embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
     ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
     : {};
+let bundledSkillSlugCache = null;
 const TEXT_IMPORT_EXTENSIONS = new Set([
   "",
   ".c",
@@ -92,6 +93,29 @@ const TEXT_IMPORT_EXTENSIONS = new Set([
 function defaultSkillsRoot(plugin) {
   const root = String((plugin && plugin.settings && plugin.settings.skillsDir) || "").trim();
   return root || ".flownote/skills";
+}
+
+function getBundledSkillSlugs() {
+  if (bundledSkillSlugCache) return bundledSkillSlugCache;
+  const slugs = new Set();
+  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
+    if (!filePath.endsWith("/SKILL.md")) continue;
+    const slug = filePath.split("/")[0];
+    if (slug) slugs.add(slug);
+  }
+  bundledSkillSlugCache = slugs;
+  return bundledSkillSlugCache;
+}
+
+function isBundledSkillSlug(slug) {
+  const normalized = String(slug || "").trim();
+  return Boolean(normalized && getBundledSkillSlugs().has(normalized));
+}
+
+function assertCustomSkillSlug(slug) {
+  if (isBundledSkillSlug(slug)) {
+    throw new Error("内置 Skills 由 FLOWnote 自动维护，不能修改、删除或覆盖。请新建自定义 Skill。");
+  }
 }
 
 function joinPath(a, b) {
@@ -158,6 +182,7 @@ async function listSkillsUnderRoot(plugin, root) {
       const slug = folder.split("/").pop() || folder;
       const name = String(frontmatter.name || slug).trim();
       const description = String(frontmatter.description || "").trim();
+      const bundled = isBundledSkillSlug(slug);
       out.push({
         slug,
         name,
@@ -170,7 +195,8 @@ async function listSkillsUnderRoot(plugin, root) {
         dirPath: folder,
         filePath,
         sourceRoot: root,
-        readOnly: false,
+        readOnly: bundled,
+        bundled,
       });
     } catch { /* skip unreadable */ }
   }
@@ -206,10 +232,12 @@ async function listSkillManagementEntries(plugin) {
     for (const skill of skills) {
       const slug = String(skill.slug || "").trim();
       if (!slug || bySlug.has(slug)) continue;
+      const bundled = isBundledSkillSlug(slug);
       bySlug.set(slug, {
         ...skill,
         sourceRoot: root,
-        readOnly: root !== primaryRoot,
+        readOnly: bundled || root !== primaryRoot,
+        bundled,
       });
     }
   }
@@ -244,6 +272,7 @@ function listEmbeddedSkillDocs() {
         filePath: `<embedded>/${slug}/SKILL.md`,
         sourceRoot: "<embedded>",
         readOnly: true,
+        bundled: true,
         embedded: true,
       });
     } catch { /* skip malformed embedded skill */ }
@@ -353,6 +382,8 @@ async function saveSkill(plugin, doc, existingSlug) {
   if (!doc || typeof doc !== "object") throw new Error("saveSkill: doc required");
   const slugCheck = validateSlug(doc.slug);
   if (!slugCheck.ok) throw new Error(slugCheck.error);
+  assertCustomSkillSlug(doc.slug);
+  if (existingSlug) assertCustomSkillSlug(existingSlug);
   for (const field of REQUIRED_FRONTMATTER_FIELDS) {
     const v = doc[field === "name" ? "name" : field];
     if (typeof v !== "string" || !v.trim()) {
@@ -402,6 +433,7 @@ async function saveSkill(plugin, doc, existingSlug) {
 async function deleteSkill(plugin, slug) {
   const slugCheck = validateSlug(slug);
   if (!slugCheck.ok) throw new Error(slugCheck.error);
+  assertCustomSkillSlug(slug);
   const adapter = plugin.app.vault.adapter;
   const root = defaultSkillsRoot(plugin);
   const dir = joinPath(root, slug);
@@ -464,6 +496,14 @@ async function importSkillsFromFileList(plugin, fileList, options = {}) {
 
   for (const skillImport of plan.imports) {
     const targetDir = joinPath(root, skillImport.slug);
+    if (isBundledSkillSlug(skillImport.slug)) {
+      result.skipped += 1;
+      result.skippedSkills.push({
+        slug: skillImport.slug,
+        reason: "内置 Skills 由 FLOWnote 自动维护，不能导入覆盖",
+      });
+      continue;
+    }
     let targetExists = false;
     try { targetExists = await adapter.exists(targetDir); } catch { targetExists = false; }
     if (targetExists && !options.overwrite) {
@@ -865,6 +905,7 @@ module.exports = {
   listSkillManagementEntries,
   listSkillSecretRefs,
   extractSkillSecretRefsFromText,
+  isBundledSkillSlug,
   renderSkillMarkdown,
   validateSlug,
   sanitizeSkillSlug,

@@ -229,7 +229,10 @@ const sessionBootstrapMethods = {
 
     if (raw.settings || raw.runtimeState) {
       const rawSettings = raw.settings || {};
-      this.settings = runtime.normalizeSettings(rawSettings, { existingInstall });
+      this.settings = runtime.normalizeSettings(rawSettings, {
+        existingInstall,
+        locale: typeof this.getDeviceLocale === "function" ? this.getDeviceLocale() : "en",
+      });
       const runtimeStateRaw = raw.runtimeState || { sessions: [], activeSessionId: "", messagesBySession: {} };
       let beforeSnapshot = "";
       try {
@@ -254,7 +257,10 @@ const sessionBootstrapMethods = {
       return;
     }
 
-    this.settings = runtime.normalizeSettings(raw, { existingInstall });
+    this.settings = runtime.normalizeSettings(raw, {
+      existingInstall,
+      locale: typeof this.getDeviceLocale === "function" ? this.getDeviceLocale() : "en",
+    });
     this.runtimeState = runtime.migrateLegacyMessages({ sessions: [], activeSessionId: "", messagesBySession: {} });
     this.runtimeStateMigrationDirty = false;
     this.ensureRuntimeStateShape();

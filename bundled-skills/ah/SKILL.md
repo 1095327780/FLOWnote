@@ -147,6 +147,7 @@ description: 阿浩知识库统一入口与技能路由中枢。用于用户不�
 | 周回顾、本周 | **ah-week** | `ah-week/SKILL.md` |
 | 月回顾、月度、复盘 | **ah-month** | `ah-month/SKILL.md` |
 | 年回顾、年度总结、年终复盘 | **ah-year** | `ah-year/SKILL.md` |
+| 主页、首页、HOME、更新主页、刷新首页 | **ah-init** | `ah-init/SKILL.md` |
 | 索引、统计、维护 | **ah-init** | `ah-init/SKILL.md` |
 | 初始化、搭建知识库、从零开始 | **ah-init** | `ah-init/SKILL.md` |
 | 旧笔记、迁移、处理旧内容 | **ah-legacy** | `ah-legacy/SKILL.md` |

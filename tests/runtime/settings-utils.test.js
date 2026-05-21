@@ -70,6 +70,21 @@ test("normalizeSettings should fallback invalid uiLanguage to auto", () => {
   assert.equal(out.uiLanguage, "auto");
 });
 
+test("normalizeSettings should use English note folders for fresh English installs", () => {
+  const out = normalizeSettings({}, { locale: "en", existingInstall: false });
+  assert.equal(out.notePaths.dailyNotes, "01-Capture/Daily Notes");
+  assert.equal(out.notePaths.permanentNotes, "02-Cultivate/Permanent Notes");
+  assert.equal(out.notePaths.activeProjects, "04-Create/Projects");
+  assert.equal(out.mobileCapture.dailyNotePath, "01-Capture/Daily Notes");
+  assert.equal(out.mobileCapture.ideaSectionHeader, "## Records");
+});
+
+test("normalizeSettings should keep Chinese note folders for existing installs", () => {
+  const out = normalizeSettings({}, { locale: "en", existingInstall: true });
+  assert.equal(out.notePaths.dailyNotes, "01-捕获层/每日笔记");
+  assert.equal(out.mobileCapture.dailyNotePath, "01-捕获层/每日笔记");
+});
+
 test("normalizeSettings should drop deprecated wsl launch settings", () => {
   const out = normalizeSettings({
     launchStrategy: "wsl",

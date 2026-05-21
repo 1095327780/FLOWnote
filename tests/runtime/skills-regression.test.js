@@ -83,6 +83,14 @@ test("bundled skills includes the helper trio: obsidian-cli / obsidian-markdown 
   }
 });
 
+test("all FLOWnote ah-* bundled skills include an English SKILL.en.md", () => {
+  const missing = skills
+    .filter((s) => s.slug === "ah" || s.slug.startsWith("ah-"))
+    .filter((s) => !fs.existsSync(path.join(s.dir, "SKILL.en.md")))
+    .map((s) => s.slug);
+  assert.deepEqual(missing, []);
+});
+
 // ---------------------------------------------------------------------------
 // Per-skill structural checks
 // ---------------------------------------------------------------------------
