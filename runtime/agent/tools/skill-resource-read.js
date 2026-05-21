@@ -6,7 +6,7 @@
 // the equivalent work with native vault/web tools where possible.
 
 const { buildTool } = require("../tool-registry");
-const { normalizeSkillRelativePath, readFile } = require("../skill-registry");
+const { normalizeSkillRelativePath, readFile, renderSkillTemplateVariables } = require("../skill-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
@@ -39,7 +39,7 @@ const INPUT_SCHEMA = {
 const DEFAULT_MAX_BYTES = 64 * 1024;
 const HARD_MAX_BYTES = 256 * 1024;
 
-function createSkillResourceReadTool({ skillRegistry, vault } = {}) {
+function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariables } = {}) {
   if (!skillRegistry || typeof skillRegistry.get !== "function") {
     throw new Error("createSkillResourceReadTool: skillRegistry required");
   }
@@ -123,7 +123,7 @@ function createSkillResourceReadTool({ skillRegistry, vault } = {}) {
         return;
       }
 
-      let output = content;
+      let output = renderSkillTemplateVariables(content, skillTemplateVariables);
       if (byteLengthUtf8(output) > maxBytes) {
         output = output.slice(0, maxBytes) +
           `\n\n[skill_resource_read: content truncated at ${maxBytes} bytes]`;

@@ -138,6 +138,16 @@ test("planMetaPathLocaleMigration includes default Meta system folders", () => {
   assert.equal(plan.items.some((item) => item.source === "Meta/索引" && item.target === "Meta/Indexes"), true);
 });
 
+test("planMetaPathLocaleMigration keeps a custom Meta root and migrates derived children", () => {
+  const plan = planMetaPathLocaleMigration({
+    metaPaths: { metaRoot: "System" },
+  }, "zh-CN", "en");
+
+  assert.equal(plan.items.some((item) => item.source === "System/模板" && item.target === "System/Templates"), true);
+  assert.equal(plan.items.some((item) => item.source === "System/索引" && item.target === "System/Indexes"), true);
+  assert.equal(plan.items.some((item) => item.key === "metaRoot"), false);
+});
+
 test("applyMetaPathLocaleMigration renames Meta folders without touching targets that exist", async () => {
   const app = makeApp({
     "Meta/模板": makeFolder("Meta/模板", [{ path: "Meta/模板/每日笔记模板.md" }]),

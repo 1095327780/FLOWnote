@@ -11,7 +11,7 @@ description: Use when 需要在多个 ah-* 技能之间持续追踪进度、同�
 
 ## 启动即执行
 
-1. 读取 `Meta/ai-memory/STATUS.md`。
+1. 读取 `{{metaPaths.memory}}/STATUS.md`。
 2. 根据当前技能识别相关待处理项（阅读/制卡/项目/回顾/缓冲任务）。
 3. 若存在待处理项，先提示用户：继续处理或开始新任务。
 
@@ -46,7 +46,7 @@ description: Use when 需要在多个 ah-* 技能之间持续追踪进度、同�
 必须使用以下结构：
 
 ```text
-Meta/ai-memory/
+{{metaPaths.memory}}/
 ├── STATUS.md
 ├── reading/
 ├── cards/
@@ -69,7 +69,7 @@ Meta/ai-memory/
 
 ## 检查清单
 
-- [ ] 已读取 `Meta/ai-memory/STATUS.md`
+- [ ] 已读取 `{{metaPaths.memory}}/STATUS.md`
 - [ ] 已识别并提示相关待处理项
 - [ ] 已在关键节点更新任务专属文件
 - [ ] 已在结束阶段整合更新 `STATUS.md`

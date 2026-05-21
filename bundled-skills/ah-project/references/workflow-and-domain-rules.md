@@ -15,7 +15,7 @@
 
 ## 二、编号分配规则
 
-1. 扫描 `04-创造层/项目/` 下现有目录。
+1. 扫描 `{{notePaths.activeProjects}}/` 下现有目录。
 2. 提取同年份前缀（`YY-`）的最大序号。
 3. 新编号 = 最大序号 + 1（两位数补零）。
 
@@ -28,11 +28,11 @@
 
 目标目录：
 
-`04-创造层/项目/{{编号}} {{项目名称}}/`
+`{{notePaths.activeProjects}}/{{编号}} {{项目名称}}/`
 
 目标文件：
 
-`04-创造层/项目/{{编号}} {{项目名称}}/📍 项目总览.md`
+`{{notePaths.activeProjects}}/{{编号}} {{项目名称}}/📍 项目总览.md`
 
 创建后必须校验：
 
@@ -49,7 +49,7 @@ Dataview 面板要求：
 
 ## 四、项目总览同步
 
-文件：`04-创造层/项目/📍 项目总览.md`
+文件：`{{notePaths.activeProjects}}/📍 项目总览.md`
 
 处理原则：
 
@@ -62,10 +62,10 @@ Dataview 面板要求：
 
 默认领域页：
 
-- `03-连接层/🌱 内容创作.md`
-- `03-连接层/🌱 产品开发.md`
-- `03-连接层/🌱 个人成长.md`
-- `03-连接层/🌱 效率工具.md`
+- `{{notePaths.domainPages}}/🌱 内容创作.md`
+- `{{notePaths.domainPages}}/🌱 产品开发.md`
+- `{{notePaths.domainPages}}/🌱 个人成长.md`
+- `{{notePaths.domainPages}}/🌱 效率工具.md`
 
 同步规则：
 

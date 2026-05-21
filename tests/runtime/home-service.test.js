@@ -66,6 +66,13 @@ function createApp(files) {
       async modify(file, content) {
         file.content = String(content || "");
       },
+      async createFolder(_path) {},
+      async create(path, content) {
+        const file = makeFile(path, String(content || ""));
+        files.push(file);
+        byPath.set(file.path, file);
+        return file;
+      },
     },
     metadataCache: {
       getFileCache(file) {
@@ -101,6 +108,22 @@ test("summarizeDailyNote extracts focus, record, and task stats", () => {
       { lineIndex: 6, text: "做数据服务", done: false },
       { lineIndex: 7, text: "调研插件", done: true },
     ]);
+  } finally {
+    service.restore();
+  }
+});
+
+test("findOrCreateTodayDailyNote follows notePaths dailyNotes instead of stale mobile capture path", async () => {
+  const service = loadHomeServiceWithMockObsidian();
+  try {
+    const app = createApp([]);
+    const file = await service.findOrCreateTodayDailyNote(app, {
+      uiLanguage: "zh-CN",
+      notePaths: { dailyNotes: "99-自定义/日记" },
+      mobileCapture: { dailyNotePath: "01-捕获层/每日笔记" },
+    }, { dateStr: "2026-05-21", locale: "zh-CN" });
+    assert.equal(file.path, "99-自定义/日记/2026-05-21.md");
+    assert.equal(app.vault.getAbstractFileByPath("01-捕获层/每日笔记/2026-05-21.md"), null);
   } finally {
     service.restore();
   }

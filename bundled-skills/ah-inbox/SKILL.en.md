@@ -11,10 +11,10 @@ Goal: turn loose captures into clear next states.
 
 Use configured note paths. English defaults:
 
-- Inbox: `01-Capture/Inbox`
-- Daily notes: `01-Capture/Daily Notes`
-- Permanent notes: `02-Cultivate/Permanent Notes`
-- Projects: `04-Create/Projects`
+- Inbox: `{{notePaths.inbox}}`
+- Daily notes: `{{notePaths.dailyNotes}}`
+- Permanent notes: `{{notePaths.permanentNotes}}`
+- Projects: `{{notePaths.activeProjects}}`
 
 ## Workflow
 

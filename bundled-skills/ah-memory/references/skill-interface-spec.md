@@ -6,7 +6,7 @@
 
 每个技能启动时必须：
 
-1. 读取 `Meta/ai-memory/STATUS.md`。
+1. 读取 `{{metaPaths.memory}}/STATUS.md`。
 2. 只解析与当前技能相关的区块。
 3. 如存在待处理项，先提示用户继续或新开。
 
@@ -35,7 +35,7 @@
 - 记录当前章节、章节范围与下一章节指针。
 - 同步 `STATUS.md` 时同时写入批次进度与章节进度。
 
-路径统一位于 `Meta/ai-memory/` 下：
+路径统一位于 `{{metaPaths.memory}}/` 下：
 
 ```text
 reading/
@@ -50,7 +50,7 @@ reviews/
 每个技能结束时必须：
 
 1. 更新任务专属文件的最终状态。
-2. 整合更新 `Meta/ai-memory/STATUS.md`。
+2. 整合更新 `{{metaPaths.memory}}/STATUS.md`。
 3. 若产生新待办，写入对应区块。
 4. 输出下一步建议（如需要跨技能接力）。
 
@@ -65,7 +65,7 @@ reviews/
 
 ### STATUS 文件不存在
 
-1. 创建 `Meta/ai-memory/`。
+1. 创建 `{{metaPaths.memory}}/`。
 2. 按模板创建 `STATUS.md`。
 3. 继续流程并在输出中说明已自动初始化。
 

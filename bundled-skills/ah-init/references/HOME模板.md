@@ -18,15 +18,15 @@ cssclasses:
 
 ```dataviewjs
 const cfg = {
-  daily: "01-捕获层/每日笔记",
-  highlights: "01-捕获层/划线笔记",
-  permanent: "02-培养层/永久笔记",
-  literature: "02-培养层/文献笔记",
-  topics: "02-培养层/主题笔记",
-  domains: "03-连接层",
-  projects: "04-创造层/项目",
-  archives: "04-创造层/归档",
-  memory: "Meta/ai-memory"
+  daily: "{{notePaths.dailyNotes}}",
+  highlights: "{{notePaths.highlights}}",
+  permanent: "{{notePaths.permanentNotes}}",
+  literature: "{{notePaths.literatureNotes}}",
+  topics: "{{notePaths.topicNotes}}",
+  domains: "{{notePaths.domainPages}}",
+  projects: "{{notePaths.activeProjects}}",
+  archives: "{{notePaths.archive}}",
+  memory: "{{metaPaths.memory}}"
 };
 
 const today = dv.date("today");
@@ -51,16 +51,16 @@ if (openTasks.length) {
 
 ```dataviewjs
 const folders = [
-  ["捕获", "每日笔记", "01-捕获层/每日笔记"],
-  ["捕获", "划线笔记", "01-捕获层/划线笔记"],
-  ["捕获", "周记", "01-捕获层/周记"],
-  ["捕获", "月记", "01-捕获层/月记"],
-  ["培养", "永久笔记", "02-培养层/永久笔记"],
-  ["培养", "文献笔记", "02-培养层/文献笔记"],
-  ["培养", "主题笔记", "02-培养层/主题笔记"],
-  ["连接", "领域页", "03-连接层"],
-  ["创造", "项目", "04-创造层/项目"],
-  ["创造", "归档", "04-创造层/归档"]
+  ["捕获", "每日笔记", "{{notePaths.dailyNotes}}"],
+  ["捕获", "划线笔记", "{{notePaths.highlights}}"],
+  ["捕获", "周记", "{{notePaths.weeklyReviews}}"],
+  ["捕获", "月记", "{{notePaths.monthlyReviews}}"],
+  ["培养", "永久笔记", "{{notePaths.permanentNotes}}"],
+  ["培养", "文献笔记", "{{notePaths.literatureNotes}}"],
+  ["培养", "主题笔记", "{{notePaths.topicNotes}}"],
+  ["连接", "领域页", "{{notePaths.domainPages}}"],
+  ["创造", "项目", "{{notePaths.activeProjects}}"],
+  ["创造", "归档", "{{notePaths.archive}}"]
 ];
 
 function pageCount(folder) {
@@ -81,7 +81,7 @@ dv.table(
 ## 进行中的项目
 
 ```dataviewjs
-const projectRoot = "04-创造层/项目";
+const projectRoot = "{{notePaths.activeProjects}}";
 const overviewNames = new Set(["📍 项目总览", "Project Overview"]);
 
 function projectFolderName(page) {
@@ -118,7 +118,7 @@ if (!projects.length) {
 ## 最近活动
 
 ```dataviewjs
-const hiddenPrefixes = [".", "Meta/ai-memory", "Meta/.ai-memory", "Clippings/", "04-创造层/归档/"];
+const hiddenPrefixes = [".", "{{metaPaths.memory}}", "{{metaPaths.legacyMemory}}", "Clippings/", "{{notePaths.archive}}/"];
 const pages = dv.pages()
   .where(p => p.file.ext === "md")
   .where(p => !hiddenPrefixes.some(prefix => p.file.path.startsWith(prefix)))
@@ -133,13 +133,13 @@ dv.list(pages.map(p => `${p.file.link} · ${p.file.mtime.toFormat("MM-dd HH:mm")
 
 ```dataviewjs
 const cfg = {
-  daily: "01-捕获层/每日笔记",
-  highlights: "01-捕获层/划线笔记",
-  permanent: "02-培养层/永久笔记",
-  literature: "02-培养层/文献笔记",
-  topics: "02-培养层/主题笔记",
-  domains: "03-连接层",
-  projects: "04-创造层/项目"
+  daily: "{{notePaths.dailyNotes}}",
+  highlights: "{{notePaths.highlights}}",
+  permanent: "{{notePaths.permanentNotes}}",
+  literature: "{{notePaths.literatureNotes}}",
+  topics: "{{notePaths.topicNotes}}",
+  domains: "{{notePaths.domainPages}}",
+  projects: "{{notePaths.activeProjects}}"
 };
 
 const overviewNames = new Set(["📍 项目总览", "Project Overview"]);

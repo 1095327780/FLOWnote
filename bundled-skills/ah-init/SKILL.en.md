@@ -9,19 +9,19 @@ Goal: create or repair the minimum folder and template structure required by FLO
 
 ## English Default Structure
 
-- `01-Capture/Inbox`
-- `01-Capture/Daily Notes`
-- `01-Capture/Weekly Reviews`
-- `01-Capture/Monthly Reviews`
-- `01-Capture/Yearly Reviews`
-- `02-Cultivate/Permanent Notes`
-- `02-Cultivate/Literature Notes`
-- `02-Cultivate/Topic Notes`
-- `03-Connect`
-- `04-Create/Projects`
-- `04-Create/Archives`
-- `Meta/ai-memory`
-- `Meta/Templates`
+- `{{notePaths.inbox}}`
+- `{{notePaths.dailyNotes}}`
+- `{{notePaths.weeklyReviews}}`
+- `{{notePaths.monthlyReviews}}`
+- `{{notePaths.yearlyReviews}}`
+- `{{notePaths.permanentNotes}}`
+- `{{notePaths.literatureNotes}}`
+- `{{notePaths.topicNotes}}`
+- `{{notePaths.domainPages}}`
+- `{{notePaths.activeProjects}}`
+- `{{notePaths.archive}}`
+- `{{metaPaths.memory}}`
+- `{{metaPaths.templates}}`
 
 ## Rules
 
@@ -57,9 +57,9 @@ Use this mode when the user asks to update the home document, fix Home, refresh 
    - `.flownote/`
    - `.opencode/`
    - `.agents/`
-   - `Meta/ai-memory/`
-   - `Meta/.ai-memory/`
-   - `04-Create/Archives/`
+   - `{{metaPaths.memory}}/`
+   - `{{metaPaths.legacyMemory}}/`
+   - `{{notePaths.archive}}/`
    - `Clippings/`
 10. Active projects should count only project overview files under the active projects folder. Do not count the root project index as a project.
 

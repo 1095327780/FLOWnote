@@ -1,28 +1,17 @@
 const {
   DEFAULT_NOTE_PATHS_ZH,
   DEFAULT_NOTE_PATHS_EN,
+  DEFAULT_META_PATHS_ZH,
+  DEFAULT_META_PATHS_EN,
   getDefaultNotePathsByLocale,
+  getDefaultMetaPathsByLocale,
   normalizeNotePaths,
+  normalizeMetaPaths,
 } = require("./settings-utils");
 const { normalizeSupportedLocale } = require("./i18n-locale-utils");
 
 const NOTE_PATH_KEYS = Object.keys(DEFAULT_NOTE_PATHS_ZH);
-const DEFAULT_META_PATHS_ZH = Object.freeze({
-  templates: "Meta/模板",
-  indexes: "Meta/索引",
-  indexPages: "Meta/索引页",
-  systemDocs: "Meta/系统文档",
-  homeViews: "Meta/Home视图",
-  activeFlow: "Meta/主动流",
-});
-const DEFAULT_META_PATHS_EN = Object.freeze({
-  templates: "Meta/Templates",
-  indexes: "Meta/Indexes",
-  indexPages: "Meta/Index Pages",
-  systemDocs: "Meta/System Docs",
-  homeViews: "Meta/Home Views",
-  activeFlow: "Meta/Active Flow",
-});
+const ROOT_NOTE_PATH_KEYS = new Set(["captureRoot", "cultivateRoot", "createRoot"]);
 const META_PATH_KEYS = Object.keys(DEFAULT_META_PATHS_ZH);
 
 function normalizeVaultPath(value) {
@@ -81,6 +70,12 @@ function planNotePathLocaleMigration(settings = {}, fromLocale, toLocale) {
     items.push({ key, source, target });
   }
 
+  items.sort((a, b) => {
+    const ar = ROOT_NOTE_PATH_KEYS.has(a.key) ? 1 : 0;
+    const br = ROOT_NOTE_PATH_KEYS.has(b.key) ? 1 : 0;
+    return ar - br;
+  });
+
   return {
     fromLocale: sourceLocale,
     toLocale: targetLocale,
@@ -91,31 +86,47 @@ function planNotePathLocaleMigration(settings = {}, fromLocale, toLocale) {
   };
 }
 
-function getDefaultMetaPathsByLocale(locale) {
-  const normalized = normalizeSupportedLocale(locale, "zh-CN");
-  return normalized === "en" ? DEFAULT_META_PATHS_EN : DEFAULT_META_PATHS_ZH;
-}
-
-function planMetaPathLocaleMigration(fromLocale, toLocale) {
+function planMetaPathLocaleMigration(settings = {}, fromLocale, toLocale) {
+  if (typeof settings === "string" && (typeof fromLocale === "string" || fromLocale === undefined)) {
+    toLocale = fromLocale;
+    fromLocale = settings;
+    settings = {};
+  }
   const sourceLocale = normalizeSupportedLocale(fromLocale, "zh-CN");
   const targetLocale = normalizeSupportedLocale(toLocale, "en");
   const fromDefaults = getDefaultMetaPathsByLocale(sourceLocale);
   const toDefaults = getDefaultMetaPathsByLocale(targetLocale);
+  const current = normalizeMetaPaths(settings && settings.metaPaths, fromDefaults);
+  const sourceDefaults = normalizeMetaPaths({ metaRoot: current.metaRoot }, fromDefaults);
+  const targetDefaults = normalizeMetaPaths({ metaRoot: current.metaRoot }, toDefaults);
   const items = [];
+  const skippedCustomPath = [];
+  const alreadyTarget = [];
 
   if (sourceLocale === targetLocale) {
     return {
       fromLocale: sourceLocale,
       toLocale: targetLocale,
       items,
+      skippedCustomPath,
+      alreadyTarget,
       count: 0,
     };
   }
 
   for (const key of META_PATH_KEYS) {
-    const source = normalizeVaultPath(fromDefaults[key]);
-    const target = normalizeVaultPath(toDefaults[key]);
+    const source = normalizeVaultPath(sourceDefaults[key]);
+    const target = normalizeVaultPath(targetDefaults[key]);
+    const currentPath = normalizeVaultPath(current[key]);
     if (!source || !target || samePath(source, target)) continue;
+    if (samePath(currentPath, target)) {
+      alreadyTarget.push({ key, path: target });
+      continue;
+    }
+    if (!samePath(currentPath, source)) {
+      skippedCustomPath.push({ key, current: currentPath, source, target });
+      continue;
+    }
     items.push({ key, source, target, kind: "meta" });
   }
 
@@ -123,6 +134,8 @@ function planMetaPathLocaleMigration(fromLocale, toLocale) {
     fromLocale: sourceLocale,
     toLocale: targetLocale,
     items,
+    skippedCustomPath,
+    alreadyTarget,
     count: items.length,
   };
 }
@@ -189,6 +202,7 @@ async function applyNotePathLocaleMigration(app, settings, plan) {
 
     const targetFile = getAbstract(vault, target);
     if (targetFile) {
+      if (ROOT_NOTE_PATH_KEYS.has(key)) settings.notePaths[key] = target;
       result.skippedTargetExists.push({ key, source, target });
       continue;
     }
@@ -229,14 +243,16 @@ async function applyNotePathLocaleMigration(app, settings, plan) {
   return result;
 }
 
-async function applyMetaPathLocaleMigration(app, plan) {
+async function applyMetaPathLocaleMigration(app, settingsOrPlan, maybePlan) {
+  const settings = maybePlan ? settingsOrPlan : null;
+  const plan = maybePlan || settingsOrPlan;
   const vault = app && app.vault;
   const fileManager = app && app.fileManager;
   const result = {
     migrated: [],
     skippedMissingSource: [],
     skippedTargetExists: [],
-    skippedCustomPath: [],
+    skippedCustomPath: Array.isArray(plan && plan.skippedCustomPath) ? [...plan.skippedCustomPath] : [],
     errors: [],
   };
   if (!vault || typeof vault.getAbstractFileByPath !== "function") {
@@ -258,6 +274,9 @@ async function applyMetaPathLocaleMigration(app, plan) {
     const sourceFile = getAbstract(vault, source);
     if (!sourceFile) {
       result.skippedMissingSource.push({ key, source, target });
+      if (settings && settings.metaPaths && typeof settings.metaPaths === "object") {
+        settings.metaPaths[key] = target;
+      }
       continue;
     }
 
@@ -276,6 +295,9 @@ async function applyMetaPathLocaleMigration(app, plan) {
       await ensureFolder(vault, getParentPath(target));
       await fileManager.renameFile(sourceFile, target);
       result.migrated.push({ key, source, target });
+      if (settings && settings.metaPaths && typeof settings.metaPaths === "object") {
+        settings.metaPaths[key] = target;
+      }
     } catch (error) {
       result.errors.push({
         key,

@@ -28,37 +28,37 @@ description: 知识库初始化与索引管理。用于首次搭建知识库、�
 ## 模式 A：初始化/迁移
 
 1. 创建并校验标准目录：
-   - `01-捕获层/`
-   - `01-捕获层/每日笔记/`
-   - `01-捕获层/划线笔记/`
-   - `01-捕获层/周记/`
-   - `01-捕获层/月记/`
-   - `01-捕获层/年记/`
-   - `02-培养层/永久笔记/`
-   - `02-培养层/文献笔记/`
-   - `02-培养层/主题笔记/`
-   - `03-连接层/`
-   - `04-创造层/项目/`
-   - `04-创造层/归档/`
-   - `Meta/ai-memory/`
-   - `Meta/ai-memory/reading/`
-   - `Meta/ai-memory/cards/`
-   - `Meta/ai-memory/projects/`
-   - `Meta/ai-memory/reviews/`
-   - `Meta/索引/`
+   - `{{notePaths.captureRoot}}/`
+   - `{{notePaths.dailyNotes}}/`
+   - `{{notePaths.highlights}}/`
+   - `{{notePaths.weeklyReviews}}/`
+   - `{{notePaths.monthlyReviews}}/`
+   - `{{notePaths.yearlyReviews}}/`
+   - `{{notePaths.permanentNotes}}/`
+   - `{{notePaths.literatureNotes}}/`
+   - `{{notePaths.topicNotes}}/`
+   - `{{notePaths.domainPages}}/`
+   - `{{notePaths.activeProjects}}/`
+   - `{{notePaths.archive}}/`
+   - `{{metaPaths.memory}}/`
+   - `{{metaPaths.memory}}/reading/`
+   - `{{metaPaths.memory}}/cards/`
+   - `{{metaPaths.memory}}/projects/`
+   - `{{metaPaths.memory}}/reviews/`
+   - `{{metaPaths.indexes}}/`
 2. 扫描并确认连接层领域页（优先复用已有设置）。
 3. 扫描并确认培养层主题笔记（扁平结构，无子目录）。
 4. 创建 HOME 主页：若不存在主页，立即使用 `references/HOME模板.md` 创建 `🏠Home.md`，保留顶部插件提示；这一步不依赖领域页/主题笔记确认结果。
 5. 按用户确认结果生成其他基础页面：领域页、主题笔记、项目总览。
 6. 迁移旧笔记（保留原内容，按规则分类）。
-7. 初始化 `Meta/ai-memory/STATUS.md`。
-8. 生成知识库索引 `Meta/索引/kb-manifest.md`。
+7. 初始化 `{{metaPaths.memory}}/STATUS.md`。
+8. 生成知识库索引 `{{metaPaths.indexes}}/kb-manifest.md`。
 
 ## 模式 B：索引更新
 
 1. 扫描四层目录与关键子目录。
 2. 统计：笔记数量、主题分布、领域分布、项目分布。
-3. 更新 `Meta/索引/kb-manifest.md`。
+3. 更新 `{{metaPaths.indexes}}/kb-manifest.md`。
 4. 同步检查主页自动区：若主页不存在则创建；若主页存在且包含 FLOWNOTE 自动区标记，则只更新自动区；若主页存在但没有标记，先征求用户确认，不得直接覆盖。
 5. 输出本次变化摘要（与上次对比）。
 
@@ -89,11 +89,11 @@ description: 知识库初始化与索引管理。用于首次搭建知识库、�
    - `.flownote/`
    - `.opencode/`
    - `.agents/`
-   - `Meta/ai-memory/`
-   - `Meta/.ai-memory/`
-   - `04-创造层/归档/`
+   - `{{metaPaths.memory}}/`
+   - `{{metaPaths.legacyMemory}}/`
+   - `{{notePaths.archive}}/`
    - `Clippings/`
-8. 活跃项目只统计 `04-创造层/项目/` 下项目自己的 `📍 项目总览.md`，不得把根目录的 `04-创造层/项目/📍 项目总览.md` 算作项目。
+8. 活跃项目只统计 `{{notePaths.activeProjects}}/` 下项目自己的 `📍 项目总览.md`，不得把根目录的 `{{notePaths.activeProjects}}/📍 项目总览.md` 算作项目。
 
 ## 用户场景判定
 
@@ -144,17 +144,17 @@ description: 知识库初始化与索引管理。用于首次搭建知识库、�
 
 - 目录初始化不能只建父目录，必须把下游技能依赖的子目录一次建齐。
 - 捕获层最小可用结构固定为：`每日笔记/`、`划线笔记/`、`周记/`、`月记/`、`年记/`。
-- 记忆系统最小可用结构固定为：`Meta/ai-memory/STATUS.md` + `reading/` + `cards/` + `projects/` + `reviews/`。
-- 项目系统初始化时，若 `04-创造层/项目/📍 项目总览.md` 不存在，必须创建最小索引文件。
+- 记忆系统最小可用结构固定为：`{{metaPaths.memory}}/STATUS.md` + `reading/` + `cards/` + `projects/` + `reviews/`。
+- 项目系统初始化时，若 `{{notePaths.activeProjects}}/📍 项目总览.md` 不存在，必须创建最小索引文件。
 - 连接层初始化规则：
-  - 先扫描 `03-连接层/*.md` 作为“已有领域页”。
+  - 先扫描 `{{notePaths.domainPages}}/*.md` 作为“已有领域页”。
   - 若已有领域页，先向用户回显并确认“沿用/补充/删改”。
   - 若无领域页，先给候选方案并与用户确认后再创建，不得直接落盘。
   - 领域确认固定提示：
     - `我发现你当前已有这些领域页：{{已有领域页}}。是否沿用？还需要补充或调整哪些领域？`
     - `你当前还没有领域页。基于常见工作流，我建议先建立：{{候选领域}}。您看这样是否可行？还有什么需要补充的吗？`
 - 主题笔记初始化规则：
-  - 主题笔记目录固定为 `02-培养层/主题笔记/`。
+  - 主题笔记目录固定为 `{{notePaths.topicNotes}}/`。
   - 主题笔记必须是该目录下的一级 `.md` 文件（扁平结构），禁止在主题目录下再建子文件夹。
   - 若已有主题笔记，全部保留在该目录并向用户确认“沿用/补充/重命名”。
   - 若无主题笔记，先与用户确认关注主题后再创建，不得直接落盘。

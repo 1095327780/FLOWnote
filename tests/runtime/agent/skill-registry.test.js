@@ -7,6 +7,7 @@ const {
   parseArgumentNames,
   parseToolList,
   substituteArguments,
+  renderSkillTemplateVariables,
   formatSkillListing,
   SkillRegistry,
 } = require("../../../runtime/agent/skill-registry");
@@ -96,6 +97,29 @@ test("substituteArguments leaves placeholders alone when args are empty", () => 
   const out = substituteArguments("/cmd $ARGUMENTS\nfirst: $1", "");
   assert.match(out, /\/cmd /);
   assert.match(out, /first: \$1/);
+});
+
+test("renderSkillTemplateVariables fills note path variables and replaces default path literals", () => {
+  const out = renderSkillTemplateVariables(
+    [
+      "Daily: {{notePaths.dailyNotes}}",
+      "Alias: {{dailyNotesPath}}",
+      "Read 01-捕获层/每日笔记/{{YYYY-MM-DD}}.md",
+      "Keep {{unknown.token}}",
+    ].join("\n"),
+    {
+      notePaths: {
+        dailyNotes: "Daily/Journal",
+      },
+      defaultPathReplacements: [
+        { from: "01-捕获层/每日笔记", to: "Daily/Journal" },
+      ],
+    },
+  );
+  assert.match(out, /Daily: Daily\/Journal/);
+  assert.match(out, /Alias: Daily\/Journal/);
+  assert.match(out, /Read Daily\/Journal\/\{\{YYYY-MM-DD\}\}\.md/);
+  assert.match(out, /\{\{unknown\.token\}\}/);
 });
 
 // ----- loadSkills -----
@@ -255,6 +279,29 @@ test("skill_invoke returns the skill body with $ARGUMENTS substituted", async ()
   assert.match(r.content, /See World/);
 });
 
+test("skill_invoke renders configured note paths before returning the body", async () => {
+  const reg = new SkillRegistry([
+    {
+      name: "daily",
+      description: "Daily note",
+      body: "Create {{notePaths.dailyNotes}}/today.md, not 01-捕获层/每日笔记/today.md",
+      dirPath: ".flownote/skills/daily",
+    },
+  ]);
+  const tool = createSkillInvokeTool({
+    skillRegistry: reg,
+    skillTemplateVariables: {
+      notePaths: { dailyNotes: "My Journal" },
+      defaultPathReplacements: [{ from: "01-捕获层/每日笔记", to: "My Journal" }],
+    },
+  });
+  const r = lastResult(await collect(tool, { skill: "daily" }));
+  assert.ok(!r.isError);
+  assert.match(r.content, /Create My Journal\/today\.md/);
+  assert.match(r.content, /not My Journal\/today\.md/);
+  assert.doesNotMatch(r.content, /01-捕获层\/每日笔记/);
+});
+
 test("skill_invoke advertises skill resources", async () => {
   const reg = new SkillRegistry([
     {
@@ -290,6 +337,33 @@ test("skill_resource_read reads vault-backed resources", async () => {
   assert.ok(!r.isError);
   assert.match(r.content, /Skill resource: rich\/references\/guide\.md/);
   assert.match(r.content, /guide/);
+});
+
+test("skill_resource_read renders configured note paths inside resources", async () => {
+  const reg = new SkillRegistry([
+    {
+      name: "rich",
+      description: "Rich skill",
+      body: "",
+      dirPath: ".flownote/skills/rich",
+      resourcePaths: ["references/guide.md"],
+    },
+  ]);
+  const vault = fakeVault({
+    ".flownote/skills/rich": "---\nname: rich\ndescription: Rich\n---\n",
+    ".flownote/skills/rich/references/guide.md": "Use {{notePaths.dailyNotes}} and 01-捕获层/每日笔记.",
+  });
+  const tool = createSkillResourceReadTool({
+    skillRegistry: reg,
+    vault,
+    skillTemplateVariables: {
+      notePaths: { dailyNotes: "My Journal" },
+      defaultPathReplacements: [{ from: "01-捕获层/每日笔记", to: "My Journal" }],
+    },
+  });
+  const r = lastResult(await collect(tool, { skill: "rich", path: "references/guide.md" }));
+  assert.ok(!r.isError);
+  assert.match(r.content, /Use My Journal and My Journal\./);
 });
 
 test("skill_resource_read reads embedded resources and rejects traversal", async () => {

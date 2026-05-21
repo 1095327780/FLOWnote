@@ -10,7 +10,7 @@ Goal: close the week and set a realistic next-week direction.
 ## Workflow
 
 1. Read daily notes for the current week.
-2. Read active projects and `Meta/ai-memory/STATUS.md`.
+2. Read active projects and `{{metaPaths.memory}}/STATUS.md`.
 3. Summarize completed work, open loops, risks, and useful captures.
 4. Create or update the weekly review in configured `weeklyReviews`.
 5. Produce a next-week plan and update memory state.

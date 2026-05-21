@@ -151,6 +151,26 @@ test("readTemplate falls back to bundled when no user copy exists", async () => 
   assert.match(r.content, /今日聚焦/);
 });
 
+test("readTemplate renders path variables in bundled fallback content", async () => {
+  const previous = FIXTURE_BUNDLE["ah-note/assets/每日笔记模板.md"];
+  FIXTURE_BUNDLE["ah-note/assets/每日笔记模板.md"] = "Daily={{notePaths.dailyNotes}} Memory={{metaPaths.memory}} Skills={{skillsDir}}\n";
+  try {
+    const plugin = {
+      app: { vault: { adapter: makeAdapter({}) } },
+      settings: {
+        skillsDir: ".custom/skills",
+        notePaths: { dailyNotes: "Custom/Daily" },
+        metaPaths: { metaRoot: "Custom" },
+      },
+    };
+    const r = await readTemplate(plugin, "daily-note");
+    assert.equal(r.source, "bundled");
+    assert.equal(r.content, "Daily=Custom/Daily Memory=Custom/ai-memory Skills=.custom/skills\n");
+  } finally {
+    FIXTURE_BUNDLE["ah-note/assets/每日笔记模板.md"] = previous;
+  }
+});
+
 test("readTemplate returns null for unknown template id", async () => {
   const r = await readTemplate(makePlugin(makeAdapter({})), "no-such");
   assert.equal(r, null);

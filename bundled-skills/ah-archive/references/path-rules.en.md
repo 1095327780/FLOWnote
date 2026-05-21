@@ -2,14 +2,14 @@
 
 ## Directory Conventions
 
-- Active projects: `04-Create/Projects/`
-- Archive folder: `04-Create/Archives/`
+- Active projects: `{{notePaths.activeProjects}}/`
+- Archive folder: `{{notePaths.archive}}/`
 
 ## Archive Hierarchy Principles
 
 The archive hierarchy is not a fixed template. It must follow the user's actual project and folder structure.
 
-1. Read the existing hierarchy under `04-Create/Archives/`.
+1. Read the existing hierarchy under `{{notePaths.archive}}/`.
 2. Reuse existing hierarchy when possible.
 3. If no hierarchy exists, confirm with the user before creating one.
 4. Use names that stay useful for long-term retrieval.
@@ -24,7 +24,7 @@ The archive hierarchy is not a fixed template. It must follow the user's actual 
 Example:
 
 ```bash
-mv "04-Create/Projects/{{id}} {{projectName}}" "04-Create/Archives/{{confirmedLevel}}/{{id}} {{projectName}}"
+mv "{{notePaths.activeProjects}}/{{id}} {{projectName}}" "{{notePaths.archive}}/{{confirmedLevel}}/{{id}} {{projectName}}"
 ```
 
 ## Multi-Area Projects

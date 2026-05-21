@@ -20,9 +20,9 @@
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
 
-## 0.5.7 更新亮点
+## 0.5.8 更新亮点
 
-0.5.7 重点打磨 FLOWnote 的跨语言体验、本地模型支持和首页数据可信度，让英文用户可以完整使用，也让使用本机 Ollama 的用户更清楚地配置桌面端与移动端模型。
+0.5.8 重点打磨 FLOWnote 的跨语言体验、本地模型支持和首页数据可信度，让英文用户可以完整使用，也让使用本机 Ollama 的用户更清楚地配置桌面端与移动端模型。
 
 - **多语言体验补齐**：界面、设置项、命令提示、首页文案、内置 Skills 和核心模板进一步补齐英文版本；新英文库会使用英文目录，中文老用户升级后不会被自动改目录。
 - **语言切换更安全**：手动切换中英文时，会先询问是否重装对应语言的 Skills/模板，再二次确认是否迁移默认目录；自定义路径不会被自动移动或覆盖。
@@ -303,9 +303,9 @@ Language: [简体中文](#flownote) | **English**
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
 </p>
 
-## What's New in 0.5.7
+## What's New in 0.5.8
 
-0.5.7 focuses on language readiness, local-model support, and more trustworthy dashboard data. English users get a complete FLOWnote experience, while Ollama users get clearer desktop/mobile model configuration.
+0.5.8 focuses on language readiness, local-model support, and more trustworthy dashboard data. English users get a complete FLOWnote experience, while Ollama users get clearer desktop/mobile model configuration.
 
 - **Improved multilingual support**: UI text, settings, command hints, home content, bundled Skills, and core templates now have broader English coverage. New English vaults use English folders, while existing Chinese users are not migrated automatically.
 - **Safer language switching**: Switching between Chinese and English asks before reinstalling localized Skills/templates, then asks again before migrating default folders. Customized paths are not moved or overwritten.

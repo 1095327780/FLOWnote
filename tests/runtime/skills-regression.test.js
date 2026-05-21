@@ -60,6 +60,19 @@ function loadSkill(slug, dir) {
   return { slug, dir, raw, frontmatter: parsed.frontmatter, body: parsed.body };
 }
 
+function walkMarkdownFiles(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const filePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkMarkdownFiles(filePath, out);
+    } else if (/\.md$/i.test(entry.name)) {
+      out.push(filePath);
+    }
+  }
+  return out;
+}
+
 const skills = listSkillDirs()
   .map((s) => loadSkill(s.slug, s.dir))
   .filter(Boolean);
@@ -89,6 +102,18 @@ test("all FLOWnote ah-* bundled skills include an English SKILL.en.md", () => {
     .filter((s) => !fs.existsSync(path.join(s.dir, "SKILL.en.md")))
     .map((s) => s.slug);
   assert.deepEqual(missing, []);
+});
+
+test("FLOWnote bundled skill markdown uses path variables instead of default folders", () => {
+  const files = walkMarkdownFiles(BUNDLED_DIR)
+    .filter((file) => path.relative(BUNDLED_DIR, file).split(path.sep)[0].startsWith("ah"));
+  const hardcodedPath = /(01-捕获层|02-培养层|03-连接层|04-创造层|01-Capture|02-Cultivate|03-Connect|04-Create|Meta\/模板|Meta\/索引|Meta\/索引页|Meta\/系统文档|Meta\/Home视图|Meta\/Templates|Meta\/Indexes|Meta\/Index Pages|Meta\/System Docs|Meta\/Home Views|Meta\/ai-memory|Meta\/\.ai-memory|Read skills\/|`skills\/)/;
+  const offenders = [];
+  for (const file of files) {
+    const text = fs.readFileSync(file, "utf8");
+    if (hardcodedPath.test(text)) offenders.push(path.relative(BUNDLED_DIR, file));
+  }
+  assert.deepEqual(offenders, []);
 });
 
 // ---------------------------------------------------------------------------

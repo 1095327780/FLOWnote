@@ -37,11 +37,8 @@ function normalizeHomeSettings(settings = {}) {
 }
 
 function resolveDailyNotePath(settings = {}, dateStr = formatDateStr()) {
-  const mc = settings && settings.mobileCapture && typeof settings.mobileCapture === "object"
-    ? settings.mobileCapture
-    : {};
   const notePaths = getNotePathSettings(settings);
-  const dailyNotePath = normalizePath(String(mc.dailyNotePath || notePaths.dailyNotes || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记");
+  const dailyNotePath = normalizePath(String(notePaths.dailyNotes || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记");
   return normalizePath(`${dailyNotePath}/${dateStr}.md`);
 }
 
@@ -317,10 +314,8 @@ async function getTodayState(app, settings = {}, options = {}) {
 
 async function findOrCreateTodayDailyNote(app, settings = {}, options = {}) {
   const dateStr = String(options.dateStr || formatDateStr());
-  const mc = settings && settings.mobileCapture && typeof settings.mobileCapture === "object"
-    ? settings.mobileCapture
-    : {};
-  const dailyNotePath = String(mc.dailyNotePath || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记";
+  const notePaths = getNotePathSettings(settings);
+  const dailyNotePath = String(notePaths.dailyNotes || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记";
   return findOrCreateDailyNote(app.vault, dailyNotePath, dateStr, {
     locale: options.locale || settings.uiLanguage || "zh-CN",
     skillsDir: settings.skillsDir || ".flownote/skills",

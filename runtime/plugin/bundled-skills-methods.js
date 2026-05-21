@@ -1,7 +1,10 @@
 // Node-only deps — see bundled-skills-utils.js for the same shim
 // pattern (mobile returns `{}` for these, doesn't throw).
 let fs = {};
-let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+let path = {
+  join: (...parts) => parts.filter(Boolean).join("/"),
+  dirname: (p) => String(p || "").split("/").slice(0, -1).join("/") || ".",
+};
 let crypto = {};
 try {
   const real = require("fs");
@@ -31,6 +34,17 @@ const {
   copyFileWithParent,
   cloneExistingPath,
 } = require("./bundled-skills-utils");
+const { renderSkillTemplateVariables } = require("../agent/skill-registry");
+const {
+  DEFAULT_NOTE_PATHS_ZH,
+  DEFAULT_NOTE_PATHS_EN,
+  DEFAULT_META_PATHS_ZH,
+  DEFAULT_META_PATHS_EN,
+  getDefaultNotePathsByLocale,
+  getDefaultMetaPathsByLocale,
+  normalizeNotePaths,
+  normalizeMetaPaths,
+} = require("../settings-utils");
 const {
   resolveBundledSyncAction: resolveBundledSyncActionImpl,
   syncBundledSkills: syncBundledSkillsImpl,
@@ -60,6 +74,50 @@ const EMBEDDED_BUNDLED_SKILLS_FILES = embeddedBundledSkillsModule
 function hasEmbeddedBundledSkillsFiles() {
   if (!EMBEDDED_BUNDLED_SKILLS_FILES) return false;
   return Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES).length > 0;
+}
+
+function buildBundledTemplateVariables(plugin, locale) {
+  const settings = plugin && plugin.settings && typeof plugin.settings === "object"
+    ? plugin.settings
+    : {};
+  const noteDefaults = getDefaultNotePathsByLocale(locale);
+  const metaDefaults = getDefaultMetaPathsByLocale(locale);
+  const notePaths = normalizeNotePaths(settings.notePaths, noteDefaults);
+  const metaPaths = normalizeMetaPaths(settings.metaPaths, metaDefaults);
+  const skillsDir = String(settings.skillsDir || ".flownote/skills").replace(/\\/g, "/").replace(/\/+$/, "").trim() || ".flownote/skills";
+  const defaultPathReplacements = [];
+  for (const defaults of [DEFAULT_NOTE_PATHS_ZH, DEFAULT_NOTE_PATHS_EN]) {
+    for (const key of Object.keys(defaults || {})) {
+      defaultPathReplacements.push({ from: defaults[key], to: notePaths[key] });
+    }
+  }
+  for (const defaults of [DEFAULT_META_PATHS_ZH, DEFAULT_META_PATHS_EN]) {
+    for (const key of Object.keys(defaults || {})) {
+      defaultPathReplacements.push({ from: defaults[key], to: metaPaths[key] });
+    }
+  }
+  return { notePaths, metaPaths, skillsDir, defaultPathReplacements };
+}
+
+function renderBundledTemplateContent(plugin, content, locale) {
+  return renderSkillTemplateVariables(
+    String(content || ""),
+    buildBundledTemplateVariables(plugin, locale),
+  );
+}
+
+function readRenderedBundledTemplate(plugin, sourcePath, locale) {
+  return renderBundledTemplateContent(plugin, fs.readFileSync(sourcePath, "utf8"), locale);
+}
+
+function fileHasRenderedContent(plugin, destFile, sourcePath, locale) {
+  if (!fs.existsSync(destFile)) return false;
+  return fs.readFileSync(destFile, "utf8") === readRenderedBundledTemplate(plugin, sourcePath, locale);
+}
+
+function writeRenderedBundledTemplate(plugin, sourcePath, destFile, locale) {
+  fs.mkdirSync(path.dirname(destFile), { recursive: true });
+  fs.writeFileSync(destFile, readRenderedBundledTemplate(plugin, sourcePath, locale), "utf8");
 }
 
 function ensureEmbeddedBundledSkillsRoot(pluginRootDir) {
@@ -375,6 +433,9 @@ function createBundledSkillsMethods(options = {}) {
 
     resolveMetaTemplatesDir(templateMap, locale = "en") {
       const normalizedLocale = this.resolveBundledSkillLocale(locale);
+      const defaults = getDefaultMetaPathsByLocale(normalizedLocale);
+      const metaPaths = normalizeMetaPaths(this.settings && this.settings.metaPaths, defaults);
+      if (metaPaths.templates) return metaPaths.templates;
       if (normalizedLocale === "en") return path.join("Meta", "Templates");
       return templateMap && templateMap.metaTemplatesDir
         ? templateMap.metaTemplatesDir
@@ -620,7 +681,7 @@ function createBundledSkillsMethods(options = {}) {
           for (const targetRelativePath of source.entry.targets) {
             const destFile = path.join(targetRoot, targetRelativePath);
             const exists = fs.existsSync(destFile);
-            if (exists && filesHaveSameContent(destFile, source.sourcePath)) {
+            if (exists && fileHasRenderedContent(this, destFile, source.sourcePath, skillLocale)) {
               continue;
             }
 
@@ -650,7 +711,7 @@ function createBundledSkillsMethods(options = {}) {
                 if (backed) backupCount += 1;
                 replacedCount += 1;
               }
-              copyFileWithParent(source.sourcePath, destFile);
+              writeRenderedBundledTemplate(this, source.sourcePath, destFile, skillLocale);
               synced += 1;
             } catch (e) {
               errors.push(`${entry.id}: ${e instanceof Error ? e.message : String(e)}`);
@@ -783,7 +844,7 @@ function createBundledSkillsMethods(options = {}) {
 
           const destFile = path.join(metaRoot, localizedEntry.metaSource);
           const exists = fs.existsSync(destFile);
-          if (!exists || !filesHaveSameContent(srcFile, destFile)) {
+          if (!exists || !fileHasRenderedContent(this, destFile, srcFile, skillLocale)) {
             let action = "replace";
             if (exists) {
               action = await this.resolveBundledSyncAction({
@@ -808,7 +869,7 @@ function createBundledSkillsMethods(options = {}) {
                 if (backed) backupCount += 1;
                 replacedCount += 1;
               }
-              copyFileWithParent(srcFile, destFile);
+              writeRenderedBundledTemplate(this, srcFile, destFile, skillLocale);
               synced += 1;
             } catch (e) {
               errors.push(`${entry.id}: ${e instanceof Error ? e.message : String(e)}`);

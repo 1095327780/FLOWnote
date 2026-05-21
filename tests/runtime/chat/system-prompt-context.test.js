@@ -47,6 +47,16 @@ test("buildSystemPrompt includes vault block when opts.vaultName is set", () => 
   assert.match(out, /当前 Obsidian 库名：shanghao/);
 });
 
+test("buildSystemPrompt does not inject note path override instructions", () => {
+  const out = buildSystemPrompt([], {
+    todayLabel: "2026-05-15 (星期五)",
+    notePaths: { dailyNotes: "自定义/日记" },
+    locale: "zh-CN",
+  });
+  assert.doesNotMatch(out, /Note path conventions/);
+  assert.doesNotMatch(out, /自定义\/日记/);
+});
+
 test("buildSystemPrompt supports English context blocks", () => {
   const out = buildSystemPrompt([], {
     todayLabel: "2026-05-15 (Friday)",

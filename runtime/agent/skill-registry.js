@@ -299,6 +299,69 @@ function substituteArguments(body, argsString, argNames) {
   return out;
 }
 
+function renderSkillTemplateVariables(body, variables = {}) {
+  if (typeof body !== "string" || !body) return typeof body === "string" ? body : "";
+  let out = body;
+  const replacements = buildTemplateTokenMap(variables);
+  out = out.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (match, key) => {
+    return Object.prototype.hasOwnProperty.call(replacements, key) ? replacements[key] : match;
+  });
+
+  const pathReplacements = Array.isArray(variables.defaultPathReplacements)
+    ? variables.defaultPathReplacements
+    : [];
+  const sorted = pathReplacements
+    .map((item) => ({
+      from: normalizeReplacementPath(item && item.from),
+      to: normalizeReplacementPath(item && item.to),
+    }))
+    .filter((item) => item.from && item.to && item.from !== item.to)
+    .sort((a, b) => b.from.length - a.from.length);
+  for (const item of sorted) {
+    out = out.replace(new RegExp(escapeRegExp(item.from), "g"), item.to);
+  }
+  return out;
+}
+
+function buildTemplateTokenMap(variables) {
+  const out = {};
+  const notePaths = variables && variables.notePaths && typeof variables.notePaths === "object"
+    ? variables.notePaths
+    : {};
+  for (const [key, value] of Object.entries(notePaths)) {
+    const normalized = normalizeReplacementPath(value);
+    if (!normalized) continue;
+    out[`notePaths.${key}`] = normalized;
+    out[`paths.${key}`] = normalized;
+    out[`${key}Path`] = normalized;
+    out[key] = normalized;
+  }
+  const metaPaths = variables && variables.metaPaths && typeof variables.metaPaths === "object"
+    ? variables.metaPaths
+    : {};
+  for (const [key, value] of Object.entries(metaPaths)) {
+    const normalized = normalizeReplacementPath(value);
+    if (!normalized) continue;
+    out[`metaPaths.${key}`] = normalized;
+    out[`meta.${key}`] = normalized;
+    out[`${key}MetaPath`] = normalized;
+  }
+  const skillsDir = normalizeReplacementPath(variables && variables.skillsDir);
+  if (skillsDir) {
+    out.skillsDir = skillsDir;
+    out.skillRoot = skillsDir;
+  }
+  return out;
+}
+
+function normalizeReplacementPath(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Load every SKILL.md under `rootPath` (one level deep — each subdir
  * holds at most one SKILL.md). Quietly skips any directory that has no
@@ -571,6 +634,7 @@ module.exports = {
   normalizeResourcePaths,
   readFile,
   substituteArguments,
+  renderSkillTemplateVariables,
   formatSkillListing,
   SkillRegistry,
   MAX_LISTING_DESC_CHARS,

@@ -47,8 +47,16 @@ const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
-const { getDefaultNotePathsByLocale } = require("../settings-utils");
-const { getDefaultMetaPathsByLocale } = require("../note-path-locale-migration");
+const {
+  DEFAULT_NOTE_PATHS_ZH,
+  DEFAULT_NOTE_PATHS_EN,
+  DEFAULT_META_PATHS_ZH,
+  DEFAULT_META_PATHS_EN,
+  getDefaultNotePathsByLocale,
+  getDefaultMetaPathsByLocale,
+  normalizeNotePaths,
+  normalizeMetaPaths,
+} = require("../settings-utils");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
@@ -250,86 +258,12 @@ function buildSystemPrompt(skillManifests, opts) {
   if (ctxLines.length > 0) {
     parts.push(`Context:\n${ctxLines.join("\n\n")}`);
   }
-  // Note path overrides — the user has configured which folders each
-  // note kind lives in. The bundled SKILL.md files reference defaults
-  // like `01-捕获层/每日笔记/` inline; this block tells the model to
-  // treat those as DEFAULTS and prefer the user's configured paths.
-  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths, locale);
-  if (notePathBlock) parts.push(notePathBlock);
-  const metaPathBlock = formatMetaPathConventions(locale);
-  if (metaPathBlock) parts.push(metaPathBlock);
 
   const listing = formatSkillListing(skillManifests);
   if (listing) {
     parts.push(`Available skills (call via skill_invoke):\n${listing}`);
   }
   return parts.join("\n\n");
-}
-
-// Default folder layout the bundled skills hardcode. When the user
-// overrides any of these in `settings.notePaths`, we surface the
-// override to the model in a "Note path overrides" block of the system
-// prompt — the model is instructed to use the override whenever a skill
-// references the default path.
-const NOTE_PATH_LABELS = {
-  dailyNotes:       "Daily notes 每日笔记",
-  weeklyReviews:    "Weekly reviews 周记",
-  monthlyReviews:   "Monthly reviews 月记",
-  yearlyReviews:    "Yearly reviews 年记",
-  permanentNotes:   "Permanent notes 永久笔记",
-  topicNotes:       "Topic notes 主题笔记 (📍)",
-  literatureNotes:  "Literature notes 文献笔记 (《》)",
-  domainPages:      "Domain pages 领域页 (🌱)",
-  activeProjects:   "Active projects 项目",
-  archive:          "Archive 归档",
-};
-
-function formatNotePathOverrides(notePaths, locale = "en") {
-  const live = (notePaths && typeof notePaths === "object") ? notePaths : {};
-  const defaultLayout = getDefaultNotePathsByLocale(locale);
-  // Always emit the full table so the model has a single source of
-  // truth, even if every value matches the default — it's only ~10
-  // lines and dramatically reduces "AI guessed the wrong path" cases.
-  const lines = [
-    "Note path conventions (USE THESE EXACT FOLDERS when reading or writing the listed note kinds; OVERRIDE any path mentioned inside a skill body):",
-  ];
-  for (const key of Object.keys(defaultLayout)) {
-    const dflt = defaultLayout[key];
-    const v = String((live[key] || "")).replace(/\\/g, "/").replace(/\/+$/, "").trim() || dflt;
-    const label = NOTE_PATH_LABELS[key] || key;
-    const tag = v !== dflt ? "  (user-customized)" : "";
-    lines.push(`  - ${label}: ${v}${tag}`);
-  }
-  lines.push(
-    "",
-    "When a skill body contains a hardcoded path like \"01-捕获层/每日笔记/\" or \"02-培养层/永久笔记/\", that path is the DEFAULT. If the table above lists a different value for that note kind, use the table's value. Never invent a new folder.",
-  );
-  return lines.join("\n");
-}
-
-const META_PATH_LABELS = {
-  templates: "Templates 模板",
-  indexes: "Indexes 索引",
-  indexPages: "Index pages 索引页",
-  systemDocs: "System docs 系统文档",
-  homeViews: "Home views Home视图",
-  activeFlow: "Active flow 主动流",
-};
-
-function formatMetaPathConventions(locale = "en") {
-  const metaLayout = getDefaultMetaPathsByLocale(locale);
-  const lines = [
-    "Meta path conventions (USE THESE EXACT FOLDERS for FLOWnote system resources):",
-  ];
-  for (const key of Object.keys(metaLayout)) {
-    const label = META_PATH_LABELS[key] || key;
-    lines.push(`  - ${label}: ${metaLayout[key]}`);
-  }
-  lines.push(
-    "",
-    "For the knowledge index, read `kb-manifest.md` from the Indexes/索引 folder listed above before broad vault search.",
-  );
-  return lines.join("\n");
 }
 
 /**
@@ -435,9 +369,10 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin) {
   }
   registry.register(createAskUserTool());
   if (skillRegistry && typeof skillRegistry.list === "function") {
-    registry.register(createSkillInvokeTool({ skillRegistry }));
+    const skillTemplateVariables = buildSkillTemplateVariables(plugin);
+    registry.register(createSkillInvokeTool({ skillRegistry, skillTemplateVariables }));
     if (app && app.vault) {
-      registry.register(createSkillResourceReadTool({ skillRegistry, vault: app.vault }));
+      registry.register(createSkillResourceReadTool({ skillRegistry, vault: app.vault, skillTemplateVariables }));
     }
   }
   return registry;
@@ -474,6 +409,30 @@ function resolveSkillRoots(plugin) {
     });
 }
 
+function buildSkillTemplateVariables(plugin) {
+  const settings = plugin && plugin.settings && typeof plugin.settings === "object"
+    ? plugin.settings
+    : {};
+  const locale = getRunnerLocale(plugin);
+  const localeDefaults = getDefaultNotePathsByLocale(locale);
+  const metaLocaleDefaults = getDefaultMetaPathsByLocale(locale);
+  const notePaths = normalizeNotePaths(settings.notePaths, localeDefaults);
+  const metaPaths = normalizeMetaPaths(settings.metaPaths, metaLocaleDefaults);
+  const skillsDir = String(settings.skillsDir || DEFAULT_SKILL_ROOT).replace(/\\/g, "/").replace(/\/+$/, "").trim() || DEFAULT_SKILL_ROOT;
+  const defaultPathReplacements = [];
+  for (const defaults of [DEFAULT_NOTE_PATHS_ZH, DEFAULT_NOTE_PATHS_EN]) {
+    for (const key of Object.keys(defaults || {})) {
+      defaultPathReplacements.push({ from: defaults[key], to: notePaths[key] });
+    }
+  }
+  for (const defaults of [DEFAULT_META_PATHS_ZH, DEFAULT_META_PATHS_EN]) {
+    for (const key of Object.keys(defaults || {})) {
+      defaultPathReplacements.push({ from: defaults[key], to: metaPaths[key] });
+    }
+  }
+  return { notePaths, metaPaths, skillsDir, defaultPathReplacements };
+}
+
 /**
  * Load skills from the vault. Cached on the plugin object so we don't
  * re-scan disk on every turn. Cache invalidates when the configured
@@ -487,7 +446,13 @@ async function ensureSkillRegistry(plugin) {
     return new SkillRegistry([]);
   }
   const skillRoots = resolveSkillRoots(plugin);
-  const cacheKey = skillRoots.join("\n");
+  const skillTemplateVariables = buildSkillTemplateVariables(plugin);
+  const cacheKey = [
+    skillRoots.join("\n"),
+    JSON.stringify(skillTemplateVariables.notePaths || {}),
+    JSON.stringify(skillTemplateVariables.metaPaths || {}),
+    String(skillTemplateVariables.skillsDir || ""),
+  ].join("\n---\n");
 
   // Cache key: ordered skill roots. Re-load if the user points elsewhere.
   if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === cacheKey) {
@@ -829,10 +794,9 @@ async function runDirectAgentTurn({
   const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
     ? String(view.app.vault.getName() || "")
     : "";
-  const notePaths = (plugin.settings && plugin.settings.notePaths) || null;
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    { todayLabel: describeToday(new Date(), locale), vaultName, notePaths, locale },
+    { todayLabel: describeToday(new Date(), locale), vaultName, locale },
   );
 
   // ---------------------------------------------------------------------

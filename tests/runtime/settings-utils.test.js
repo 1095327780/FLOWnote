@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   normalizeSettings,
   normalizeSettingsInPlace,
+  normalizeMetaPaths,
   normalizeSkillSecrets,
 } = require("../../runtime/settings-utils");
 
@@ -83,6 +84,20 @@ test("normalizeSettings should keep Chinese note folders for existing installs",
   const out = normalizeSettings({}, { locale: "en", existingInstall: true });
   assert.equal(out.notePaths.dailyNotes, "01-捕获层/每日笔记");
   assert.equal(out.mobileCapture.dailyNotePath, "01-捕获层/每日笔记");
+});
+
+test("normalizeMetaPaths derives all Meta children from the root directory", () => {
+  const out = normalizeMetaPaths({
+    metaRoot: "System",
+    templates: "Ignored/Templates",
+    memory: "Ignored/Memory",
+  });
+
+  assert.equal(out.metaRoot, "System");
+  assert.equal(out.templates, "System/模板");
+  assert.equal(out.indexes, "System/索引");
+  assert.equal(out.memory, "System/ai-memory");
+  assert.equal(out.legacyMemory, "System/.ai-memory");
 });
 
 test("normalizeSettings should drop deprecated wsl launch settings", () => {

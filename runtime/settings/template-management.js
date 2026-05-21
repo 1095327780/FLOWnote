@@ -31,6 +31,17 @@ const EMBEDDED_BUNDLED_SKILLS_FILES = embeddedBundledSkillsModule
 const DEFAULT_META_TEMPLATES_DIR = "Meta/模板";
 const TEMPLATE_MAP_FILE = "template-map.json";
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { renderSkillTemplateVariables } = require("../agent/skill-registry");
+const {
+  DEFAULT_NOTE_PATHS_ZH,
+  DEFAULT_NOTE_PATHS_EN,
+  DEFAULT_META_PATHS_ZH,
+  DEFAULT_META_PATHS_EN,
+  getDefaultNotePathsByLocale,
+  getDefaultMetaPathsByLocale,
+  normalizeNotePaths,
+  normalizeMetaPaths,
+} = require("../settings-utils");
 
 function joinPath(a, b) {
   return `${String(a).replace(/\/+$/, "")}/${String(b).replace(/^\/+/, "")}`;
@@ -83,8 +94,12 @@ function resolveTemplateLocale(plugin) {
   return normalizeSupportedLocale(locale, "zh-CN");
 }
 
-function metaTemplatesDirByLocale(baseDir, locale) {
-  return normalizeSupportedLocale(locale, "zh-CN") === "en"
+function metaTemplatesDirByLocale(plugin, baseDir, locale) {
+  const normalizedLocale = normalizeSupportedLocale(locale, "zh-CN");
+  const defaults = getDefaultMetaPathsByLocale(normalizedLocale);
+  const metaPaths = normalizeMetaPaths(plugin && plugin.settings && plugin.settings.metaPaths, defaults);
+  if (metaPaths.templates) return metaPaths.templates;
+  return normalizedLocale === "en"
     ? "Meta/Templates"
     : (String(baseDir || "").trim() || DEFAULT_META_TEMPLATES_DIR);
 }
@@ -116,15 +131,39 @@ function resolveTemplateEntryByLocale(raw, locale) {
  * @param {string} fallbackPath  vault-relative path from template-map.json
  * @returns {string}
  */
-function readEmbeddedFallback(fallbackPath) {
+function buildTemplateVariables(plugin, locale) {
+  const settings = plugin && plugin.settings && typeof plugin.settings === "object"
+    ? plugin.settings
+    : {};
+  const noteDefaults = getDefaultNotePathsByLocale(locale);
+  const metaDefaults = getDefaultMetaPathsByLocale(locale);
+  const notePaths = normalizeNotePaths(settings.notePaths, noteDefaults);
+  const metaPaths = normalizeMetaPaths(settings.metaPaths, metaDefaults);
+  const skillsDir = String(settings.skillsDir || ".flownote/skills").replace(/\\/g, "/").replace(/\/+$/, "").trim() || ".flownote/skills";
+  const defaultPathReplacements = [];
+  for (const defaults of [DEFAULT_NOTE_PATHS_ZH, DEFAULT_NOTE_PATHS_EN]) {
+    for (const key of Object.keys(defaults || {})) {
+      defaultPathReplacements.push({ from: defaults[key], to: notePaths[key] });
+    }
+  }
+  for (const defaults of [DEFAULT_META_PATHS_ZH, DEFAULT_META_PATHS_EN]) {
+    for (const key of Object.keys(defaults || {})) {
+      defaultPathReplacements.push({ from: defaults[key], to: metaPaths[key] });
+    }
+  }
+  return { notePaths, metaPaths, skillsDir, defaultPathReplacements };
+}
+
+function readEmbeddedFallback(fallbackPath, plugin = null, locale = "zh-CN") {
   if (!EMBEDDED_BUNDLED_SKILLS_FILES) return "";
   const key = String(fallbackPath || "").replace(/^\/+/, "");
   if (!key) return "";
   // The embedded bundle keys are relative to bundled-skills/ root, so
   // the fallback path matches verbatim ("ah-note/assets/每日笔记模板.md").
-  return EMBEDDED_BUNDLED_SKILLS_FILES[key]
+  const raw = EMBEDDED_BUNDLED_SKILLS_FILES[key]
     ? String(EMBEDDED_BUNDLED_SKILLS_FILES[key])
     : "";
+  return plugin ? renderSkillTemplateVariables(raw, buildTemplateVariables(plugin, locale)) : raw;
 }
 
 /**
@@ -150,7 +189,7 @@ async function listTemplates(plugin) {
   if (!adapter) return [];
   const locale = resolveTemplateLocale(plugin);
   const { entries, metaTemplatesDir } = await readTemplateMap(plugin);
-  const localizedMetaTemplatesDir = metaTemplatesDirByLocale(metaTemplatesDir, locale);
+  const localizedMetaTemplatesDir = metaTemplatesDirByLocale(plugin, metaTemplatesDir, locale);
   const root = skillsRoot(plugin);
   const out = [];
   for (const raw of entries) {
@@ -165,7 +204,7 @@ async function listTemplates(plugin) {
     if (hasUserCopy && fallback) {
       try {
         const userContent = await adapter.read(userPath);
-        const bundledContent = readEmbeddedFallback(fallback);
+        const bundledContent = readEmbeddedFallback(fallback, plugin, locale);
         isCustomized = bundledContent && userContent.trim() !== bundledContent.trim();
       } catch { /* treat as not customized */ }
     }
@@ -203,7 +242,8 @@ async function readTemplate(plugin, id) {
       return { id: item.id, content, source: "user", userPath: item.userPath, fallback: item.fallback };
     } catch { /* fall through */ }
   }
-  const bundled = readEmbeddedFallback(item.fallback);
+  const locale = resolveTemplateLocale(plugin);
+  const bundled = readEmbeddedFallback(item.fallback, plugin, locale);
   if (!bundled) return null;
   return { id: item.id, content: bundled, source: "bundled", userPath: item.userPath, fallback: item.fallback };
 }
@@ -268,7 +308,8 @@ async function resetTemplate(plugin, id) {
   const list = await listTemplates(plugin);
   const item = list.find((t) => t.id === id);
   if (!item) throw new Error(`未知模板 ID: ${id}`);
-  const bundled = readEmbeddedFallback(item.fallback);
+  const locale = resolveTemplateLocale(plugin);
+  const bundled = readEmbeddedFallback(item.fallback, plugin, locale);
   if (!bundled) {
     return { userPath: item.userPath, restored: false };
   }

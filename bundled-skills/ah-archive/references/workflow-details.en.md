@@ -36,7 +36,7 @@ Offer three choices:
 
 ## 5. Confirm Archive Level
 
-Read `04-Create/Archives/` and reuse existing levels when possible. If none exists, propose 2-3 options and wait for user confirmation.
+Read `{{notePaths.archive}}/` and reuse existing levels when possible. If none exists, propose 2-3 options and wait for user confirmation.
 
 ## 6. Execution Order
 

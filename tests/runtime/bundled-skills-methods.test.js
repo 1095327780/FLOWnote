@@ -280,6 +280,35 @@ test("syncBundledTemplates should switch template filenames by locale and clean 
   }
 });
 
+test("syncBundledTemplates should render path variables before installing templates", async () => {
+  const fixture = createFixture();
+  try {
+    writeFile(
+      path.join(fixture.bundledRoot, "resources", "templates-default", "示例模板.md"),
+      "Daily={{notePaths.dailyNotes}} Memory={{metaPaths.memory}} Skills={{skillsDir}}\n",
+    );
+    fixture.plugin.settings.notePaths = { dailyNotes: "Custom/Daily" };
+    fixture.plugin.settings.metaPaths = { metaRoot: "Custom" };
+    fixture.plugin.settings.skillsDir = ".custom/skills";
+
+    const result = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: true,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(result.errors.length, 0);
+
+    const templateFile = path.join(fixture.vaultPath, ".custom", "skills", "ah-test", "assets", "templates", "示例模板.md");
+    assert.equal(
+      fs.readFileSync(templateFile, "utf8"),
+      "Daily=Custom/Daily Memory=Custom/ai-memory Skills=.custom/skills\n",
+    );
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("resetMetaTemplateBaseline should switch Meta template filename by locale", async () => {
   const fixture = createFixture();
   try {

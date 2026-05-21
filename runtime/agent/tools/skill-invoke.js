@@ -8,7 +8,7 @@
 // guidance available.
 
 const { buildTool } = require("../tool-registry");
-const { substituteArguments } = require("../skill-registry");
+const { substituteArguments, renderSkillTemplateVariables } = require("../skill-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
 
 const DESCRIPTION =
@@ -51,7 +51,7 @@ const CLAUDE_CODE_COMPATIBILITY_HINT = [
  * @param {import('../skill-registry').SkillRegistry} deps.skillRegistry
  * @returns {import('../tool-registry').ToolDef}
  */
-function createSkillInvokeTool({ skillRegistry } = {}) {
+function createSkillInvokeTool({ skillRegistry, skillTemplateVariables } = {}) {
   if (!skillRegistry || typeof skillRegistry.get !== "function") {
     throw new Error("createSkillInvokeTool: skillRegistry required");
   }
@@ -103,7 +103,8 @@ function createSkillInvokeTool({ skillRegistry } = {}) {
         return;
       }
       const argsStr = typeof input.args === "string" ? input.args : "";
-      let body = substituteArguments(skill.body, argsStr, skill.argumentNames || []);
+      let body = renderSkillTemplateVariables(skill.body, skillTemplateVariables);
+      body = substituteArguments(body, argsStr, skill.argumentNames || []);
       if (byteLengthUtf8(body) > MAX_BODY_BYTES) {
         body = body.slice(0, MAX_BODY_BYTES) + "\n\n[skill_invoke: body truncated — split this skill into smaller pieces]";
       }

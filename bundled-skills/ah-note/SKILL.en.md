@@ -9,10 +9,10 @@ Goal: create a usable daily note with one clear focus and a realistic task list.
 
 ## Startup
 
-1. Use the configured `dailyNotes` folder from the system prompt. English default: `01-Capture/Daily Notes/{{YYYY-MM-DD}}.md`.
+1. Use the rendered `{{notePaths.dailyNotes}}` folder in this skill. English default: `{{notePaths.dailyNotes}}/{{YYYY-MM-DD}}.md`.
 2. If today's note does not exist, create it from the daily-note template.
 3. If it exists, enter light update mode instead of overwriting.
-4. Read available context: yesterday's note, yesterday's `Tomorrow Plan`, `Meta/ai-memory/STATUS.md`, current weekly/monthly review notes, and active projects.
+4. Read available context: yesterday's note, yesterday's `Tomorrow Plan`, `{{metaPaths.memory}}/STATUS.md`, current weekly/monthly review notes, and active projects.
 
 ## Required Sections
 

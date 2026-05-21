@@ -18,15 +18,15 @@ cssclasses:
 
 ```dataviewjs
 const cfg = {
-  daily: "01-Capture/Daily Notes",
-  highlights: "01-Capture/Highlights",
-  permanent: "02-Cultivate/Permanent Notes",
-  literature: "02-Cultivate/Literature Notes",
-  topics: "02-Cultivate/Topic Notes",
-  domains: "03-Connect",
-  projects: "04-Create/Projects",
-  archives: "04-Create/Archives",
-  memory: "Meta/ai-memory"
+  daily: "{{notePaths.dailyNotes}}",
+  highlights: "{{notePaths.highlights}}",
+  permanent: "{{notePaths.permanentNotes}}",
+  literature: "{{notePaths.literatureNotes}}",
+  topics: "{{notePaths.topicNotes}}",
+  domains: "{{notePaths.domainPages}}",
+  projects: "{{notePaths.activeProjects}}",
+  archives: "{{notePaths.archive}}",
+  memory: "{{metaPaths.memory}}"
 };
 
 const today = dv.date("today");
@@ -51,16 +51,16 @@ if (openTasks.length) {
 
 ```dataviewjs
 const folders = [
-  ["Capture", "Daily Notes", "01-Capture/Daily Notes"],
-  ["Capture", "Highlights", "01-Capture/Highlights"],
-  ["Capture", "Weekly Reviews", "01-Capture/Weekly Reviews"],
-  ["Capture", "Monthly Reviews", "01-Capture/Monthly Reviews"],
-  ["Cultivate", "Permanent Notes", "02-Cultivate/Permanent Notes"],
-  ["Cultivate", "Literature Notes", "02-Cultivate/Literature Notes"],
-  ["Cultivate", "Topic Notes", "02-Cultivate/Topic Notes"],
-  ["Connect", "Areas", "03-Connect"],
-  ["Create", "Projects", "04-Create/Projects"],
-  ["Create", "Archives", "04-Create/Archives"]
+  ["Capture", "Daily Notes", "{{notePaths.dailyNotes}}"],
+  ["Capture", "Highlights", "{{notePaths.highlights}}"],
+  ["Capture", "Weekly Reviews", "{{notePaths.weeklyReviews}}"],
+  ["Capture", "Monthly Reviews", "{{notePaths.monthlyReviews}}"],
+  ["Cultivate", "Permanent Notes", "{{notePaths.permanentNotes}}"],
+  ["Cultivate", "Literature Notes", "{{notePaths.literatureNotes}}"],
+  ["Cultivate", "Topic Notes", "{{notePaths.topicNotes}}"],
+  ["Connect", "Areas", "{{notePaths.domainPages}}"],
+  ["Create", "Projects", "{{notePaths.activeProjects}}"],
+  ["Create", "Archives", "{{notePaths.archive}}"]
 ];
 
 function pageCount(folder) {
@@ -81,7 +81,7 @@ dv.table(
 ## Active Projects
 
 ```dataviewjs
-const projectRoot = "04-Create/Projects";
+const projectRoot = "{{notePaths.activeProjects}}";
 const overviewNames = new Set(["Project Overview", "📍 项目总览"]);
 
 function projectFolderName(page) {
@@ -118,7 +118,7 @@ if (!projects.length) {
 ## Recent Activity
 
 ```dataviewjs
-const hiddenPrefixes = [".", "Meta/ai-memory", "Meta/.ai-memory", "Clippings/", "04-Create/Archives/"];
+const hiddenPrefixes = [".", "{{metaPaths.memory}}", "{{metaPaths.legacyMemory}}", "Clippings/", "{{notePaths.archive}}/"];
 const pages = dv.pages()
   .where(p => p.file.ext === "md")
   .where(p => !hiddenPrefixes.some(prefix => p.file.path.startsWith(prefix)))
@@ -133,13 +133,13 @@ dv.list(pages.map(p => `${p.file.link} · ${p.file.mtime.toFormat("MM-dd HH:mm")
 
 ```dataviewjs
 const cfg = {
-  daily: "01-Capture/Daily Notes",
-  highlights: "01-Capture/Highlights",
-  permanent: "02-Cultivate/Permanent Notes",
-  literature: "02-Cultivate/Literature Notes",
-  topics: "02-Cultivate/Topic Notes",
-  domains: "03-Connect",
-  projects: "04-Create/Projects"
+  daily: "{{notePaths.dailyNotes}}",
+  highlights: "{{notePaths.highlights}}",
+  permanent: "{{notePaths.permanentNotes}}",
+  literature: "{{notePaths.literatureNotes}}",
+  topics: "{{notePaths.topicNotes}}",
+  domains: "{{notePaths.domainPages}}",
+  projects: "{{notePaths.activeProjects}}"
 };
 
 const overviewNames = new Set(["Project Overview", "📍 项目总览"]);

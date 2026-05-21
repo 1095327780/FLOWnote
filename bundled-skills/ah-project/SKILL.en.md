@@ -10,7 +10,7 @@ Goal: turn an intended outcome into a structured project workspace.
 ## Startup
 
 1. Ask for the project name, outcome, deadline, and priority if missing.
-2. Use the configured `activeProjects` folder. English default: `04-Create/Projects`.
+2. Use the configured `activeProjects` folder. English default: `{{notePaths.activeProjects}}`.
 3. Create a project folder and a `Project Overview.md` note.
 
 ## Project Overview

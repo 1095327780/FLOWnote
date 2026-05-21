@@ -845,7 +845,7 @@ class BasicSettingsSectionMethods {
   async promptAndRunNotePathLocaleMigration(previousLocale, nextLocale, t) {
     if (typeof this.showConfirmModal !== "function") return null;
     const notePlan = planNotePathLocaleMigration(this.plugin.settings || {}, previousLocale, nextLocale);
-    const metaPlan = planMetaPathLocaleMigration(previousLocale, nextLocale);
+    const metaPlan = planMetaPathLocaleMigration(this.plugin.settings, previousLocale, nextLocale);
     const allItems = [
       ...(Array.isArray(notePlan && notePlan.items) ? notePlan.items.map((item) => ({ ...item, kind: "note" })) : []),
       ...(Array.isArray(metaPlan && metaPlan.items) ? metaPlan.items : []),
@@ -900,7 +900,10 @@ class BasicSettingsSectionMethods {
     if (!secondConfirm) return null;
 
     const noteResult = await applyNotePathLocaleMigration(this.app, this.plugin.settings, notePlan);
-    const metaResult = await applyMetaPathLocaleMigration(this.app, metaPlan);
+    if (!this.plugin.settings.metaPaths || typeof this.plugin.settings.metaPaths !== "object") {
+      this.plugin.settings.metaPaths = {};
+    }
+    const metaResult = await applyMetaPathLocaleMigration(this.app, this.plugin.settings, metaPlan);
     const result = mergeMigrationResults(noteResult, metaResult);
     this.plugin.__flownoteSkillCache = null;
     await this.plugin.saveSettings();
@@ -915,27 +918,46 @@ class BasicSettingsSectionMethods {
   }
 
   renderNotePathsSection(containerEl, t) {
-    const { getDefaultNotePathsByLocale } = require("../settings-utils");
+    const { getDefaultNotePathsByLocale, getDefaultMetaPathsByLocale, deriveMetaPathsFromRoot } = require("../settings-utils");
     const locale = typeof this.plugin.getEffectiveLocale === "function"
       ? this.plugin.getEffectiveLocale()
       : "zh-CN";
     const localeDefaults = getDefaultNotePathsByLocale(locale);
+    const metaLocaleDefaults = getDefaultMetaPathsByLocale(locale);
     if (!this.plugin.settings.notePaths) {
       this.plugin.settings.notePaths = { ...localeDefaults };
     }
+    if (!this.plugin.settings.metaPaths) {
+      this.plugin.settings.metaPaths = { ...metaLocaleDefaults };
+    }
     const paths = this.plugin.settings.notePaths;
+    const metaPaths = this.plugin.settings.metaPaths;
 
     const fields = [
+      ["captureRoot",     "捕获层根目录", "Capture root"],
+      ["inbox",           "收集箱", "Inbox"],
       ["dailyNotes",      "每日笔记", "Daily notes"],
+      ["highlights",      "划线笔记", "Highlights"],
       ["weeklyReviews",   "周记 / 周回顾", "Weekly review"],
       ["monthlyReviews",  "月记 / 月报", "Monthly review"],
       ["yearlyReviews",   "年记 / 年报", "Yearly review"],
+      ["cultivateRoot",   "培养层根目录", "Cultivate root"],
       ["permanentNotes",  "永久笔记", "Permanent notes"],
       ["topicNotes",      "主题笔记（📍）", "Topic notes (📍)"],
       ["literatureNotes", "文献笔记（《》）", "Literature notes (《》)"],
       ["domainPages",     "领域页所在层（🌱）", "Domain pages layer (🌱)"],
+      ["createRoot",      "创造层根目录", "Create root"],
       ["activeProjects",  "进行中项目", "Active projects"],
       ["archive",         "归档", "Archive"],
+    ];
+    const metaPreviewKeys = [
+      "templates",
+      "indexes",
+      "indexPages",
+      "systemDocs",
+      "homeViews",
+      "memory",
+      "legacyMemory",
     ];
 
     for (const [key, zhLabel, enLabel] of fields) {
@@ -954,13 +976,70 @@ class BasicSettingsSectionMethods {
             .setValue(paths[key] && paths[key] !== defaultValue ? paths[key] : "")
             .onChange(async (raw) => {
               const v = String(raw || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
+              const previousPath = String(paths[key] || defaultValue).replace(/\\/g, "/").replace(/\/+$/, "").trim() || defaultValue;
               paths[key] = v || defaultValue;
+              if (key === "dailyNotes") {
+                const nextPath = paths[key];
+                const mc = this.plugin.settings.mobileCapture && typeof this.plugin.settings.mobileCapture === "object"
+                  ? this.plugin.settings.mobileCapture
+                  : (this.plugin.settings.mobileCapture = {});
+                const oldDefault = localeDefaults.dailyNotes;
+                const currentMobilePath = String(mc.dailyNotePath || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
+                if (!currentMobilePath || currentMobilePath === previousPath || currentMobilePath === oldDefault) {
+                  mc.dailyNotePath = nextPath;
+                }
+              }
               await this.plugin.saveSettings();
               // Invalidate the agent's cached system prompt so the next
               // turn picks up the new path immediately.
               this.plugin.__flownoteSkillCache = null;
             });
         });
+    }
+
+    const renderDerivedMetaSummary = () => {
+      const existing = containerEl.querySelector(".oc-meta-paths-derived");
+      if (existing) existing.remove();
+      const latest = deriveMetaPathsFromRoot(metaPaths.metaRoot, metaLocaleDefaults);
+      Object.assign(metaPaths, latest);
+      const wrap = containerEl.createDiv({ cls: "oc-meta-paths-derived" });
+      wrap.createEl("div", {
+        cls: "setting-item-description",
+        text: t(
+          "settings.notePaths.metaDerivedDesc",
+          "Meta 内部目录会随根目录自动生成：{paths}",
+          {
+            paths: metaPreviewKeys
+              .map((key) => latest[key])
+              .filter(Boolean)
+              .join("、"),
+          },
+        ),
+      });
+    };
+
+    {
+      const defaultValue = metaLocaleDefaults.metaRoot;
+      new Setting(containerEl)
+        .setName(locale === "en" ? "Meta root" : "Meta 根目录")
+        .setDesc(t(
+          "settings.notePaths.fieldDesc",
+          "默认：{default}",
+          { default: defaultValue },
+        ))
+        .addText((text) => {
+          text
+            .setPlaceholder(defaultValue)
+            .setValue(metaPaths.metaRoot && metaPaths.metaRoot !== defaultValue ? metaPaths.metaRoot : "")
+            .onChange(async (raw) => {
+              const v = String(raw || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
+              Object.assign(metaPaths, deriveMetaPathsFromRoot(v || defaultValue, metaLocaleDefaults));
+              await this.plugin.saveSettings();
+              this.plugin.__flownoteSkillCache = null;
+              renderDerivedMetaSummary();
+            });
+        });
+      renderDerivedMetaSummary();
     }
   }
 
