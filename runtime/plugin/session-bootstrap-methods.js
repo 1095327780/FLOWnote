@@ -355,7 +355,7 @@ const sessionBootstrapMethods = {
         : (typeof this.getEffectiveLocale === "function" ? this.getEffectiveLocale() : "en"),
     ).trim() || "en";
     const syncResult = await this.syncBundledContent(vaultPath, {
-      force: Object.prototype.hasOwnProperty.call(options, "force") ? Boolean(options.force) : true,
+      force: Object.prototype.hasOwnProperty.call(options, "force") ? Boolean(options.force) : false,
       syncTemplates: Object.prototype.hasOwnProperty.call(options, "syncTemplates")
         ? Boolean(options.syncTemplates)
         : true,

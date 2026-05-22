@@ -140,7 +140,6 @@ async function syncBundledSkills(vaultPath, options = {}) {
           if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
           const backed = this.backupPathIfNeeded(destDir, backupRoot, path.join("skills", skillId));
           if (backed) backupCount += 1;
-          fs.rmSync(destDir, { recursive: true, force: true });
           replacedCount += 1;
         }
         runtime.copyDirectoryRecursive(srcDir, destDir);

@@ -190,6 +190,38 @@ test("syncBundledContent should install locale-specific SKILL.md and switch on l
   }
 });
 
+test("syncBundledContent should update existing bundled skill in place", async () => {
+  const fixture = createFixture();
+  try {
+    const first = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(first.errors.length, 0);
+
+    const skillDir = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test");
+    const skillFile = path.join(skillDir, "SKILL.md");
+    const userSidecar = path.join(skillDir, "user-sidecar.md");
+    writeFile(userSidecar, "user note\n");
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "SKILL.md"), "---\nname: ah-test\ndescription: updated\n---\n\n# Updated\n");
+
+    const second = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(second.errors.length, 0);
+    assert.equal(second.skills.replacedCount, 1);
+    assert.equal(fs.readFileSync(skillFile, "utf8").includes("# Updated"), true);
+    assert.equal(fs.readFileSync(userSidecar, "utf8"), "user note\n");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("syncBundledContent should localize references to canonical path by locale", async () => {
   const fixture = createFixture();
   try {

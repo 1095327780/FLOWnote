@@ -11,6 +11,11 @@
 //   <skillsDir>/<slug>/scripts/     ← optional
 
 const { parseFrontmatter, parseToolList } = require("../agent/skill-registry");
+const {
+  EMBEDDED_BUNDLED_SKILLS_FILES,
+  isBundledSkillSlug,
+  isBundledSkillConflictCopySlug,
+} = require("../bundled-skill-slugs");
 
 const REQUIRED_FRONTMATTER_FIELDS = ["name", "description"];
 const SKILL_FILE_NAME = "SKILL.md";
@@ -24,14 +29,6 @@ const SUPPLEMENTAL_SKILL_ROOTS = [
   PORTABLE_SKILL_ROOT,
 ];
 const SECRET_REF_RE = /\$(?:\{([A-Z][A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|KEY))\}|([A-Z][A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|KEY)))/g;
-const embeddedBundledSkillsModule = (() => {
-  try { return require("../generated/bundled-skills-embedded"); } catch { return {}; }
-})();
-const EMBEDDED_BUNDLED_SKILLS_FILES =
-  embeddedBundledSkillsModule && embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
-    ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
-    : {};
-let bundledSkillSlugCache = null;
 const TEXT_IMPORT_EXTENSIONS = new Set([
   "",
   ".c",
@@ -93,23 +90,6 @@ const TEXT_IMPORT_EXTENSIONS = new Set([
 function defaultSkillsRoot(plugin) {
   const root = String((plugin && plugin.settings && plugin.settings.skillsDir) || "").trim();
   return root || ".flownote/skills";
-}
-
-function getBundledSkillSlugs() {
-  if (bundledSkillSlugCache) return bundledSkillSlugCache;
-  const slugs = new Set();
-  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
-    if (!filePath.endsWith("/SKILL.md")) continue;
-    const slug = filePath.split("/")[0];
-    if (slug) slugs.add(slug);
-  }
-  bundledSkillSlugCache = slugs;
-  return bundledSkillSlugCache;
-}
-
-function isBundledSkillSlug(slug) {
-  const normalized = String(slug || "").trim();
-  return Boolean(normalized && getBundledSkillSlugs().has(normalized));
 }
 
 function assertCustomSkillSlug(slug) {
@@ -180,6 +160,7 @@ async function listSkillsUnderRoot(plugin, root) {
       const raw = await adapter.read(filePath);
       const { frontmatter, body } = parseFrontmatter(raw);
       const slug = folder.split("/").pop() || folder;
+      if (isBundledSkillConflictCopySlug(slug)) continue;
       const name = String(frontmatter.name || slug).trim();
       const description = String(frontmatter.description || "").trim();
       const bundled = isBundledSkillSlug(slug);
@@ -906,6 +887,7 @@ module.exports = {
   listSkillSecretRefs,
   extractSkillSecretRefsFromText,
   isBundledSkillSlug,
+  isBundledSkillConflictCopySlug,
   renderSkillMarkdown,
   validateSlug,
   sanitizeSkillSlug,

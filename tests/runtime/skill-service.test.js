@@ -87,3 +87,28 @@ test("SkillService should load supplemental Claude-style skill directories", () 
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+test("SkillService should ignore iCloud conflict copies of bundled skills", () => {
+  const fixture = createFixture();
+  try {
+    writeFile(
+      path.join(fixture.skillsRoot, "ah-capture", "SKILL.md"),
+      "---\nname: ah-capture\ndescription: builtin\n---\n\n# Builtin\n",
+    );
+    writeFile(
+      path.join(fixture.skillsRoot, "ah-capture(1)", "SKILL.md"),
+      "---\nname: ah-capture\ndescription: duplicate\n---\n\n# Duplicate\n",
+    );
+    writeFile(
+      path.join(fixture.skillsRoot, "my-custom(1)", "SKILL.md"),
+      "---\nname: custom\ndescription: custom copy\n---\n\n# Custom\n",
+    );
+
+    const service = new SkillService(fixture.vaultPath, { skillsDir: ".opencode/skills" });
+    const ids = service.loadSkills().map((item) => item.id).sort();
+
+    assert.deepEqual(ids, ["ah-capture", "my-custom(1)"]);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});

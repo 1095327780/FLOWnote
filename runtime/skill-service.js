@@ -2,6 +2,7 @@
 // Mobile's `require(...)` returns `{}` (not throw), so sniff before adopting.
 let fs = {};
 let path = { join: (...parts) => parts.filter(Boolean).join("/") };
+const { isBundledSkillConflictCopySlug } = require("./bundled-skill-slugs");
 try {
   const real = require("fs");
   if (real && typeof real.existsSync === "function") fs = real;
@@ -119,6 +120,7 @@ class SkillService {
       for (const e of entries) {
         if (!e || String(e.name || "").startsWith(".")) continue;
         if (!e.isDirectory()) continue;
+        if (isBundledSkillConflictCopySlug(e.name)) continue;
         if (seenIds.has(e.name)) continue;
         const file = path.join(root, e.name, "SKILL.md");
         if (!fs.existsSync(file)) continue;

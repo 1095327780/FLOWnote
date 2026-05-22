@@ -223,6 +223,19 @@ test("listSkillManagementEntries marks installed bundled skills read-only even i
   assert.equal(custom.bundled, false);
 });
 
+test("listSkillManagementEntries ignores iCloud conflict copies of bundled skills", async () => {
+  const adapter = makeAdapter({
+    ".flownote/skills/ah-capture/SKILL.md": `---\nname: ah-capture\ndescription: Builtin\n---\nbody`,
+    ".flownote/skills/ah-capture(1)/SKILL.md": `---\nname: ah-capture\ndescription: Duplicate\n---\nbody`,
+    ".flownote/skills/custom-copy(1)/SKILL.md": `---\nname: Custom copy\ndescription: User skill\n---\nbody`,
+  });
+  const plugin = makePlugin(adapter, ".flownote/skills");
+  const out = await listSkillManagementEntries(plugin);
+  assert.equal(out.some((s) => s.slug === "ah-capture"), true);
+  assert.equal(out.some((s) => s.slug === "ah-capture(1)"), false);
+  assert.equal(out.some((s) => s.slug === "custom-copy(1)"), true);
+});
+
 test("listSkillSecretRefs detects env-style API key placeholders across skill roots", async () => {
   const adapter = makeAdapter({
     ".flownote/skills/weread-skills/SKILL.md":
