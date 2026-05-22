@@ -69,6 +69,6 @@ test("i18n messages should include localized home view copy", () => {
   );
   assert.equal(
     I18N_MESSAGES.en && I18N_MESSAGES.en.view && I18N_MESSAGES.en.view.input.placeholder,
-    "Type your message...",
+    "Type a message, or type / to trigger skills...",
   );
 });

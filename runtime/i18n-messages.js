@@ -247,7 +247,7 @@ const I18N_MESSAGES = {
         current: "当前会话：{title}",
       },
       input: {
-        placeholder: "输入你的消息...",
+        placeholder: "输入消息，或输入 / 触发技能...",
       },
       settings: "设置",
       tools: {
@@ -679,7 +679,7 @@ const I18N_MESSAGES = {
         current: "Current session: {title}",
       },
       input: {
-        placeholder: "Type your message...",
+        placeholder: "Type a message, or type / to trigger skills...",
       },
       settings: "Settings",
       tools: {

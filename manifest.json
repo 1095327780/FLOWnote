@@ -1,7 +1,7 @@
 {
   "id": "flownote",
   "name": "FLOWnote",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "minAppVersion": "1.5.0",
   "description": "AI note workspace with dashboard home, quick capture, mobile shortcuts, built-in skills, and direct API workflows.",
   "author": "阿浩learn",

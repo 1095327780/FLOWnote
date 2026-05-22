@@ -400,7 +400,7 @@ function renderMain(main) {
 
   this.elements.input = inputWrapper.createEl("textarea", {
     cls: "oc-input",
-    attr: { placeholder: tr(this, "view.input.placeholder", "Type your message...") },
+    attr: { placeholder: tr(this, "view.input.placeholder", "Type a message, or type / to trigger skills...") },
   });
   this.elements.input.addEventListener("keydown", (ev) => {
     if (typeof this.handleLinkedContextInputKeydown === "function" && this.handleLinkedContextInputKeydown(ev)) {
