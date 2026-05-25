@@ -499,7 +499,21 @@ async function runSendPrompt(view, userText, options = {}) {
     const skillCommand = skillMatch && typeof skillMatch.command === "string"
       ? String(skillMatch.command).trim()
       : "";
-    const useNativeSkillCommand = Boolean(skillMatch && skillMatch.skill && skillCommand);
+    const skillForTurn = skillMatch && skillMatch.skill ? skillMatch.skill : null;
+    const directPreloadedSkill = agentMode === "direct" && skillForTurn
+      ? {
+          skill: String(
+            skillForTurn.name
+            || skillForTurn.id
+            || skillForTurn.slug
+            || skillCommand
+            || "",
+          ).replace(/^\/+/, "").trim(),
+          args: String(skillMatch.promptText || "").trim(),
+          command: skillCommand,
+        }
+      : null;
+    const useNativeSkillCommand = Boolean(skillForTurn && skillCommand && agentMode !== "direct");
     let prompt = "";
     if (useNativeSkillCommand) {
       let commandArgs = String(skillMatch.promptText || "").trim();
@@ -510,12 +524,17 @@ async function runSendPrompt(view, userText, options = {}) {
     } else {
       const rawPrompt = String(skillMatch && skillMatch.promptText ? skillMatch.promptText : userText);
       const skillService = view.plugin && view.plugin.skillService;
-      const skillForInject = skillMatch && skillMatch.skill;
+      const skillForInject = skillForTurn;
       // skillService is null on mobile (legacy fs-backed loader is desktop
       // only). When it's missing OR there's no matched skill, just send
       // the raw user prompt — the agent-side SkillRegistry handles skill
       // discovery via vault.adapter during the turn.
-      if (skillService && typeof skillService.buildInjectedPrompt === "function" && skillForInject) {
+      if (
+        !directPreloadedSkill
+        && skillService
+        && typeof skillService.buildInjectedPrompt === "function"
+        && skillForInject
+      ) {
         // Skill injection is always full-content. (The old "summary /
         // full / off" knob has been retired — summary mode tended to
         // produce incomplete results and "off" defeats the purpose.)
@@ -548,6 +567,7 @@ async function runSendPrompt(view, userText, options = {}) {
         sessionId,
         draftId,
         userText: prompt,
+        preloadedSkillCommand: directPreloadedSkill,
         handlers,
         signal: requestAbort.signal,
       });

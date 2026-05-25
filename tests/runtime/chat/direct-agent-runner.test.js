@@ -574,6 +574,68 @@ test("runDirectAgentTurn passes a system prompt containing currentDate + skill l
   assert.match(sys, /- ah-note:/);
 });
 
+test("runDirectAgentTurn preloads explicit slash skill instructions into the current direct turn", async () => {
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "/ah-capture hello" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  let capturedInput = null;
+  const provider = {
+    id: "mock",
+    displayName: "Mock",
+    spec: { id: "mock", displayName: "Mock", protocol: "anthropic-messages", models: [] },
+    userConfig: { providerId: "mock", mode: "api", apiKey: "k", model: "mock-1" },
+    async *createMessage(input) {
+      capturedInput = input;
+      yield ev.msgStart();
+      yield ev.textBlock(0);
+      yield ev.textDelta(0, "ok");
+      yield ev.blockStop(0);
+      yield ev.msgDelta("end_turn");
+      yield ev.msgStop();
+    },
+  };
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+  const skillRegistry = new SkillRegistry([
+    {
+      name: "ah-capture",
+      slug: "ah-capture",
+      description: "Capture text",
+      body: "CAPTURE BODY\nInput: $ARGUMENTS\nDaily path: {{notePaths.dailyNotes}}/{{YYYY-MM-DD}}.md\nTime: {{HH:mm}}",
+      argumentNames: [],
+      resourcePaths: [],
+      dirPath: "<test>/ah-capture",
+    },
+  ]);
+  const { handlers } = collectHandlerCalls();
+
+  await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "hello",
+    handlers,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+    skillRegistryOverride: skillRegistry,
+    preloadedSkillCommand: {
+      skill: "ah-capture",
+      args: "hello",
+      command: "/ah-capture",
+    },
+  });
+
+  assert.ok(capturedInput, "provider must have been called");
+  const currentTurn = capturedInput.messages[capturedInput.messages.length - 1];
+  const text = currentTurn.content.map((block) => block.text || "").join("\n");
+  assert.match(text, /preloaded skill: ah-capture/);
+  assert.match(text, /CAPTURE BODY/);
+  assert.match(text, /Input: hello/);
+  assert.match(text, /Daily path: 01-Capture\/Daily Notes\/\d{4}-\d{2}-\d{2}\.md/);
+  assert.match(text, /Time: \d{2}:\d{2}/);
+  assert.match(text, /Treat Arguments as the skill input|请把 Arguments 当作该技能的输入/);
+});
+
 // ---------------------------------------------------------------------------
 // ask_user handler bridge: chat-orchestrator-style onAskUser is invoked
 // ---------------------------------------------------------------------------

@@ -303,7 +303,8 @@ function renderSkillTemplateVariables(body, variables = {}) {
   if (typeof body !== "string" || !body) return typeof body === "string" ? body : "";
   let out = body;
   const replacements = buildTemplateTokenMap(variables);
-  out = out.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (match, key) => {
+  out = out.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawKey) => {
+    const key = String(rawKey || "").trim();
     return Object.prototype.hasOwnProperty.call(replacements, key) ? replacements[key] : match;
   });
 
@@ -351,7 +352,41 @@ function buildTemplateTokenMap(variables) {
     out.skillsDir = skillsDir;
     out.skillRoot = skillsDir;
   }
+  const now = normalizeTemplateNow(variables && variables.now);
+  const currentDate = String((variables && variables.currentDate) || formatTemplateDate(now)).trim();
+  const currentTime = String((variables && variables.currentTime) || formatTemplateTime(now)).trim();
+  const currentDateTime = String((variables && variables.currentDateTime) || `${currentDate} ${currentTime}`).trim();
+  out["YYYY-MM-DD"] = currentDate;
+  out["HH:mm"] = currentTime;
+  out["YYYY-MM-DD HH:mm"] = currentDateTime;
+  out.currentDate = currentDate;
+  out.currentTime = currentTime;
+  out.currentDateTime = currentDateTime;
   return out;
+}
+
+function normalizeTemplateNow(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number" || typeof value === "string") {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
+function formatTemplateDate(now) {
+  const d = normalizeTemplateNow(now);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatTemplateTime(now) {
+  const d = normalizeTemplateNow(now);
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
 }
 
 function normalizeReplacementPath(value) {

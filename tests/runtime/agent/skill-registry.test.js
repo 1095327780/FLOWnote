@@ -105,12 +105,14 @@ test("renderSkillTemplateVariables fills note path variables and replaces defaul
       "Daily: {{notePaths.dailyNotes}}",
       "Alias: {{dailyNotesPath}}",
       "Read 01-捕获层/每日笔记/{{YYYY-MM-DD}}.md",
+      "At {{HH:mm}} / {{YYYY-MM-DD HH:mm}}",
       "Keep {{unknown.token}}",
     ].join("\n"),
     {
       notePaths: {
         dailyNotes: "Daily/Journal",
       },
+      now: new Date(2026, 4, 15, 9, 7, 0),
       defaultPathReplacements: [
         { from: "01-捕获层/每日笔记", to: "Daily/Journal" },
       ],
@@ -118,7 +120,8 @@ test("renderSkillTemplateVariables fills note path variables and replaces defaul
   );
   assert.match(out, /Daily: Daily\/Journal/);
   assert.match(out, /Alias: Daily\/Journal/);
-  assert.match(out, /Read Daily\/Journal\/\{\{YYYY-MM-DD\}\}\.md/);
+  assert.match(out, /Read Daily\/Journal\/2026-05-15\.md/);
+  assert.match(out, /At 09:07 \/ 2026-05-15 09:07/);
   assert.match(out, /\{\{unknown\.token\}\}/);
 });
 

@@ -29,7 +29,16 @@ const { createWebRequestTool } = require("../agent/tools/web-request");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
-const { loadSkills, formatSkillListing, SkillRegistry, parseFrontmatter, buildSkillManifest, normalizeResourcePaths } = require("../agent/skill-registry");
+const {
+  loadSkills,
+  formatSkillListing,
+  SkillRegistry,
+  parseFrontmatter,
+  buildSkillManifest,
+  normalizeResourcePaths,
+  substituteArguments,
+  renderSkillTemplateVariables,
+} = require("../agent/skill-registry");
 
 // Embedded bundled-skills index — used as a fallback when the user's
 // vault doesn't have skill folders synced yet. The plugin bundle has
@@ -65,16 +74,19 @@ const SUPPLEMENTAL_SKILL_ROOTS = [
   ".claude/skills",
   "skills",
 ];
+const pad2 = (value) => String(value).padStart(2, "0");
 
 // Local-timezone YYYY-MM-DD. Local — not UTC — because the user's "today"
 // is whatever calendar date their wall clock shows. Used to anchor the
 // model when it writes daily notes, weekly reviews, etc.
 function getLocalISODate(now) {
   const d = now instanceof Date ? now : new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function getLocalHHmm(now) {
+  const d = now instanceof Date ? now : new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 const ZH_WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
@@ -99,6 +111,11 @@ function describeToday(now, locale = "zh-CN") {
   }
   const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
   return `${getLocalISODate(d)} (${weekday})`;
+}
+
+function describeCurrentDateTime(now, locale = "zh-CN") {
+  const d = now instanceof Date ? now : new Date();
+  return `${describeToday(d, locale)} ${getLocalHHmm(d)}`;
 }
 
 const BASE_SYSTEM_PROMPT = [
@@ -248,6 +265,13 @@ function buildSystemPrompt(skillManifests, opts) {
       `# currentDate\nToday is ${opts.todayLabel}. Resolve relative dates such as "today", "yesterday", and "this week" against this date.`,
     ));
   }
+  if (opts && opts.currentDateTimeLabel) {
+    ctxLines.push(runnerText(
+      locale,
+      `# currentDateTime\n当前本地时间是 ${opts.currentDateTimeLabel}。需要给捕获记录、更新时间、时间戳写入时，使用这里的真实本地时间，不要自行猜测。`,
+      `# currentDateTime\nThe current local time is ${opts.currentDateTimeLabel}. Use this real local time for capture entries, update times, and timestamps; do not guess.`,
+    ));
+  }
   if (opts && typeof opts.vaultName === "string" && opts.vaultName) {
     ctxLines.push(runnerText(
       locale,
@@ -316,7 +340,7 @@ function buildAnthropicHistory(storedMessages, draftId) {
  * @param {Object} [plugin]                 plugin settings for skill secrets
  * @returns {ToolRegistry}
  */
-function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin) {
+function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin, now = new Date()) {
   const registry = new ToolRegistry();
   if (app && app.vault) {
     registry.register(createVaultReadTool({ vault: app.vault, normalizePath }));
@@ -369,7 +393,7 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin) {
   }
   registry.register(createAskUserTool());
   if (skillRegistry && typeof skillRegistry.list === "function") {
-    const skillTemplateVariables = buildSkillTemplateVariables(plugin);
+    const skillTemplateVariables = buildSkillTemplateVariables(plugin, now);
     registry.register(createSkillInvokeTool({ skillRegistry, skillTemplateVariables }));
     if (app && app.vault) {
       registry.register(createSkillResourceReadTool({ skillRegistry, vault: app.vault, skillTemplateVariables }));
@@ -409,7 +433,7 @@ function resolveSkillRoots(plugin) {
     });
 }
 
-function buildSkillTemplateVariables(plugin) {
+function buildSkillTemplateVariables(plugin, now = new Date()) {
   const settings = plugin && plugin.settings && typeof plugin.settings === "object"
     ? plugin.settings
     : {};
@@ -430,7 +454,77 @@ function buildSkillTemplateVariables(plugin) {
       defaultPathReplacements.push({ from: defaults[key], to: metaPaths[key] });
     }
   }
-  return { notePaths, metaPaths, skillsDir, defaultPathReplacements };
+  const currentDate = getLocalISODate(now);
+  const currentTime = getLocalHHmm(now);
+  return { notePaths, metaPaths, skillsDir, defaultPathReplacements, now, currentDate, currentTime, currentDateTime: `${currentDate} ${currentTime}` };
+}
+
+function buildPreloadedSkillTurnText({
+  skillRegistry,
+  plugin,
+  preloadedSkillCommand,
+  userText,
+  locale,
+  now,
+}) {
+  if (!skillRegistry || typeof skillRegistry.get !== "function") return String(userText || "");
+  const requested = preloadedSkillCommand && typeof preloadedSkillCommand === "object"
+    ? preloadedSkillCommand
+    : null;
+  if (!requested) return String(userText || "");
+
+  const skillName = String(requested.skill || requested.command || "").replace(/^\/+/, "").trim();
+  if (!skillName) return String(userText || "");
+  const skill = skillRegistry.get(skillName);
+  if (!skill || skill.disableModelInvocation) return String(userText || "");
+
+  const args = String(
+    requested.args !== undefined && requested.args !== null
+      ? requested.args
+      : userText,
+  ).trim();
+  const skillTemplateVariables = buildSkillTemplateVariables(plugin, now);
+  let body = renderSkillTemplateVariables(skill.body, skillTemplateVariables);
+  body = substituteArguments(body, args, skill.argumentNames || []);
+
+  const resources = Array.isArray(skill.resourcePaths) ? skill.resourcePaths : [];
+  const resourceHint = resources.length
+    ? [
+        "Skill resources available via skill_resource_read:",
+        ...resources.slice(0, 40).map((path) => `  - ${path}`),
+        resources.length > 40 ? `  ... ${resources.length - 40} more` : "",
+      ].filter(Boolean).join("\n")
+    : "";
+  const command = String(requested.command || `/${skill.name}`).trim();
+  const preface = runnerText(
+    locale,
+    [
+      "FLOWnote 已按用户显式输入的 slash 命令预加载技能。",
+      `Original command: ${command}`,
+      args ? `Arguments: ${args}` : "",
+      "请把 Arguments 当作该技能的输入，按下面的技能说明执行，不要把它当作普通聊天请求。",
+    ].filter(Boolean).join("\n"),
+    [
+      "FLOWnote preloaded this skill because the user explicitly typed a slash command.",
+      `Original command: ${command}`,
+      args ? `Arguments: ${args}` : "",
+      "Treat Arguments as the skill input and follow the loaded skill instructions below. Do not answer it as ordinary chat.",
+    ].filter(Boolean).join("\n"),
+  );
+
+  return [
+    preface,
+    "",
+    `--- preloaded skill: ${skill.name} ---`,
+    `Source: ${skill.dirPath || skill.filePath || ""}`,
+    resourceHint,
+    "",
+    "--- skill body ---",
+    body,
+    "",
+    "--- user request ---",
+    String(userText || ""),
+  ].filter((part) => part !== "").join("\n");
 }
 
 /**
@@ -729,6 +823,7 @@ function renderBlocks(state) {
  * @param {Function}    [args.requestImpl]       injection for tests
  * @param {ToolRegistry} [args.toolRegistryOverride] injection for tests
  * @param {Function}    [args.runAgentLoopImpl]  injection for tests
+ * @param {Object}      [args.preloadedSkillCommand] explicit slash skill to preload in direct mode
  * @returns {Promise<{messageId: string, text: string, reasoning: string, meta: string, blocks: Array}>}
  */
 async function runDirectAgentTurn({
@@ -742,6 +837,7 @@ async function runDirectAgentTurn({
   toolRegistryOverride,
   runAgentLoopImpl,
   skillRegistryOverride,
+  preloadedSkillCommand,
 }) {
   const plugin = view.plugin;
   let settings = plugin.settings.agentProvider || {};
@@ -789,14 +885,20 @@ async function runDirectAgentTurn({
     normalizePath = undefined;
   }
   const skillRegistry = skillRegistryOverride || (await ensureSkillRegistry(plugin));
-  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry, plugin);
   const locale = getRunnerLocale(view);
+  const turnNow = new Date();
+  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry, plugin, turnNow);
   const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
     ? String(view.app.vault.getName() || "")
     : "";
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    { todayLabel: describeToday(new Date(), locale), vaultName, locale },
+    {
+      todayLabel: describeToday(turnNow, locale),
+      currentDateTimeLabel: describeCurrentDateTime(turnNow, locale),
+      vaultName,
+      locale,
+    },
   );
 
   // ---------------------------------------------------------------------
@@ -810,7 +912,15 @@ async function runDirectAgentTurn({
   // that's the raw version from the session store. Append the composed
   // userText (which the orchestrator built via composePromptWithLinkedFiles
   // and skill injection) as the actual current turn.
-  history.push({ role: "user", content: [{ type: "text", text: String(userText || "") }] });
+  const turnText = buildPreloadedSkillTurnText({
+    skillRegistry,
+    plugin,
+    preloadedSkillCommand,
+    userText,
+    locale,
+    now: turnNow,
+  });
+  history.push({ role: "user", content: [{ type: "text", text: turnText }] });
 
   // ---------------------------------------------------------------------
   // 4. Translate agent-loop events → chat handler calls
@@ -1077,15 +1187,8 @@ function composeMetaLine(provider, stopReason, state) {
 }
 
 module.exports = {
-  runDirectAgentTurn,
-  buildAnthropicHistory,
-  buildDefaultToolRegistry,
-  buildSystemPrompt,
-  ensureSkillRegistry,
-  invalidateSkillCache,
-  getLocalISODate,
-  describeToday,
-  DEFAULT_SKILL_ROOT,
-  SUPPLEMENTAL_SKILL_ROOTS,
+  runDirectAgentTurn, buildAnthropicHistory, buildDefaultToolRegistry, buildSystemPrompt,
+  ensureSkillRegistry, invalidateSkillCache, getLocalISODate, getLocalHHmm,
+  describeToday, describeCurrentDateTime, DEFAULT_SKILL_ROOT, SUPPLEMENTAL_SKILL_ROOTS,
   resolveSkillRoots,
 };

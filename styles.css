@@ -8100,7 +8100,7 @@ body.theme-light .oc-home-stat:where(*) {
 }
 
 /* Homepage refinement: cleaner cards and narrow-pane layout ---------- */
-.oc-home-card::before,
+.oc-home-card:where(*)::before,
 .oc-home-heatmap-card:where(*)::before {
   display: none;
 }
@@ -8526,7 +8526,6 @@ body.theme-light .oc-home-stat:where(*) {
   align-items: center;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none;
 }
 
 .is-mobile .oc-home-hero .oc-home-action-grid-hero::-webkit-scrollbar {

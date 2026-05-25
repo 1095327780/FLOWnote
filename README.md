@@ -20,9 +20,9 @@
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
 
-## 0.5.9 更新亮点
+## 0.5.10 更新亮点
 
-0.5.9 重点打磨 FLOWnote 的跨语言体验、本地模型支持和首页数据可信度，让英文用户可以完整使用，也让使用本机 Ollama 的用户更清楚地配置桌面端与移动端模型。
+0.5.10 重点打磨 FLOWnote 的跨语言体验、本地模型支持和首页数据可信度，让英文用户可以完整使用，也让使用本机 Ollama 的用户更清楚地配置桌面端与移动端模型。
 
 - **多语言体验补齐**：界面、设置项、命令提示、首页文案、内置 Skills 和核心模板进一步补齐英文版本；新英文库会使用英文目录，中文老用户升级后不会被自动改目录。
 - **语言切换更安全**：手动切换中英文时，会先询问是否重装对应语言的 Skills/模板，再二次确认是否迁移默认目录；自定义路径不会被自动移动或覆盖。
@@ -34,6 +34,7 @@
 - **首页目录入口重做**：快速入口改成目录看板，不再使用会误创建文件的目录链接，也不再把“收集箱”作为核心入口；捕获内容默认围绕每日笔记流转。
 - **内置 Skills 只读化**：FLOWnote 内置 Skills 由插件自动更新，设置页不能再编辑、删除或导入覆盖；用户仍可新增、导入和编辑自己的自定义 Skills。
 - **输入框提示优化**：聊天输入框新增“输入 / 触发技能”的提示，帮助新用户更容易发现内置技能命令。
+- **技能命令触发更稳定**：当用户直接输入 `/ah-capture`、`/ah-card` 等技能命令并附带内容时，FLOWnote 会优先加载对应 Skill 执行，不再容易被模型当成普通聊天回复。
 - **设置页更清爽**：笔记位置、Skills 管理、模板管理等低频配置默认折叠，需要时再展开，减少新用户第一次配置时的信息压力。
 
 ## 0.5.6 更新亮点
@@ -304,9 +305,9 @@ Language: [简体中文](#flownote) | **English**
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
 </p>
 
-## What's New in 0.5.9
+## What's New in 0.5.10
 
-0.5.9 focuses on language readiness, local-model support, and more trustworthy dashboard data. English users get a complete FLOWnote experience, while Ollama users get clearer desktop/mobile model configuration.
+0.5.10 focuses on language readiness, local-model support, and more trustworthy dashboard data. English users get a complete FLOWnote experience, while Ollama users get clearer desktop/mobile model configuration.
 
 - **Improved multilingual support**: UI text, settings, command hints, home content, bundled Skills, and core templates now have broader English coverage. New English vaults use English folders, while existing Chinese users are not migrated automatically.
 - **Safer language switching**: Switching between Chinese and English asks before reinstalling localized Skills/templates, then asks again before migrating default folders. Customized paths are not moved or overwritten.
@@ -318,6 +319,7 @@ Language: [简体中文](#flownote) | **English**
 - **Directory entry redesign**: The home quick-entry area is now a directory dashboard instead of folder wikilinks that can accidentally create files. Capture flow is centered on daily notes rather than an inbox concept.
 - **Bundled Skills are read-only**: FLOWnote bundled Skills are maintained by the plugin and cannot be edited, deleted, or overwritten from Settings. Users can still add, import, and edit their own custom Skills.
 - **Clearer composer hint**: The chat input now tells users they can type `/` to trigger Skills, making built-in commands easier to discover.
+- **More reliable Skill command routing**: When users type Skill commands such as `/ah-capture` or `/ah-card` with content, FLOWnote now preloads the matching Skill first instead of letting the model treat the message as ordinary chat.
 - **Cleaner settings page**: Note locations, Skills management, and template management are collapsed by default, reducing setup noise for new users.
 
 ## What's New in 0.5.6

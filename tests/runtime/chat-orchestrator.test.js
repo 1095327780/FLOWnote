@@ -2,13 +2,21 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
 
-function loadRunSendPromptWithMockObsidian() {
+function loadRunSendPromptWithMockObsidian(options = {}) {
   const originalLoad = Module._load;
 
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "obsidian") {
       return {
         Notice: class NoticeMock {},
+      };
+    }
+    if (
+      typeof options.runDirectAgentTurn === "function"
+      && (request === "./direct-agent-runner" || String(request).endsWith("/direct-agent-runner"))
+    ) {
+      return {
+        runDirectAgentTurn: options.runDirectAgentTurn,
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -265,6 +273,102 @@ test("runSendPrompt should keep explicit skill command for native command routin
     assert.match(sentPrompt, /^\/ah-init\b/);
     assert.match(sentPrompt, /请按技能执行当前任务/);
     assert.match(sentPrompt, /\[linked=Project\/alpha\.md\]/);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("runSendPrompt should preload explicit slash skills in direct mode instead of sending raw command", async () => {
+  const runtimeState = {
+    sessions: [{ id: "s1", title: "新会话", updatedAt: 0 }],
+    activeSessionId: "s1",
+    messagesBySession: { s1: [] },
+  };
+
+  let captured = null;
+  const fixture = loadRunSendPromptWithMockObsidian({
+    async runDirectAgentTurn(options) {
+      captured = options;
+      return { text: "done", reasoning: "", meta: "", blocks: [] };
+    },
+  });
+  const sessionStore = createSessionStore(runtimeState);
+
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { agentProvider: { mode: "direct" }, defaultModel: "" },
+      skillService: {
+        buildInjectedPrompt() {
+          throw new Error("direct explicit slash skills should be preloaded by the runner");
+        },
+      },
+      async createSession() {
+        throw new Error("createSession should not be called when active session exists");
+      },
+      async persistState() {},
+      markModelUnavailable() {
+        return { hidden: false };
+      },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "",
+    autoScrollEnabled: true,
+    silentAbortBudget: 0,
+    currentAbort: null,
+    linkedContextFiles: [],
+
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() {
+      return {
+        skill: { id: "ah-capture", name: "ah-capture" },
+        promptText: "读书笔记文本",
+        command: "/ah-capture",
+      };
+    },
+    getLinkedContextFilePaths() { return []; },
+    clearLinkedContextFiles() {},
+    composePromptWithLinkedFiles(prompt) {
+      return String(prompt || "");
+    },
+
+    render() {},
+    renderMessages() {},
+    renderSidebar() {},
+    refreshHistoryMenu() {},
+    scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {},
+    setBusy() {},
+    setRuntimeStatus() {},
+
+    findMessageRow() { return null; },
+    hasReasoningBlock() { return false; },
+    renderAssistantBlocks() {},
+    removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {},
+    renderInlineQuestionPanel() {},
+    showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; },
+    removePendingQuestionRequest() {},
+    hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {},
+    handleToastEvent() {},
+    isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "/ah-capture 读书笔记文本");
+
+    assert.ok(captured, "direct runner should be called");
+    assert.equal(captured.userText, "读书笔记文本");
+    assert.deepEqual(captured.preloadedSkillCommand, {
+      skill: "ah-capture",
+      args: "读书笔记文本",
+      command: "/ah-capture",
+    });
   } finally {
     fixture.restore();
   }
