@@ -10,6 +10,7 @@ const {
   isLikelyNodeScriptFile,
   isNodeScriptPath,
   isWindowsCommandWrapperPath,
+  isLikelyOpenCodeDesktopAppPath,
 } = require("../../runtime/executable-resolver");
 
 test("resolveWindowsWrapperNodeScript should parse npm cmd wrapper target", () => {
@@ -134,4 +135,49 @@ test("helper detectors should recognize script and wrapper paths", () => {
   assert.equal(isNodeScriptPath("C:\\\\a\\\\b\\\\opencode.exe"), false);
   assert.equal(isWindowsCommandWrapperPath("C:\\\\a\\\\b\\\\opencode.cmd"), true);
   assert.equal(isWindowsCommandWrapperPath("C:\\\\a\\\\b\\\\opencode.exe"), false);
+});
+
+test("ExecutableResolver should skip the Windows OpenCode Desktop app exe", async () => {
+  const platformDesc = Object.getOwnPropertyDescriptor(process, "platform");
+  if (!platformDesc) return;
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-desktop-"));
+  const desktopExe = path.join(tmpDir, "AppData", "Local", "Programs", "opencode", "opencode.exe");
+  const npmExe = path.join(tmpDir, "AppData", "Roaming", "npm", "node_modules", "opencode-ai", "bin", "opencode.exe");
+  fs.mkdirSync(path.dirname(desktopExe), { recursive: true });
+  fs.mkdirSync(path.dirname(npmExe), { recursive: true });
+  fs.writeFileSync(desktopExe, "desktop gui", "utf8");
+  fs.writeFileSync(npmExe, "cli", "utf8");
+
+  const prevAppData = process.env.APPDATA;
+  const prevLocalAppData = process.env.LOCALAPPDATA;
+  const prevUserProfile = process.env.USERPROFILE;
+  const prevPath = process.env.PATH;
+
+  try {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    process.env.APPDATA = path.join(tmpDir, "AppData", "Roaming");
+    process.env.LOCALAPPDATA = path.join(tmpDir, "AppData", "Local");
+    process.env.USERPROFILE = tmpDir;
+    process.env.PATH = "";
+
+    assert.equal(isLikelyOpenCodeDesktopAppPath(desktopExe), true);
+    const resolver = new ExecutableResolver();
+    const resolved = await resolver.resolve();
+
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.path, npmExe);
+    assert.equal(resolved.attempted.includes(desktopExe), false);
+  } finally {
+    Object.defineProperty(process, "platform", platformDesc);
+    if (prevAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = prevAppData;
+    if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = prevLocalAppData;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    if (prevPath === undefined) delete process.env.PATH;
+    else process.env.PATH = prevPath;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

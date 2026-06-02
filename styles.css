@@ -22,6 +22,9 @@
   --oc-surface-panel: color-mix(in srgb, var(--background-primary) 92%, rgb(var(--oc-brand-rgb)) 8%);
   --oc-shadow-soft: 0 10px 30px rgba(15, 35, 57, 0.12);
   --oc-shadow-faint: 0 2px 10px rgba(15, 35, 57, 0.08);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  color-scheme: light dark;
 }
 
 body.theme-light .oc-surface {
@@ -29,9 +32,31 @@ body.theme-light .oc-surface {
   --oc-shadow-faint: 0 2px 8px rgba(50, 90, 128, 0.1);
 }
 
+.theme-dark .oc-surface,
 body.theme-dark .oc-surface {
+  --background-primary: #1b2027;
+  --background-secondary: #151a21;
+  --background-secondary-alt: #202631;
+  --background-modifier-border: rgba(255, 255, 255, 0.12);
+  --background-modifier-border-hover: rgba(255, 255, 255, 0.2);
+  --background-modifier-hover: rgba(255, 255, 255, 0.08);
+  --text-normal: #e8edf4;
+  --text-muted: #a9b3c0;
+  --text-faint: #737d8b;
   --oc-border: color-mix(in srgb, var(--background-modifier-border) 86%, rgb(var(--oc-brand-rgb)) 14%);
   --oc-border-hover: color-mix(in srgb, var(--background-modifier-border-hover) 76%, rgb(var(--oc-brand-rgb)) 24%);
+  --oc-border-focus: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 60%, var(--background-modifier-border));
+  --oc-surface-raised: color-mix(in srgb, var(--background-primary) 92%, rgb(var(--oc-brand-rgb)) 8%);
+  --oc-surface-muted: color-mix(in srgb, var(--background-secondary) 84%, rgb(var(--oc-brand-rgb)) 16%);
+  --oc-surface-panel: color-mix(in srgb, var(--background-secondary) 88%, rgb(var(--oc-brand-rgb)) 12%);
+  --oc-shadow-soft: 0 14px 36px rgba(0, 0, 0, 0.32);
+  --oc-shadow-faint: 0 4px 18px rgba(0, 0, 0, 0.24);
+  color-scheme: dark;
+}
+
+.theme-light .oc-surface,
+body.theme-light .oc-surface {
+  color-scheme: light;
 }
 
 .oc-shell {
