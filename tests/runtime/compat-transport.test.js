@@ -1,11 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const { CompatTransport } = require("../../runtime/compat-transport");
 
-function createTransport() {
+function createTransport(options = {}) {
   return new CompatTransport({
-    vaultPath: "/vault",
+    vaultPath: options.vaultPath || "/vault",
     settings: {
       cliPath: "",
       autoDetectCli: true,
@@ -17,6 +20,50 @@ function createTransport() {
     logger: () => {},
   });
 }
+
+test("startWithFallbacks should reject relative vault paths before creating runtime home", async () => {
+  const relativeVault = `relative-${Date.now().toString(36)}`;
+  const transport = createTransport({ vaultPath: relativeVault });
+  let resolvedExecutable = false;
+  transport.resolveExecutable = async () => {
+    resolvedExecutable = true;
+    return { path: "/tmp/opencode", kind: "native" };
+  };
+
+  await assert.rejects(
+    () => transport.startWithFallbacks(),
+    /vault path must be absolute|Vault 路径必须是绝对路径/i,
+  );
+  assert.equal(resolvedExecutable, false);
+  assert.equal(fs.existsSync(path.join(process.cwd(), relativeVault, ".opencode-runtime")), false);
+});
+
+test("startWithFallbacks should accept non-ASCII absolute vault paths", async () => {
+  const vaultPath = fs.mkdtempSync(path.join(os.tmpdir(), "flownote-中文路径-"));
+  const transport = createTransport({ vaultPath });
+  let started = false;
+  let runtimeHome = "";
+  transport.resolveExecutable = async () => ({ path: "/tmp/opencode-cli.js", kind: "node-script" });
+  transport.buildLaunchAttempts = (_resolved, home) => {
+    runtimeHome = home;
+    return [{ label: "mock", command: "node", args: [], options: {}, mode: "native", directory: vaultPath }];
+  };
+  transport.startProcessWithAttempt = async () => {
+    started = true;
+    return "http://127.0.0.1:4096";
+  };
+  transport.notifyLaunchSuccess = () => {};
+
+  try {
+    const url = await transport.startWithFallbacks();
+    assert.equal(url, "http://127.0.0.1:4096");
+    assert.equal(started, true);
+    assert.equal(runtimeHome, path.join(vaultPath, ".opencode-runtime"));
+    assert.equal(fs.existsSync(runtimeHome), true);
+  } finally {
+    fs.rmSync(vaultPath, { recursive: true, force: true });
+  }
+});
 
 test("normalizeDirectoryForService should migrate legacy wsl workspace directory", () => {
   const transport = createTransport();

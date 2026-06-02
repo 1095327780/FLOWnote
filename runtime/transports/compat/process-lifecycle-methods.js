@@ -14,7 +14,52 @@ function createProcessLifecycleMethods(deps = {}) {
     }),
   } = deps;
 
+  function isAbsoluteFsPath(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return false;
+    if (/^[a-zA-Z]:[\\/]/.test(raw)) return true;
+    if (/^\\\\[^\\/]+[\\/][^\\/]+/.test(raw)) return true;
+    if (path && typeof path.isAbsolute === "function" && path.isAbsolute(raw)) return true;
+    return false;
+  }
+
   class ProcessLifecycleMethods {
+  validateVaultPathForRuntime() {
+    const vaultPath = String(this.vaultPath || "").trim();
+    if (!vaultPath) {
+      throw new Error(rt(
+        "无法启动 FLOWnote 服务：Vault 路径为空。",
+        "Failed to start FLOWnote service: vault path is empty.",
+      ));
+    }
+    if (!isAbsoluteFsPath(vaultPath)) {
+      throw new Error(rt(
+        "无法启动 FLOWnote 服务：Vault 路径必须是绝对路径，当前为 {vaultPath}",
+        "Failed to start FLOWnote service: vault path must be absolute, got {vaultPath}",
+        { vaultPath },
+      ));
+    }
+
+    let stat = null;
+    try {
+      stat = fs.statSync(vaultPath);
+    } catch (e) {
+      throw new Error(rt(
+        "无法启动 FLOWnote 服务：Vault 路径不存在或不可访问：{vaultPath}",
+        "Failed to start FLOWnote service: vault path does not exist or is inaccessible: {vaultPath}",
+        { vaultPath },
+      ));
+    }
+    if (!stat || typeof stat.isDirectory !== "function" || !stat.isDirectory()) {
+      throw new Error(rt(
+        "无法启动 FLOWnote 服务：Vault 路径不是文件夹：{vaultPath}",
+        "Failed to start FLOWnote service: vault path is not a directory: {vaultPath}",
+        { vaultPath },
+      ));
+    }
+    return vaultPath;
+  }
+
   async startProcessWithAttempt(attempt) {
     const launch = attempt && typeof attempt === "object" ? attempt : {};
     const label = String(launch.label || launch.command || "unknown");
@@ -165,7 +210,8 @@ function createProcessLifecycleMethods(deps = {}) {
   }
 
   async startWithFallbacks() {
-    const runtimeHome = path.join(this.vaultPath, this.settings.opencodeHomeDir || ".opencode-runtime");
+    const vaultPath = this.validateVaultPathForRuntime();
+    const runtimeHome = path.join(vaultPath, this.settings.opencodeHomeDir || ".opencode-runtime");
     fs.mkdirSync(runtimeHome, { recursive: true });
 
     const resolved = await this.resolveExecutable();
