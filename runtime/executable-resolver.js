@@ -248,9 +248,18 @@ function isWindowsWslPath(filePath) {
   return base === "wsl" || base === "wsl.exe";
 }
 
+function isLikelyOpenCodeDesktopAppPath(filePath) {
+  if (process.platform !== "win32") return false;
+  const normalized = String(filePath || "").replace(/\\/g, "/").toLowerCase();
+  if (!normalized) return false;
+  return /\/appdata\/local\/programs\/opencode\/opencode\.exe$/.test(normalized)
+    || normalized.includes("/appdata/roaming/ai.opencode.desktop/");
+}
+
 function windowsCandidatePriority(candidate) {
   const normalized = String(candidate || "").trim();
   const ext = path.extname(normalized).toLowerCase();
+  if (isLikelyOpenCodeDesktopAppPath(normalized)) return 500;
   if (isWindowsCommandWrapperPath(normalized)) return 50;
   if (ext === ".exe" || ext === ".com") return 0;
   if (isNodeScriptPath(normalized)) return 10;
@@ -269,16 +278,18 @@ class ExecutableResolver {
     const localAppData = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
     const userProfile = process.env.USERPROFILE || home;
     const npmNodeModules = path.join(appData, "npm", "node_modules");
+    const npmBin = path.join(appData, "npm");
 
     return [
       path.join(home, ".opencode", "bin", "opencode.exe"),
       path.join(userProfile, ".opencode", "bin", "opencode.exe"),
-      path.join(localAppData, "Programs", "opencode", "opencode.exe"),
       path.join(localAppData, "Microsoft", "WinGet", "Links", "opencode.exe"),
       path.join(localAppData, "Microsoft", "WinGet", "Links", "opencode"),
+      path.join(npmBin, "opencode.exe"),
       path.join(npmNodeModules, "@opencode-ai", "opencode", "dist", "cli.js"),
       path.join(npmNodeModules, "@opencode-ai", "opencode", "cli.js"),
       path.join(npmNodeModules, "@opencode-ai", "opencode", "bin", "opencode.js"),
+      path.join(npmNodeModules, "opencode-ai", "bin", "opencode.exe"),
       path.join(npmNodeModules, "opencode-ai", "bin", "opencode"),
       path.join(npmNodeModules, "opencode", "dist", "cli.js"),
       path.join(npmNodeModules, "opencode", "cli.js"),
@@ -348,6 +359,7 @@ class ExecutableResolver {
     for (const c of ordered) {
       attempted.push(c);
       if (process.platform === "win32" && isWindowsWslPath(c)) continue;
+      if (process.platform === "win32" && isLikelyOpenCodeDesktopAppPath(c)) continue;
       if (!fs.existsSync(c)) continue;
       if (!isExecutable(c)) continue;
 
@@ -401,6 +413,7 @@ module.exports = {
   isNodeScriptPath,
   isLikelyNodeScriptFile,
   isWindowsCommandWrapperPath,
+  isLikelyOpenCodeDesktopAppPath,
   resolveWindowsWrapperNodeScript,
   resolveNodeExecutablePath,
 };
