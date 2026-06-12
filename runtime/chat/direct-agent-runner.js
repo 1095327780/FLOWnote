@@ -29,6 +29,7 @@ const { createWebRequestTool } = require("../agent/tools/web-request");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
+const { shouldBlockUnbackedFileMutationClaim, unbackedFileMutationWarning } = require("./file-mutation-claim-guard");
 const {
   loadSkills,
   formatSkillListing,
@@ -1155,6 +1156,10 @@ async function runDirectAgentTurn({
         "• Switch to a model with a larger output limit.\n" +
         "• Split the task into smaller steps, then write each part back separately.",
     );
+  }
+  if (shouldBlockUnbackedFileMutationClaim({ text: finalText, toolUses: state.toolUses })) {
+    log("turn guard: blocked unbacked file mutation claim");
+    finalText = unbackedFileMutationWarning(locale);
   }
 
   const finalBlocks = renderBlocks(state);

@@ -156,6 +156,68 @@ test("runDirectAgentTurn streams text through onToken and returns final response
   assert.equal(out.tokens[out.tokens.length - 1], "Hello world");
 });
 
+test("runDirectAgentTurn blocks a completed rename claim when no mutation tool ran", async () => {
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "把 old.md 改名为 new.md" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  const provider = makeFakeProvider([[
+    ev.msgStart(),
+    ev.textBlock(0),
+    ev.textDelta(0, "已经把 old.md 重命名为 new.md。"),
+    ev.blockStop(0),
+    ev.msgDelta("end_turn"),
+    ev.msgStop(),
+  ]]);
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+
+  const { handlers } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "把 old.md 改名为 new.md",
+    handlers,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+  });
+
+  assert.match(response.text, /no files were actually changed/i);
+  assert.doesNotMatch(response.text, /old\.md 重命名为 new\.md/);
+  const streamBlock = response.blocks.find((b) => b.type === "stream-text");
+  assert.match(streamBlock.text, /no files were actually changed/i);
+});
+
+test("runDirectAgentTurn allows rename instructions that do not claim completion", async () => {
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "怎么重命名文件？" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  const provider = makeFakeProvider([[
+    ev.msgStart(),
+    ev.textBlock(0),
+    ev.textDelta(0, "You can rename a note by giving me the current and target vault-relative paths."),
+    ev.blockStop(0),
+    ev.msgDelta("end_turn"),
+    ev.msgStop(),
+  ]]);
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+
+  const { handlers } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "怎么重命名文件？",
+    handlers,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+  });
+
+  assert.match(response.text, /current and target vault-relative paths/);
+  assert.doesNotMatch(response.text, /no files were actually changed/i);
+});
+
 // ---------------------------------------------------------------------------
 // runDirectAgentTurn — single tool use round trip
 // ---------------------------------------------------------------------------
