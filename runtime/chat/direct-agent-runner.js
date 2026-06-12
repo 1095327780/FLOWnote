@@ -47,6 +47,7 @@ const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
+const { getIntlLocale, normalizeSupportedLocale } = require("../i18n-locale-utils");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
@@ -69,9 +70,29 @@ function getLocalISODate(now) {
 
 const ZH_WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
-function describeToday(now) {
+function describeToday(now, locale = "zh-CN") {
   const d = now instanceof Date ? now : new Date();
-  return `${getLocalISODate(d)} (星期${ZH_WEEKDAY[d.getDay()]})`;
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  const weekday = normalizedLocale === "zh-CN"
+    ? `星期${ZH_WEEKDAY[d.getDay()]}`
+    : d.toLocaleDateString(getIntlLocale(normalizedLocale), { weekday: "long" });
+  return `${getLocalISODate(d)} (${weekday})`;
+}
+
+function describeOutputLanguage(locale) {
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  if (normalizedLocale === "zh-CN") return { label: "Simplified Chinese", instruction: "用简体中文输出。" };
+  if (normalizedLocale === "ru") {
+    return {
+      label: "Russian",
+      instruction: [
+        "Reply and write user-facing note content in Russian unless the user explicitly asks for another language.",
+        "Bundled skill instructions may be written in Chinese or English; follow their workflow, but translate user-facing output.",
+        "Do not translate file paths, tool names, code, frontmatter keys, or quoted source text unless the user asks.",
+      ].join(" "),
+    };
+  }
+  return { label: "English", instruction: "Reply and write user-facing note content in English unless the user explicitly asks for another language." };
 }
 
 const BASE_SYSTEM_PROMPT = [
@@ -215,6 +236,10 @@ function buildSystemPrompt(skillManifests, opts) {
   const ctxLines = [];
   if (opts && opts.todayLabel) {
     ctxLines.push(`# currentDate\n今天是 ${opts.todayLabel}。涉及"今天 / 昨天 / 本周"等相对时间时，以这个日期为准。`);
+  }
+  if (opts && opts.outputLocale) {
+    const outputLanguage = describeOutputLanguage(opts.outputLocale);
+    ctxLines.push(`# outputLanguage\nUI language: ${outputLanguage.label}. ${outputLanguage.instruction}`);
   }
   if (opts && typeof opts.vaultName === "string" && opts.vaultName) {
     ctxLines.push(`# vault\n当前 Obsidian 库名：${opts.vaultName}`);
@@ -751,9 +776,10 @@ async function runDirectAgentTurn({
     ? String(view.app.vault.getName() || "")
     : "";
   const notePaths = (plugin.settings && plugin.settings.notePaths) || null;
+  const locale = typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : "zh-CN";
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    { todayLabel: describeToday(), vaultName, notePaths },
+    { todayLabel: describeToday(undefined, locale), outputLocale: locale, vaultName, notePaths },
   );
 
   // ---------------------------------------------------------------------

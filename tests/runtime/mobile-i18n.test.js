@@ -53,6 +53,9 @@ test("mobile ai prompt should switch by locale", () => {
     assert.match(zhPrompt, /不要新增原文没有的观点/);
     assert.match(enPrompt, /voice-transcript cleanup assistant/i);
     assert.match(enPrompt, /speech-recognition mistakes/i);
+    const ruPrompt = fixture.getCaptureSystemPrompt("ru-RU");
+    assert.match(ruPrompt, /голосовой расшифровки/i);
+    assert.match(ruPrompt, /ошибки распознавания речи/i);
   } finally {
     fixture.restore();
   }
@@ -63,8 +66,10 @@ test("daily note template should switch by locale", () => {
   try {
     const zhTpl = fixture.getDailyNoteTemplate("zh-CN");
     const enTpl = fixture.getDailyNoteTemplate("en-US");
+    const ruTpl = fixture.getDailyNoteTemplate("ru-RU");
     assert.match(zhTpl, /## 📝 记录/);
     assert.match(enTpl, /## 📝 Records/);
+    assert.match(ruTpl, /## 📝 Записи/);
   } finally {
     fixture.restore();
   }
@@ -74,6 +79,7 @@ test("summary fallback should switch by locale", () => {
   const fixture = loadMobileModulesWithMockObsidian();
   try {
     assert.equal(fixture.summaryFallback("zh-CN"), "暂无法解析，已保留原始链接");
+    assert.equal(fixture.summaryFallback("ru-RU"), "Не удалось обработать, исходная ссылка сохранена");
     assert.equal(fixture.summaryFallback("fr-FR"), "Unable to resolve, original URL preserved");
   } finally {
     fixture.restore();
@@ -89,6 +95,8 @@ test("formatCaptureEntry should parse legacy and english URL placeholder", () =>
     const enEntry = fixture.formatCaptureEntry("10:00", enText, { locale: "en" });
     assert.match(zhEntry, /链接摘要/);
     assert.match(enEntry, /URL Summary/);
+    const ruEntry = fixture.formatCaptureEntry("10:00", enText, { locale: "ru-RU" });
+    assert.match(ruEntry, /Краткое описание URL/);
   } finally {
     fixture.restore();
   }

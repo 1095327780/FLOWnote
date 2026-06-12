@@ -1,21 +1,41 @@
-const SUPPORTED_UI_LOCALES = ["zh-CN", "en"];
+const SUPPORTED_UI_LOCALES = ["zh-CN", "en", "ru"];
 const DEFAULT_UI_LOCALE = "en";
 const UI_LANGUAGE_OPTIONS = ["auto", ...SUPPORTED_UI_LOCALES];
+const INTL_LOCALE_BY_UI_LOCALE = {
+  "zh-CN": "zh-CN",
+  en: "en-US",
+  ru: "ru-RU",
+};
+
+function normalizeLocaleInput(value) {
+  return String(value || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+function normalizeSupportedLocaleToken(raw) {
+  if (!raw) return "";
+  for (const loc of SUPPORTED_UI_LOCALES) {
+    if (raw === loc.toLowerCase()) return loc;
+  }
+  for (const loc of SUPPORTED_UI_LOCALES) {
+    const base = loc.toLowerCase().split("-")[0];
+    if (raw === base || raw.startsWith(`${base}-`)) return loc;
+  }
+  return "";
+}
 
 function normalizeUiLanguage(value) {
-  const raw = String(value || "").trim().toLowerCase();
+  const raw = normalizeLocaleInput(value);
   if (raw === "auto") return "auto";
-  if (raw === "zh-cn" || raw === "zh_cn" || raw === "zh") return "zh-CN";
-  if (raw.startsWith("en")) return "en";
-  return "auto";
+  return normalizeSupportedLocaleToken(raw) || "auto";
 }
 
 function normalizeSupportedLocale(value, fallback = DEFAULT_UI_LOCALE) {
-  const raw = String(value || "").trim().toLowerCase();
-  if (raw === "zh-cn" || raw === "zh_cn" || raw === "zh" || raw.startsWith("zh-")) return "zh-CN";
-  if (raw.startsWith("en")) return "en";
+  const raw = normalizeLocaleInput(value);
+  const normalized = normalizeSupportedLocaleToken(raw);
+  if (normalized) return normalized;
   if (fallback === null || fallback === undefined) return DEFAULT_UI_LOCALE;
-  return String(fallback);
+  const fallbackNormalized = normalizeSupportedLocaleToken(normalizeLocaleInput(fallback));
+  return fallbackNormalized || String(fallback);
 }
 
 function resolveLocaleFromNavigator(navigatorLike, fallback = DEFAULT_UI_LOCALE) {
@@ -57,6 +77,18 @@ function interpolateTemplate(message, params = {}) {
   });
 }
 
+function getIntlLocale(locale, fallback = DEFAULT_UI_LOCALE) {
+  const normalized = normalizeSupportedLocale(locale, fallback);
+  return INTL_LOCALE_BY_UI_LOCALE[normalized] || INTL_LOCALE_BY_UI_LOCALE[DEFAULT_UI_LOCALE];
+}
+
+function getLocalizedMarkdownTokenOrder(locale, fallback = DEFAULT_UI_LOCALE) {
+  const normalized = normalizeSupportedLocale(locale, fallback);
+  if (normalized === "zh-CN") return ["zh-CN", "base", "en"];
+  if (normalized === "en") return ["en", "base", "zh-CN"];
+  return [normalized, "base", "en", "zh-CN"];
+}
+
 function createTranslator(options = {}) {
   const messages = options.messages && typeof options.messages === "object" ? options.messages : {};
   const getLocale = typeof options.getLocale === "function"
@@ -86,5 +118,7 @@ module.exports = {
   resolveLocaleFromNavigator,
   getMessageByPath,
   interpolateTemplate,
+  getIntlLocale,
+  getLocalizedMarkdownTokenOrder,
   createTranslator,
 };

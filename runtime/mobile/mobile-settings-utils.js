@@ -128,12 +128,16 @@ function normalizeLinkResolver(raw) {
 
 function defaultDailyNotePathByLocale(locale) {
   const normalized = normalizeSupportedLocale(locale, DEFAULT_UI_LOCALE);
-  return normalized === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes";
+  if (normalized === "zh-CN") return "01-捕获层/每日笔记";
+  if (normalized === "ru") return "01-Capture/Daily Notes";
+  return "01-Capture/Daily Notes";
 }
 
 function defaultIdeaSectionHeaderByLocale(locale) {
   const normalized = normalizeSupportedLocale(locale, DEFAULT_UI_LOCALE);
-  return normalized === "zh-CN" ? "## 📝 记录" : "## 📝 Records";
+  if (normalized === "zh-CN") return "## 📝 记录";
+  if (normalized === "ru") return "## 📝 Записи";
+  return "## 📝 Records";
 }
 
 function normalizeMobileSettings(raw) {

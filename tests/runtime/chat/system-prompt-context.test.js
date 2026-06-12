@@ -24,6 +24,12 @@ test("describeToday appends the Chinese weekday label", () => {
   assert.equal(describeToday(d), "2026-05-15 (星期五)");
 });
 
+test("describeToday should localize weekday label", () => {
+  const d = new Date(2026, 4, 15, 12, 0, 0);
+  assert.equal(describeToday(d, "en-US"), "2026-05-15 (Friday)");
+  assert.equal(describeToday(d, "ru-RU"), "2026-05-15 (пятница)");
+});
+
 test("buildSystemPrompt omits the Context block when no opts given", () => {
   const out = buildSystemPrompt([]);
   assert.doesNotMatch(out, /Context:/);
@@ -34,6 +40,14 @@ test("buildSystemPrompt includes currentDate when opts.todayLabel is set", () =>
   assert.match(out, /# currentDate/);
   assert.match(out, /2026-05-15 \(星期五\)/);
   assert.match(out, /相对时间/);
+});
+
+test("buildSystemPrompt includes Russian output-language instruction", () => {
+  const out = buildSystemPrompt([], { outputLocale: "ru-RU" });
+  assert.match(out, /# outputLanguage/);
+  assert.match(out, /UI language: Russian/);
+  assert.match(out, /Reply and write user-facing note content in Russian/);
+  assert.match(out, /Bundled skill instructions may be written in Chinese or English/);
 });
 
 test("buildSystemPrompt includes vault block when opts.vaultName is set", () => {

@@ -175,6 +175,16 @@ test("findOrCreateDailyNote should fallback to built-in template when skill temp
   }
 });
 
+test("renderDailyNoteTemplate should localize weekday placeholders for Russian", () => {
+  const fixture = loadDailyNoteServiceWithMockObsidian();
+  try {
+    const output = fixture.renderDailyNoteTemplate("# YYYY-MM-DD Weekday", "2026-03-05", "ru-RU");
+    assert.equal(output, "# 2026-03-05 четверг");
+  } finally {
+    fixture.restore();
+  }
+});
+
 test("appendToIdeaSection should avoid injecting duplicate record header for legacy target header", async () => {
   const fixture = loadDailyNoteServiceWithMockObsidian();
   try {

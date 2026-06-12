@@ -69,14 +69,37 @@ const LOCALE_MESSAGES = {
       untitled: "(Untitled)",
     },
   },
+  ru: {
+    errors: {
+      resolverBodyEmpty: "Тело ответа пустое",
+      resolverUnsupported: "Неподдерживаемый сервис разбора: {providerId}",
+      resolverInvalidJson: "Ответ не является корректным JSON",
+      resolverFailed: "Разбор не удался",
+      resolverFailedGeneral: "Не удалось разобрать URL",
+      resolverRateLimited: "Превышен лимит запросов",
+      resolverTimeout: "Сервис разбора не ответил вовремя",
+      resolverUnavailable: "Сервис разбора недоступен",
+    },
+    url: {
+      statusProviderMissing: "⚠️ Нет ключа {providerName}, переключаюсь на AI",
+      statusNoResolverOrAi: "⚠️ Разбор URL и AI не настроены, сохраняю обычный текст",
+      statusAiSummary: "🤖 Создаю краткое описание URL...",
+      statusFallbackAi: "⚠️ {hint}, переключаюсь на AI",
+      statusFallbackPlain: "⚠️ {hint}, сохраняю обычный текст",
+      statusResolverNoAi: "⚠️ URL обработан, но AI не настроен; сохраняю обычный текст",
+      statusAiSummaryFailed: "⚠️ AI не смог создать описание, сохраняю обычный текст",
+      statusPartialResolverFailed: "⚠️ Часть URL не обработана, применен частичный результат",
+    },
+    parser: {
+      summaryFallback: "Не удалось обработать, исходная ссылка сохранена",
+      untitled: "(Без названия)",
+    },
+  },
 };
 
-function isZh(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN";
-}
-
 function resolveLocalePack(locale) {
-  return isZh(locale) ? LOCALE_MESSAGES["zh-CN"] : LOCALE_MESSAGES.en;
+  const normalized = normalizeSupportedLocale(locale, "en");
+  return LOCALE_MESSAGES[normalized] || LOCALE_MESSAGES.en;
 }
 
 function interpolate(message, params = {}) {
@@ -434,8 +457,12 @@ async function enrichUrlsWithContextByAi(text, urlContents, mcSettings, options 
 
   const context = urlContents
     .map((item) => {
-      if (isZh(locale)) {
+      const normalized = normalizeSupportedLocale(locale, "en");
+      if (normalized === "zh-CN") {
         return `--- URL: ${item.url} ---\n标题: ${item.title || t(locale, "parser.untitled")}\n内容摘要:\n${item.body}`;
+      }
+      if (normalized === "ru") {
+        return `--- URL: ${item.url} ---\nЗаголовок: ${item.title || t(locale, "parser.untitled")}\nКраткое содержание:\n${item.body}`;
       }
       return `--- URL: ${item.url} ---\nTitle: ${item.title || t(locale, "parser.untitled")}\nSummary:\n${item.body}`;
     })

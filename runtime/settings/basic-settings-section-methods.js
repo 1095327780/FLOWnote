@@ -1,6 +1,6 @@
 const { Setting, Notice, Platform = {} } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
-const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { UI_LANGUAGE_OPTIONS, normalizeSupportedLocale } = require("../i18n-locale-utils");
 const { bindDropdownChange } = require("./component-value-utils");
 const {
   LINK_RESOLVER_DEFAULTS,
@@ -153,11 +153,24 @@ class BasicSettingsSectionMethods {
           .setDesc(t("settings.language.desc",
             "默认跟随设备语言。切换后界面即时刷新；命令名与 Ribbon 提示重载后生效。"))
           .addDropdown((dropdown) => {
-            dropdown
-              .addOption("auto", t("settings.language.optionAuto", "跟随系统（推荐）"))
-              .addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"))
-              .addOption("en", t("settings.language.optionEn", "English"))
-              .setValue(String(this.plugin.settings.uiLanguage || "auto"));
+            for (const option of UI_LANGUAGE_OPTIONS) {
+              const key = option === "zh-CN"
+                ? "optionZhCN"
+                : option === "en"
+                  ? "optionEn"
+                  : option === "ru"
+                    ? "optionRu"
+                    : "optionAuto";
+              const fallback = option === "zh-CN"
+                ? "简体中文"
+                : option === "en"
+                  ? "English"
+                  : option === "ru"
+                    ? "Русский"
+                    : "跟随系统（推荐）";
+              dropdown.addOption(option, t(`settings.language.${key}`, fallback));
+            }
+            dropdown.setValue(String(this.plugin.settings.uiLanguage || "auto"));
             bindDropdownChange(dropdown, async (selectedLanguage) => {
                 const previousLocale = normalizeSupportedLocale(
                   typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
@@ -178,7 +191,9 @@ class BasicSettingsSectionMethods {
                 if (previousLocale === nextLocale) return;
                 const languageLabel = nextLocale === "zh-CN"
                   ? t("settings.language.optionZhCN", "简体中文")
-                  : t("settings.language.optionEn", "English");
+                  : nextLocale === "ru"
+                    ? t("settings.language.optionRu", "Русский")
+                    : t("settings.language.optionEn", "English");
                 if (typeof this.showConfirmModal !== "function") return;
                 const shouldReinstall = await this.showConfirmModal({
                   title: t("settings.language.reinstallPromptTitle", "重装对应语言 Skills？"),
@@ -867,10 +882,10 @@ class BasicSettingsSectionMethods {
       .setName(t("mobile.settings.headerName", "记录区标题"))
       .addText((text) => {
         text
-          .setPlaceholder(locale === "zh-CN" ? "## 记录" : "## Records")
+          .setPlaceholder(locale === "zh-CN" ? "## 记录" : locale === "ru" ? "## Записи" : "## Records")
           .setValue(mc.ideaSectionHeader)
           .onChange(async (v) => {
-            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "## 记录" : "## Records");
+            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "## 记录" : locale === "ru" ? "## Записи" : "## Records");
             await this.plugin.saveSettings();
           });
       });

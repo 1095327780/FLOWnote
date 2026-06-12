@@ -1,4 +1,5 @@
 const { Notice, setIcon } = require("obsidian");
+const { getIntlLocale, normalizeSupportedLocale } = require("../../i18n-locale-utils");
 const { tr, normalizeLinkedContextPath } = require("./shared-utils");
 const {
   findOrCreateTodayDailyNote,
@@ -10,23 +11,32 @@ const {
   toggleTaskInFile,
 } = require("../../home/home-service");
 
-function formatRelativeTime(timestamp) {
+function formatRelativeTime(timestamp, locale = "zh-CN") {
   const value = Number(timestamp || 0);
   if (!value) return "";
   const diff = Date.now() - value;
-  if (diff < 60 * 1000) return "刚刚";
-  if (diff < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 60000))}分钟前`;
-  if (diff < 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 3600000))}小时前`;
-  if (diff < 7 * 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 86400000))}天前`;
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  if (normalizedLocale === "zh-CN") {
+    if (diff < 60 * 1000) return "刚刚";
+    if (diff < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 60000))}分钟前`;
+    if (diff < 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 3600000))}小时前`;
+    if (diff < 7 * 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 86400000))}天前`;
+  } else {
+    const rtf = new Intl.RelativeTimeFormat(getIntlLocale(normalizedLocale), { numeric: "auto" });
+    if (diff < 60 * 1000) return rtf.format(0, "second");
+    if (diff < 60 * 60 * 1000) return rtf.format(-Math.max(1, Math.floor(diff / 60000)), "minute");
+    if (diff < 24 * 60 * 60 * 1000) return rtf.format(-Math.max(1, Math.floor(diff / 3600000)), "hour");
+    if (diff < 7 * 24 * 60 * 60 * 1000) return rtf.format(-Math.max(1, Math.floor(diff / 86400000)), "day");
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString(getIntlLocale(normalizedLocale), { month: "short", day: "numeric" });
 }
 
-function formatWeekday(dateStr) {
+function formatWeekday(dateStr, locale = "zh-CN") {
   const date = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { weekday: "short" });
+  return date.toLocaleDateString(getIntlLocale(locale), { weekday: "short" });
 }
 
 function setButtonIcon(button, icon, fallback = "") {
@@ -518,13 +528,16 @@ function renderActivityHeatmap(view, parent, heatmap) {
 }
 
 function renderRecentItem(view, parent, item) {
+  const locale = view && view.plugin && typeof view.plugin.getEffectiveLocale === "function"
+    ? view.plugin.getEffectiveLocale()
+    : "zh-CN";
   const row = parent.createDiv({ cls: "oc-home-recent-item" });
   const icon = row.createDiv({ cls: "oc-home-recent-icon" });
   const typeIcon = item.type === "项目" ? "folder-kanban" : item.type === "永久笔记" ? "badge-check" : "file-text";
   setButtonIcon(icon, typeIcon);
   const body = row.createDiv({ cls: "oc-home-recent-body" });
   body.createDiv({ cls: "oc-home-recent-title", text: item.title || item.path });
-  body.createDiv({ cls: "oc-home-recent-meta", text: `${item.type} · ${formatRelativeTime(item.mtime)}` });
+  body.createDiv({ cls: "oc-home-recent-meta", text: `${item.type} · ${formatRelativeTime(item.mtime, locale)}` });
   row.addEventListener("click", () => openVaultFile(view, item.file));
 }
 
@@ -560,6 +573,9 @@ function renderHomeError(view, container, error) {
 
 function renderHomeDashboard(container) {
   const currentRun = Date.now();
+  const locale = this.plugin && typeof this.plugin.getEffectiveLocale === "function"
+    ? this.plugin.getEffectiveLocale()
+    : "zh-CN";
   this.homeRenderRun = currentRun;
   const heatmapState = currentHeatmapState(this);
   const heatmapRange = heatmapRangeFromState(heatmapState);
@@ -590,7 +606,7 @@ function renderHomeDashboard(container) {
       const heroPanel = hero.createDiv({ cls: "oc-home-hero-panel" });
       const datePanel = heroPanel.createDiv({ cls: "oc-home-hero-date" });
       datePanel.createSpan({ cls: "oc-home-hero-date-main", text: today.dateStr });
-      const weekday = formatWeekday(today.dateStr);
+      const weekday = formatWeekday(today.dateStr, locale);
       if (weekday) datePanel.createSpan({ cls: "oc-home-hero-date-sub", text: weekday });
       datePanel.createSpan({ cls: `oc-home-hero-date-pill ${today.exists ? "is-ok" : "is-warn"}`, text: today.exists ? "今日日记已创建" : "今日日记待创建" });
       renderQuickActions(this, heroPanel, { inline: true });
