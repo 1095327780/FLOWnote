@@ -172,6 +172,35 @@ test("listCaptureModels should call provider model endpoint", async () => {
   }
 });
 
+test("OpenRouter mobile preset uses the OpenAI-compatible free router endpoint", async () => {
+  let capturedRequest = null;
+  const fixture = loadMobileModulesWithMockObsidian({
+    requestUrl: async (request) => {
+      capturedRequest = request;
+      return {
+        status: 200,
+        json: { choices: [{ message: { content: "Cleaned text" } }] },
+        text: "",
+      };
+    },
+  });
+  try {
+    const result = await fixture.cleanupCapture("um quick note", {
+      provider: "openrouter",
+      apiKey: "sk-or-test",
+      baseUrl: "",
+      model: "",
+    }, { locale: "en" });
+
+    assert.equal(result, "Cleaned text");
+    assert.equal(capturedRequest.url, "https://openrouter.ai/api/v1/chat/completions");
+    const body = JSON.parse(capturedRequest.body);
+    assert.equal(body.model, "openrouter/free");
+  } finally {
+    fixture.restore();
+  }
+});
+
 test("capture settings should keep mobile key first and only fall back when empty", () => {
   const fixture = loadMobileModulesWithMockObsidian();
   try {

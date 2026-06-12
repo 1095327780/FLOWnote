@@ -43,6 +43,7 @@ test("resolveAgentProvider builds the right Provider for each preset", () => {
     { id: "qwen",              protocol: "openai-chat" },
     { id: "doubao",            protocol: "openai-chat" },
     { id: "openai-official",   protocol: "openai-chat" },
+    { id: "openrouter",        protocol: "openai-chat" },
   ];
   for (const { id, protocol } of presets) {
     const s = defaultAgentSettings();

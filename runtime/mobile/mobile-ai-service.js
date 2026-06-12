@@ -15,6 +15,7 @@ const PROVIDER_PRESETS = {
   moonshot: { name: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.cn", defaultModel: "moonshot-v1-8k", keyUrl: "https://platform.moonshot.cn/console/api-keys", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   zhipu: { name: "Zhipu (GLM)", baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-4-flash", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", chatPath: "/v4/chat/completions", modelsPath: "/v4/models" },
   siliconflow: { name: "SiliconFlow", baseUrl: "https://api.siliconflow.cn", defaultModel: "deepseek-ai/DeepSeek-V3", keyUrl: "https://cloud.siliconflow.cn/account/ak", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
+  openrouter: { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", defaultModel: "openrouter/free", keyUrl: "https://openrouter.ai/keys", chatPath: "/chat/completions", modelsPath: "/models", models: ["openrouter/free"] },
   custom: { name: "Custom", baseUrl: "", defaultModel: "", keyUrl: "", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
 };
 

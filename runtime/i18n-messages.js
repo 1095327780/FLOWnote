@@ -259,6 +259,7 @@ const I18N_MESSAGES = {
         moonshot: "Moonshot (Kimi)",
         zhipu: "智谱 (GLM)",
         siliconflow: "SiliconFlow",
+        openrouter: "OpenRouter",
         custom: "自定义",
       },
       capture: {
@@ -665,6 +666,7 @@ const I18N_MESSAGES = {
         moonshot: "Moonshot (Kimi)",
         zhipu: "Zhipu (GLM)",
         siliconflow: "SiliconFlow",
+        openrouter: "OpenRouter",
         custom: "Custom",
       },
       capture: {

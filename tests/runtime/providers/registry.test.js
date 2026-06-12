@@ -126,6 +126,21 @@ test("custom OpenAI-compat is the open slot for user-supplied endpoints", () => 
   assert.equal(spec.userMustProvideModels, true);
 });
 
+test("OpenRouter preset exposes the free router through OpenAI-compatible API", () => {
+  const spec = PROVIDERS["openrouter"];
+  assert.equal(spec.protocol, "openai-chat");
+  assert.equal(spec.defaultMode, "api");
+  assert.equal(spec.defaultModel, "openrouter/free");
+  assert.ok(spec.models.some((model) => model.id === "openrouter/free" && model.isDefault));
+  const url = resolveBaseUrl(spec, {
+    providerId: "openrouter",
+    mode: "api",
+    apiKey: "sk-or-test",
+    model: "openrouter/free",
+  });
+  assert.equal(url, "https://openrouter.ai/api/v1");
+});
+
 test("getProviderSpec returns the spec for a known id and undefined otherwise", () => {
   assert.equal(getProviderSpec("deepseek").id, "deepseek");
   assert.equal(getProviderSpec("does-not-exist"), undefined);

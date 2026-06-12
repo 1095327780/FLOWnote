@@ -232,6 +232,26 @@ const PROVIDERS = {
     defaultModel: "gpt-5.4",
   },
 
+  "openrouter": {
+    id: "openrouter",
+    displayName: "OpenRouter",
+    protocol: "openai-chat",
+    modes: {
+      "api": {
+        label: "OpenRouter API",
+        baseUrl: "https://openrouter.ai/api/v1",
+        planUrl: "https://openrouter.ai/keys",
+        recommendedModel: "openrouter/free",
+      },
+    },
+    defaultMode: "api",
+    auth: { headerName: "Authorization", scheme: "bearer" },
+    models: [
+      { id: "openrouter/free", label: "OpenRouter Free Router", tier: "fast", isDefault: true },
+    ],
+    defaultModel: "openrouter/free",
+  },
+
   "openai-compat-custom": {
     id: "openai-compat-custom",
     displayName: "自定义 OpenAI-compat",
