@@ -1,8 +1,10 @@
 // Agent loop — the conductor.
 //
 // Takes a Provider, a tool registry, the conversation so far, and runs
-// turn-by-turn until the model returns a stop_reason other than
-// `tool_use`. Yields a single stream of events for the UI:
+// turn-by-turn until the model returns no tool_use blocks. Some providers
+// misreport stop_reason even when a tool_use block was streamed, so the
+// actual content blocks are the source of truth. Yields a single stream of
+// events for the UI:
 //
 //   - { type: 'stream', event: <ProviderStreamEvent> }   passthrough
 //   - { type: 'tool_progress', tool, message?, data? }   from tool execute()
@@ -118,34 +120,25 @@ async function* runAgentLoop(args) {
 
     conversation.push({ role: "assistant", content: streamResult.assistantContent });
 
-    if (streamResult.toolUses.length === 0 || streamResult.stopReason !== "tool_use") {
+    if (streamResult.toolUses.length === 0) {
       yield { type: "turn_complete", turnIndex: turn, stopReason: streamResult.stopReason };
       yield { type: "done", turns: turn + 1 };
       return;
     }
 
-    // Split tool_uses by concurrency: read-only/concurrency-safe → parallel.
-    const parallel = [];
-    const serial = [];
-    for (const tu of streamResult.toolUses) {
-      const tool = registry.get(tu.name);
-      const isSafe = tool && (
-        (typeof tool.isConcurrencySafe === "function" && tool.isConcurrencySafe(tu.input)) ||
-        (typeof tool.isReadOnly === "function" && tool.isReadOnly(tu.input))
-      );
-      (isSafe ? parallel : serial).push(tu);
-    }
-
     /** @type {Array<{id:string,content:string,isError:boolean,progress:Array<Object>}>} */
     const allResults = [];
 
-    if (parallel.length > 0) {
-      const settled = await Promise.all(parallel.map((tu) => runToolUse(tu, registry, ctx, askFn)));
-      for (const r of settled) allResults.push(r);
-    }
-    for (const tu of serial) {
-      const r = await runToolUse(tu, registry, ctx, askFn);
-      allResults.push(r);
+    for (const batch of partitionToolUses(streamResult.toolUses, registry)) {
+      if (batch.isConcurrencySafe) {
+        const settled = await Promise.all(batch.items.map((tu) => runToolUse(tu, registry, ctx, askFn)));
+        for (const r of settled) allResults.push(r);
+      } else {
+        for (const tu of batch.items) {
+          const r = await runToolUse(tu, registry, ctx, askFn);
+          allResults.push(r);
+        }
+      }
     }
 
     // Stream tool_start / progress / tool_finish events in tool_use order.
@@ -405,6 +398,31 @@ function stringifyContent(c) {
   if (typeof c === "string") return c;
   if (c === null || c === undefined) return "";
   try { return JSON.stringify(c); } catch { return String(c); }
+}
+
+function partitionToolUses(toolUses, registry) {
+  const batches = [];
+  for (const tu of toolUses) {
+    const isConcurrencySafe = isConcurrencySafeToolUse(tu, registry);
+    const last = batches[batches.length - 1];
+    if (isConcurrencySafe && last && last.isConcurrencySafe) {
+      last.items.push(tu);
+    } else {
+      batches.push({ isConcurrencySafe, items: [tu] });
+    }
+  }
+  return batches;
+}
+
+function isConcurrencySafeToolUse(tu, registry) {
+  const tool = registry.get(tu.name);
+  if (!tool) return false;
+  try {
+    if (typeof tool.isConcurrencySafe === "function" && tool.isConcurrencySafe(tu.input)) return true;
+    return typeof tool.isReadOnly === "function" && tool.isReadOnly(tu.input);
+  } catch (_e) {
+    return false;
+  }
 }
 
 module.exports = {
