@@ -4,7 +4,7 @@
   <img src="assets/flownote-logo.svg" width="104" alt="FLOWnote logo">
 </p>
 
-语言： [English](https://github.com/1095327780/FLOWnote/blob/main/README.md) | **简体中文**
+语言： [English](https://github.com/1095327780/FLOWnote/blob/main/README.md) | **简体中文** | [Русский](https://github.com/1095327780/FLOWnote/blob/main/README.ru.md)
 
 **FLOWnote 是一个面向 Obsidian 的 AI 笔记工作台：打开就是个人首页，随手捕获、每日计划、项目推进、知识资产统计、AI 对话和技能工作流都在同一个空间里完成。**
 
@@ -19,6 +19,20 @@
 <p align="center">
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
+
+## v0.5.11 发布说明
+
+本次升级重点对大家反馈的一些问题进行了修复。
+
+- **减少升级打扰**：小版本升级不再弹兼容提示，只有从 `0.5.0` 以前升级时才会显示一次说明。
+- **用户数据保护**：启动和升级时仅补齐缺失的内置 Skills 和模板，不会覆盖你的任何自定义设置。
+- **重装更安全**：重新安装内置内容时默认跳过冲突，手动选择替换才会覆盖，同时保留备份。
+- **多语言补齐**：简中、英文、俄语的首页、聊天、设置、模板管理等界面文案已对齐。俄语 Skills 正文沿用英文以降低维护成本。
+- **AI 工具调用更可靠**：Direct AI 模式下以工具实际执行结果为准，失败时自动回传修正，界面展示工具卡片；移除不可靠的文本正则猜测。
+- **模型选择器修复**：Ollama 云端模型增加提示标记；OpenRouter 可正确拉取模型列表，不再自动重置选择。
+- **错误提示优化**：OpenRouter 授权、余额、模型不可用，以及 Ollama 模型异常等情况，现在都会给出清晰说明。
+- **修复严重问题**：首页统计可能显示全 0、笔记路径设置页渲染失败等阻断 bug 已修复。
+- **发布流程完善**：确保核心文件完整打入 release 包，同步版本号，增加提交检查和回归测试。
 
 ## 0.5.7 更新亮点
 
