@@ -11,6 +11,8 @@ const {
   toggleTaskInFile,
 } = require("../../home/home-service");
 
+const HOME_DATA_TIMEOUT_MS = 8000;
+
 function formatRelativeTime(timestamp, locale = "zh-CN") {
   const value = Number(timestamp || 0);
   if (!value) return "";
@@ -61,6 +63,93 @@ function createActionButton(parent, icon, label, onClick, cls = "") {
 
 function homeText(view, key, fallback, params = {}) {
   return tr(view, `view.home.${key}`, fallback, params);
+}
+
+function currentDateKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function fallbackDailySummary() {
+  return {
+    focus: "",
+    record: "",
+    tasks: { open: 0, done: 0, total: 0, completionRate: 0 },
+    taskItems: [],
+  };
+}
+
+function fallbackTodayState() {
+  return {
+    dateStr: currentDateKey(),
+    path: "",
+    exists: false,
+    file: null,
+    summary: fallbackDailySummary(),
+  };
+}
+
+function fallbackDashboardStats() {
+  return {
+    activeProjects: 0,
+    highPriorityProjects: 0,
+    weeklyNew: 0,
+    recentActive: 0,
+    knowledgeAssets: 0,
+    evergreenNotes: 0,
+    literatureNotes: 0,
+    topicNotes: 0,
+    domainNotes: 0,
+    dailyNotes: 0,
+    tasks: { open: 0, done: 0, total: 0, completionRate: 0 },
+  };
+}
+
+function fallbackHeatmap(range = {}) {
+  return {
+    days: 0,
+    startDate: range.startDate || "",
+    endDate: range.endDate || "",
+    total: 0,
+    activeDays: 0,
+    maxCount: 0,
+    cells: [],
+  };
+}
+
+function logHomeDataIssue(label, error) {
+  try {
+    console.warn(`[FLOWnote] Home ${label} unavailable`, error);
+  } catch {}
+}
+
+function resolveHomeData(label, producer, fallback) {
+  let value;
+  try {
+    value = producer();
+  } catch (error) {
+    logHomeDataIssue(label, error);
+    return Promise.resolve(typeof fallback === "function" ? fallback() : fallback);
+  }
+
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      logHomeDataIssue(label, new Error(`Timed out after ${HOME_DATA_TIMEOUT_MS}ms`));
+      resolve(typeof fallback === "function" ? fallback() : fallback);
+    }, HOME_DATA_TIMEOUT_MS);
+  });
+
+  return Promise.race([
+    Promise.resolve(value)
+      .catch((error) => {
+        logHomeDataIssue(label, error);
+        return typeof fallback === "function" ? fallback() : fallback;
+      }),
+    timeout,
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 function recentTypeKey(type) {
@@ -620,11 +709,11 @@ function renderHomeDashboard(container) {
   container.createDiv({ cls: "oc-home-loading", text: homeText(this, "loading", "正在读取知识库状态...") });
 
   Promise.all([
-    getDashboardStats(this.app, homeSettings),
-    getTodayState(this.app, homeSettings),
-    listProjects(this.app, homeSettings),
-    Promise.resolve(listRecentFiles(this.app, homeSettings)),
-    getDailyActivityHeatmap(this.app, homeSettings, heatmapRange),
+    resolveHomeData("dashboard stats", () => getDashboardStats(this.app, homeSettings), fallbackDashboardStats),
+    resolveHomeData("today state", () => getTodayState(this.app, homeSettings), fallbackTodayState),
+    resolveHomeData("projects", () => listProjects(this.app, homeSettings), []),
+    resolveHomeData("recent files", () => listRecentFiles(this.app, homeSettings), []),
+    resolveHomeData("activity heatmap", () => getDailyActivityHeatmap(this.app, homeSettings, heatmapRange), () => fallbackHeatmap(heatmapRange)),
   ])
     .then(([stats, today, projects, recent, heatmap]) => {
       if (this.homeRenderRun !== currentRun) return;

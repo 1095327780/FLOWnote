@@ -173,7 +173,7 @@ class BasicSettingsSectionMethods {
                   "界面语言已更新。命令名和 Ribbon 提示将在重载插件后生效。",
                 ));
                 if (previousLocale === nextLocale) return;
-                const explicitLocale = selectedLanguage === "zh-CN" || selectedLanguage === "en";
+                const explicitLocale = selectedLanguage === "zh-CN" || selectedLanguage === "en" || selectedLanguage === "ru";
                 if (!explicitLocale) return;
                 const languageLabel = nextLocale === "zh-CN"
                   ? t("settings.language.optionZhCN", "简体中文")
@@ -194,8 +194,8 @@ class BasicSettingsSectionMethods {
                 if (!shouldReinstall) return;
                 await this.reinstallBundledContentWithPrompt(null, {
                   locale: nextLocale,
-                  replaceAll: true,
-                  skipConflictPrompt: true,
+                  replaceAll: false,
+                  skipConflictPrompt: false,
                 });
                 if (typeof this.promptAndRunNotePathLocaleMigration === "function") {
                   await this.promptAndRunNotePathLocaleMigration(previousLocale, nextLocale, t);
@@ -415,7 +415,8 @@ class BasicSettingsSectionMethods {
             .addButton((b) => {
               b.setButtonText(t("settings.basic.reinstallSkillsNow", "立即重装")).onClick(async () => {
                 await this.reinstallBundledContentWithPrompt(b, {
-                  replaceAll: true, skipConflictPrompt: true,
+                  replaceAll: false,
+                  skipConflictPrompt: false,
                 });
               });
             });

@@ -15,6 +15,28 @@ const DEFAULT_HOME_SETTINGS = {
   heatmapDays: 84,
 };
 const DAILY_TASK_HEADING_PATTERNS = [/任务/, /Tasks/i, /Задачи/i, /План/i];
+const DEFAULT_HOME_FILE_READ_TIMEOUT_MS = 2500;
+
+function homeFileReadTimeoutMs() {
+  const raw = typeof process !== "undefined" && process && process.env
+    ? process.env.FLOWNOTE_HOME_READ_TIMEOUT_MS
+    : "";
+  const value = Number(raw || DEFAULT_HOME_FILE_READ_TIMEOUT_MS);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_HOME_FILE_READ_TIMEOUT_MS;
+  return Math.min(10000, Math.max(100, value));
+}
+
+async function promiseWithTimeout(promise, fallback, timeoutMs) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve(promise), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function configuredNotePaths(settings = {}) {
   const locale = settings && settings.uiLanguage ? settings.uiLanguage : "zh-CN";
@@ -71,9 +93,14 @@ function safeFiles(app) {
 
 async function readFileText(app, file) {
   if (!app || !app.vault || !file) return "";
+  const timeoutMs = homeFileReadTimeoutMs();
   try {
-    if (typeof app.vault.cachedRead === "function") return String(await app.vault.cachedRead(file) || "");
-    if (typeof app.vault.read === "function") return String(await app.vault.read(file) || "");
+    if (typeof app.vault.cachedRead === "function") {
+      return String(await promiseWithTimeout(app.vault.cachedRead(file), "", timeoutMs) || "");
+    }
+    if (typeof app.vault.read === "function") {
+      return String(await promiseWithTimeout(app.vault.read(file), "", timeoutMs) || "");
+    }
   } catch {
     return "";
   }

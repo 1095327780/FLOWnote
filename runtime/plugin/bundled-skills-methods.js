@@ -646,6 +646,7 @@ function createBundledSkillsMethods(options = {}) {
 
     async syncBundledTemplates(vaultPath, options = {}) {
       const skillLocale = this.resolveBundledSkillLocale(options.locale);
+      const cleanStale = Boolean(options.cleanStale);
       const bundledRoot = this.getBundledSkillsRoot();
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
       const targetRoot = String(options.targetRoot || "")
@@ -748,17 +749,19 @@ function createBundledSkillsMethods(options = {}) {
             }
           }
 
-          for (const staleRelativePath of source.entry.staleTargets) {
-            const staleFile = path.join(targetRoot, staleRelativePath);
-            if (!fs.existsSync(staleFile)) continue;
-            try {
-              if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
-              const backed = this.backupPathIfNeeded(staleFile, backupRoot, path.join("templates", staleRelativePath));
-              if (backed) backupCount += 1;
-              fs.rmSync(staleFile, { force: true });
-              cleanedStaleCount += 1;
-            } catch (e) {
-              errors.push(`${entry.id}: 清理旧模板失败 ${staleRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+          if (cleanStale) {
+            for (const staleRelativePath of source.entry.staleTargets) {
+              const staleFile = path.join(targetRoot, staleRelativePath);
+              if (!fs.existsSync(staleFile)) continue;
+              try {
+                if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
+                const backed = this.backupPathIfNeeded(staleFile, backupRoot, path.join("templates", staleRelativePath));
+                if (backed) backupCount += 1;
+                fs.rmSync(staleFile, { force: true });
+                cleanedStaleCount += 1;
+              } catch (e) {
+                errors.push(`${entry.id}: 清理旧模板失败 ${staleRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+              }
             }
           }
         }
@@ -815,6 +818,7 @@ function createBundledSkillsMethods(options = {}) {
 
     async resetMetaTemplateBaseline(vaultPath, options = {}) {
       const skillLocale = this.resolveBundledSkillLocale(options.locale);
+      const cleanStale = Boolean(options.cleanStale);
       const bundledRoot = this.getBundledSkillsRoot();
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
       const metaRoot = path.join(
@@ -911,21 +915,23 @@ function createBundledSkillsMethods(options = {}) {
             }
           }
 
-          for (const staleMetaRelativePath of localizedEntry.staleMetaSources) {
-            const staleFile = path.join(metaRoot, staleMetaRelativePath);
-            if (!fs.existsSync(staleFile)) continue;
-            try {
-              if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
-              const backed = this.backupPathIfNeeded(
-                staleFile,
-                backupRoot,
-                path.join("meta-templates", staleMetaRelativePath),
-              );
-              if (backed) backupCount += 1;
-              fs.rmSync(staleFile, { force: true });
-              cleanedStaleCount += 1;
-            } catch (e) {
-              errors.push(`${entry.id}: 清理旧模板失败 ${staleMetaRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+          if (cleanStale) {
+            for (const staleMetaRelativePath of localizedEntry.staleMetaSources) {
+              const staleFile = path.join(metaRoot, staleMetaRelativePath);
+              if (!fs.existsSync(staleFile)) continue;
+              try {
+                if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
+                const backed = this.backupPathIfNeeded(
+                  staleFile,
+                  backupRoot,
+                  path.join("meta-templates", staleMetaRelativePath),
+                );
+                if (backed) backupCount += 1;
+                fs.rmSync(staleFile, { force: true });
+                cleanedStaleCount += 1;
+              } catch (e) {
+                errors.push(`${entry.id}: 清理旧模板失败 ${staleMetaRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+              }
             }
           }
         }
