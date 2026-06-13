@@ -4,6 +4,9 @@ const { UI_LANGUAGE_OPTIONS, normalizeSupportedLocale } = require("../i18n-local
 const { bindDropdownChange } = require("./component-value-utils");
 const {
   LINK_RESOLVER_DEFAULTS,
+  getDefaultDailyNotePath,
+  getDefaultNotePaths,
+  migrateSettingsLocaleDefaults,
   normalizeLinkResolver,
   normalizeResolverProviderId,
 } = require("../settings-utils");
@@ -177,12 +180,13 @@ class BasicSettingsSectionMethods {
                   "en",
                 );
                 this.plugin.settings.uiLanguage = String(selectedLanguage || "auto");
-                await this.plugin.saveSettings();
-                if (typeof this.plugin.refreshLocaleUi === "function") this.plugin.refreshLocaleUi();
                 const nextLocale = normalizeSupportedLocale(
                   typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
                   "en",
                 );
+                migrateSettingsLocaleDefaults(this.plugin.settings, previousLocale, nextLocale);
+                await this.plugin.saveSettings();
+                if (typeof this.plugin.refreshLocaleUi === "function") this.plugin.refreshLocaleUi();
                 this.display();
                 new Notice(t(
                   "notices.languageAppliedReloadTip",
@@ -869,11 +873,12 @@ class BasicSettingsSectionMethods {
     new Setting(containerEl)
       .setName(t("mobile.settings.dailyPathName", "每日笔记路径"))
       .addText((text) => {
+        const defaultDailyPath = getDefaultDailyNotePath(locale);
         text
-          .setPlaceholder(locale === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes")
+          .setPlaceholder(defaultDailyPath)
           .setValue(mc.dailyNotePath)
           .onChange(async (v) => {
-            mc.dailyNotePath = v.trim() || (locale === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes");
+            mc.dailyNotePath = v.trim() || defaultDailyPath;
             await this.plugin.saveSettings();
           });
       });
@@ -976,34 +981,33 @@ class BasicSettingsSectionMethods {
   }
 
   renderNotePathsSection(containerEl, t) {
-    const { DEFAULT_NOTE_PATHS } = require("../settings-utils");
+    const locale = normalizeSupportedLocale(
+      typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : this.plugin.settings.uiLanguage,
+      "zh-CN",
+    );
+    const DEFAULT_NOTE_PATHS = getDefaultNotePaths(locale);
     if (!this.plugin.settings.notePaths) {
       this.plugin.settings.notePaths = { ...DEFAULT_NOTE_PATHS };
     }
     const paths = this.plugin.settings.notePaths;
 
     const fields = [
-      ["dailyNotes",      "每日笔记", "Daily notes"],
-      ["weeklyReviews",   "周记 / 周回顾", "Weekly review"],
-      ["monthlyReviews",  "月记 / 月报", "Monthly review"],
-      ["yearlyReviews",   "年记 / 年报", "Yearly review"],
-      ["permanentNotes",  "永久笔记", "Permanent notes"],
-      ["topicNotes",      "主题笔记（📍）", "Topic notes (📍)"],
-      ["literatureNotes", "文献笔记（《》）", "Literature notes (《》)"],
-      ["domainPages",     "领域页所在层（🌱）", "Domain pages layer (🌱)"],
-      ["activeProjects",  "进行中项目", "Active projects"],
-      ["archive",         "归档", "Archive"],
+      ["dailyNotes", "每日笔记"],
+      ["weeklyReviews", "周记 / 周回顾"],
+      ["monthlyReviews", "月记 / 月报"],
+      ["yearlyReviews", "年记 / 年报"],
+      ["permanentNotes", "永久笔记"],
+      ["topicNotes", "主题笔记（📍）"],
+      ["literatureNotes", "文献笔记（《》）"],
+      ["domainPages", "领域页所在层（🌱）"],
+      ["activeProjects", "进行中项目"],
+      ["archive", "归档"],
     ];
 
-    const locale = typeof this.plugin.getEffectiveLocale === "function"
-      ? this.plugin.getEffectiveLocale()
-      : "zh-CN";
-
-    for (const [key, zhLabel, enLabel] of fields) {
-      const label = locale === "en" ? enLabel : zhLabel;
+    for (const [key, fallbackLabel] of fields) {
       const defaultValue = DEFAULT_NOTE_PATHS[key];
       new Setting(containerEl)
-        .setName(label)
+        .setName(t(`settings.notePaths.${key}`, fallbackLabel))
         .setDesc(t(
           "settings.notePaths.fieldDesc",
           "默认：{default}",

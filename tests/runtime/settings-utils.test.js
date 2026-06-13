@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  getDefaultNotePaths,
+  migrateSettingsLocaleDefaults,
   normalizeSettings,
   normalizeSettingsInPlace,
   normalizeSkillSecrets,
@@ -63,11 +65,40 @@ test("normalizeSettings should normalize uiLanguage aliases", () => {
   assert.equal(normalizeSettings({ uiLanguage: "zh" }).uiLanguage, "zh-CN");
   assert.equal(normalizeSettings({ uiLanguage: "zh_cn" }).uiLanguage, "zh-CN");
   assert.equal(normalizeSettings({ uiLanguage: "en-US" }).uiLanguage, "en");
+  assert.equal(normalizeSettings({ uiLanguage: "ru" }).uiLanguage, "ru");
+  assert.equal(normalizeSettings({ uiLanguage: "ru-RU" }).uiLanguage, "ru");
 });
 
 test("normalizeSettings should fallback invalid uiLanguage to auto", () => {
   const out = normalizeSettings({ uiLanguage: "fr-FR" });
   assert.equal(out.uiLanguage, "auto");
+});
+
+test("normalizeSettings should use localized note path defaults", () => {
+  const out = normalizeSettings({
+    uiLanguage: "ru",
+    notePaths: getDefaultNotePaths("zh-CN"),
+    mobileCapture: { dailyNotePath: "01-捕获层/每日笔记" },
+  });
+  assert.equal(out.notePaths.dailyNotes, "01-Захват/Ежедневные заметки");
+  assert.equal(out.notePaths.activeProjects, "04-Создание/Проекты");
+  assert.equal(out.mobileCapture.dailyNotePath, "01-Захват/Ежедневные заметки");
+});
+
+test("migrateSettingsLocaleDefaults should migrate only known defaults", () => {
+  const settings = {
+    notePaths: {
+      ...getDefaultNotePaths("zh-CN"),
+      activeProjects: "Work/Projects",
+    },
+    mobileCapture: {
+      dailyNotePath: "01-捕获层/每日笔记",
+    },
+  };
+  migrateSettingsLocaleDefaults(settings, "zh-CN", "ru");
+  assert.equal(settings.notePaths.dailyNotes, "01-Захват/Ежедневные заметки");
+  assert.equal(settings.notePaths.activeProjects, "Work/Projects");
+  assert.equal(settings.mobileCapture.dailyNotePath, "01-Захват/Ежедневные заметки");
 });
 
 test("normalizeSettings should drop deprecated wsl launch settings", () => {

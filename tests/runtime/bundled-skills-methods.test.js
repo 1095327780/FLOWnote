@@ -7,6 +7,20 @@ const path = require("node:path");
 const { createBundledSkillsMethods } = require("../../runtime/plugin/bundled-skills-methods");
 const { copyDirectoryRecursive } = require("../../runtime/skill-service");
 
+const CORE_TEMPLATE_STEMS = [
+  "ah-note/assets/每日笔记模板",
+  "ah-week/references/周报模板",
+  "ah-month/references/月报模板",
+  "ah-year/references/年报模板",
+  "ah-project/assets/项目模板",
+  "ah-read/references/文献笔记模板",
+  "ah-read/assets/进度模板",
+  "ah-inbox/assets/永久笔记模板",
+  "ah-init/references/HOME模板",
+  "ah-init/references/主题笔记模板",
+  "ah-init/references/领域页模板",
+];
+
 function writeFile(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, "utf8");
@@ -23,11 +37,18 @@ function createFixture() {
   writeFile(path.join(bundledRoot, "ah-test", "SKILL.md"), "---\nname: ah-test\ndescription: test\n---\n\n# Test\n");
   writeFile(path.join(bundledRoot, "ah-test", "references", "guide.md"), "# Chinese Ref\n");
   writeFile(path.join(bundledRoot, "ah-test", "references", "guide.en.md"), "# English Ref\n");
+  writeFile(path.join(bundledRoot, "ah-test", "references", "guide.ru.md"), "# Russian Ref\n");
   writeFile(path.join(bundledRoot, "resources", "templates-default", "示例模板.md"), "fallback-template\n");
   writeFile(path.join(bundledRoot, "resources", "templates-default", "示例模板.en.md"), "fallback-template-en\n");
+  writeFile(path.join(bundledRoot, "resources", "templates-default", "示例模板.ru.md"), "fallback-template-ru\n");
   writeFile(path.join(bundledRoot, "template-map.json"), JSON.stringify({
     version: 1,
     metaTemplatesDir: "Meta/模板",
+    metaTemplatesDirs: {
+      "zh-CN": "Meta/模板",
+      en: "Meta/Templates",
+      ru: "Meta/Шаблоны",
+    },
     entries: [
       {
         id: "sample-template",
@@ -41,6 +62,12 @@ function createFixture() {
             metaSource: "Sample-Template.md",
             targets: [
               "ah-test/assets/templates/Sample-Template.md",
+            ],
+          },
+          ru: {
+            metaSource: "Sample-Template.ru.md",
+            targets: [
+              "ah-test/assets/templates/Sample-Template.ru.md",
             ],
           },
         },
@@ -64,6 +91,15 @@ function createFixture() {
 
   return { root, vaultPath, pluginRoot, plugin, bundledRoot };
 }
+
+test("core bundled templates should include zh base, English, and Russian variants", () => {
+  const bundledRoot = path.join(__dirname, "../../bundled-skills");
+  for (const stem of CORE_TEMPLATE_STEMS) {
+    assert.equal(fs.existsSync(path.join(bundledRoot, `${stem}.md`)), true, `${stem}.md`);
+    assert.equal(fs.existsSync(path.join(bundledRoot, `${stem}.en.md`)), true, `${stem}.en.md`);
+    assert.equal(fs.existsSync(path.join(bundledRoot, `${stem}.ru.md`)), true, `${stem}.ru.md`);
+  }
+});
 
 test("syncBundledContent should install bundled skill and fallback template", async () => {
   const fixture = createFixture();
@@ -220,6 +256,34 @@ test("syncBundledContent should localize references to canonical path by locale"
   }
 });
 
+test("syncBundledContent should use Russian resources and templates without requiring Russian SKILL.md", async () => {
+  const fixture = createFixture();
+  try {
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "SKILL.en.md"), "---\nname: ah-test\ndescription: English\n---\n\n# English\n");
+
+    const result = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "ru",
+      syncTemplates: true,
+      defaultConflictAction: "skip",
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.locale, "ru");
+
+    const installedSkill = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "SKILL.md");
+    const refFile = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "references", "guide.md");
+    const templateFile = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "assets", "templates", "Sample-Template.ru.md");
+
+    assert.equal(fs.readFileSync(installedSkill, "utf8").includes("# English"), true);
+    assert.equal(fs.readFileSync(refFile, "utf8"), "# Russian Ref\n");
+    assert.equal(fs.existsSync(path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "references", "guide.ru.md")), false);
+    assert.equal(fs.readFileSync(templateFile, "utf8"), "fallback-template-ru\n");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("syncBundledTemplates should prefer en fallback before base meta and keep zh base meta priority", async () => {
   const fixture = createFixture();
   try {
@@ -290,7 +354,7 @@ test("resetMetaTemplateBaseline should switch Meta template filename by locale",
     assert.equal(zhReset.errors.length, 0);
 
     const metaZh = path.join(fixture.vaultPath, "Meta", "模板", "示例模板.md");
-    const metaEn = path.join(fixture.vaultPath, "Meta", "模板", "Sample-Template.md");
+    const metaEn = path.join(fixture.vaultPath, "Meta", "Templates", "Sample-Template.md");
     assert.equal(fs.existsSync(metaZh), true);
     assert.equal(fs.existsSync(metaEn), false);
 
@@ -300,9 +364,9 @@ test("resetMetaTemplateBaseline should switch Meta template filename by locale",
     });
     assert.equal(enReset.errors.length, 0);
     assert.equal(fs.existsSync(metaEn), true);
-    assert.equal(fs.existsSync(metaZh), false);
+    assert.equal(fs.existsSync(metaZh), true);
     assert.equal(fs.readFileSync(metaEn, "utf8"), "fallback-template-en\n");
-    assert.equal(Number(enReset.cleanedStaleCount || 0) > 0, true);
+    assert.equal(Number(enReset.cleanedStaleCount || 0), 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

@@ -3,6 +3,11 @@ const {
   findOrCreateDailyNote,
   formatDateStr,
 } = require("../mobile/daily-note-service");
+const {
+  NOTE_PATH_DEFAULTS_BY_LOCALE,
+  getDefaultDailyNotePath,
+  getDefaultNotePaths,
+} = require("../localized-defaults");
 
 const DEFAULT_HOME_SETTINGS = {
   projectPath: "04-创造层/项目",
@@ -10,13 +15,33 @@ const DEFAULT_HOME_SETTINGS = {
   weeklyWindowDays: 7,
   heatmapDays: 84,
 };
-const DAILY_TASK_HEADING_PATTERNS = [/任务/, /Tasks/i];
+const DAILY_TASK_HEADING_PATTERNS = [/任务/, /Tasks/i, /Задачи/i, /План/i];
+
+function configuredNotePaths(settings = {}) {
+  const locale = settings && settings.uiLanguage ? settings.uiLanguage : "zh-CN";
+  return { ...getDefaultNotePaths(locale), ...((settings && settings.notePaths) || {}) };
+}
+
+function notePathPrefixes(settings = {}, key) {
+  const paths = configuredNotePaths(settings);
+  const values = [paths[key]];
+  for (const defaults of Object.values(NOTE_PATH_DEFAULTS_BY_LOCALE)) {
+    if (defaults && defaults[key]) values.push(defaults[key]);
+  }
+  return [...new Set(values.map((value) => normalizePath(String(value || "").trim())).filter(Boolean))];
+}
+
+function pathUnderAnyPrefix(path, prefixes) {
+  const value = normalizePath(String(path || ""));
+  return prefixes.some((prefix) => value === prefix || value.startsWith(`${prefix}/`));
+}
 
 function normalizeHomeSettings(settings = {}) {
   const raw = settings && typeof settings === "object" ? settings : {};
   const home = raw.home && typeof raw.home === "object" ? raw.home : {};
+  const paths = configuredNotePaths(raw);
   return {
-    projectPath: normalizePath(String(home.projectPath || DEFAULT_HOME_SETTINGS.projectPath).trim() || DEFAULT_HOME_SETTINGS.projectPath),
+    projectPath: normalizePath(String(home.projectPath || paths.activeProjects || DEFAULT_HOME_SETTINGS.projectPath).trim() || DEFAULT_HOME_SETTINGS.projectPath),
     recentLimit: Math.min(24, Math.max(3, Number(home.recentLimit) || DEFAULT_HOME_SETTINGS.recentLimit)),
     weeklyWindowDays: Math.min(31, Math.max(1, Number(home.weeklyWindowDays) || DEFAULT_HOME_SETTINGS.weeklyWindowDays)),
     heatmapDays: Math.min(366, Math.max(28, Number(home.heatmapDays) || DEFAULT_HOME_SETTINGS.heatmapDays)),
@@ -27,7 +52,7 @@ function resolveDailyNotePath(settings = {}, dateStr = formatDateStr()) {
   const mc = settings && settings.mobileCapture && typeof settings.mobileCapture === "object"
     ? settings.mobileCapture
     : {};
-  const dailyNotePath = normalizePath(String(mc.dailyNotePath || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记");
+  const dailyNotePath = normalizePath(String(mc.dailyNotePath || getDefaultDailyNotePath(settings.uiLanguage || "zh-CN")).trim() || getDefaultDailyNotePath(settings.uiLanguage || "zh-CN"));
   return normalizePath(`${dailyNotePath}/${dateStr}.md`);
 }
 
@@ -264,8 +289,8 @@ function firstUsefulLine(section) {
 
 function summarizeDailyNote(content) {
   const text = String(content || "");
-  const focus = firstUsefulLine(extractSection(text, [/今天最重要/, /今日聚焦/, /Most Important/i]));
-  const record = firstUsefulLine(extractSection(text, [/记录/, /Records/i, /Today Notes/i]));
+  const focus = firstUsefulLine(extractSection(text, [/今天最重要/, /今日聚焦/, /Most Important/i, /Фокус/i, /Главное сегодня/i]));
+  const record = firstUsefulLine(extractSection(text, [/记录/, /Records/i, /Today Notes/i, /Записи/i, /Ежедневные заметки/i]));
   const tasks = taskStatsFromContent(extractSection(text, DAILY_TASK_HEADING_PATTERNS) || text);
   const taskItems = listTaskItemsFromContent(text, { headingPatterns: DAILY_TASK_HEADING_PATTERNS, limit: 8 });
   return {
@@ -306,7 +331,7 @@ async function findOrCreateTodayDailyNote(app, settings = {}, options = {}) {
   const mc = settings && settings.mobileCapture && typeof settings.mobileCapture === "object"
     ? settings.mobileCapture
     : {};
-  const dailyNotePath = String(mc.dailyNotePath || "01-捕获层/每日笔记").trim() || "01-捕获层/每日笔记";
+  const dailyNotePath = String(mc.dailyNotePath || getDefaultDailyNotePath(settings.uiLanguage || "zh-CN")).trim() || getDefaultDailyNotePath(settings.uiLanguage || "zh-CN");
   return findOrCreateDailyNote(app.vault, dailyNotePath, dateStr, {
     locale: options.locale || settings.uiLanguage || "zh-CN",
     skillsDir: settings.skillsDir || ".flownote/skills",
@@ -317,8 +342,7 @@ function resolveProjectRoots(settings = {}) {
   const homeSettings = normalizeHomeSettings(settings);
   return uniqueNormalizedPaths([
     homeSettings.projectPath,
-    "04-创造层/项目",
-    "04-创造层/Projects",
+    ...notePathPrefixes(settings, "activeProjects"),
   ]);
 }
 
@@ -336,15 +360,16 @@ function projectCategoryFromPath(path, root) {
 
 function normalizeProjectStatus(status) {
   const text = String(status || "").trim();
-  if (/已完成|完成|done/i.test(text)) return "已完成";
-  if (/归档|archived/i.test(text)) return "归档";
-  if (/暂停|搁置|paused|hold/i.test(text)) return "暂停";
-  if (/进行中|active|in[- ]?progress|doing/i.test(text)) return "进行中";
+  if (/已完成|完成|done|completed|выполн|готов/i.test(text)) return "已完成";
+  if (/归档|archived|архив/i.test(text)) return "归档";
+  if (/暂停|搁置|paused|hold|пауза|приостанов/i.test(text)) return "暂停";
+  if (/进行中|active|in[- ]?progress|doing|актив|в работе|в процессе/i.test(text)) return "进行中";
   return text || "进行中";
 }
 
 function isActiveProjectStatus(status) {
-  return /进行中|active|in[- ]?progress|doing/i.test(status) && !/已完成|完成|归档|done|archived/i.test(status);
+  return /进行中|active|in[- ]?progress|doing|актив|в работе|в процессе/i.test(status) &&
+    !/已完成|完成|归档|done|completed|archived|выполн|готов|архив/i.test(status);
 }
 
 async function listProjects(app, settings = {}, options = {}) {
@@ -519,14 +544,14 @@ function isSystemPath(path) {
   return /(^|\/)(\.git|\.obsidian|\.opencode|node_modules|release|runtime\/vendor)(\/|$)/.test(String(path || ""));
 }
 
-function classifyFile(path) {
+function classifyFile(path, settings = {}) {
   const value = String(path || "");
-  if (value.includes("01-捕获层/每日笔记/")) return "每日笔记";
-  if (value.includes("02-培养层/永久笔记/")) return "永久笔记";
-  if (value.includes("02-培养层/文献笔记/")) return "文献笔记";
-  if (value.includes("02-培养层/主题笔记/")) return "主题页";
-  if (value.includes("03-连接层/")) return "领域页";
-  if (value.includes("04-创造层/项目/")) return "项目";
+  if (pathUnderAnyPrefix(value, notePathPrefixes(settings, "dailyNotes"))) return "每日笔记";
+  if (pathUnderAnyPrefix(value, notePathPrefixes(settings, "permanentNotes"))) return "永久笔记";
+  if (pathUnderAnyPrefix(value, notePathPrefixes(settings, "literatureNotes"))) return "文献笔记";
+  if (pathUnderAnyPrefix(value, notePathPrefixes(settings, "topicNotes"))) return "主题页";
+  if (pathUnderAnyPrefix(value, notePathPrefixes(settings, "domainPages"))) return "领域页";
+  if (pathUnderAnyPrefix(value, notePathPrefixes(settings, "activeProjects"))) return "项目";
   return "笔记";
 }
 
@@ -540,7 +565,7 @@ function listRecentFiles(app, settings = {}) {
       file,
       path: file.path,
       title: String(file.basename || displayNameFromPath(file.path)).replace(/\.md$/i, ""),
-      type: classifyFile(file.path),
+      type: classifyFile(file.path, settings),
       mtime: Number(file.stat && file.stat.mtime ? file.stat.mtime : 0),
     }));
 }
@@ -567,11 +592,11 @@ async function getDashboardStats(app, settings = {}, options = {}) {
 
   for (const file of files) {
     const path = String(file.path || "");
-    if (path.includes("01-捕获层/每日笔记/")) counts.dailyNotes += 1;
-    if (path.includes("02-培养层/永久笔记/")) counts.evergreenNotes += 1;
-    if (path.includes("02-培养层/文献笔记/")) counts.literatureNotes += 1;
-    if (path.includes("02-培养层/主题笔记/")) counts.topicNotes += 1;
-    if (path.includes("03-连接层/")) counts.domainNotes += 1;
+    if (pathUnderAnyPrefix(path, notePathPrefixes(settings, "dailyNotes"))) counts.dailyNotes += 1;
+    if (pathUnderAnyPrefix(path, notePathPrefixes(settings, "permanentNotes"))) counts.evergreenNotes += 1;
+    if (pathUnderAnyPrefix(path, notePathPrefixes(settings, "literatureNotes"))) counts.literatureNotes += 1;
+    if (pathUnderAnyPrefix(path, notePathPrefixes(settings, "topicNotes"))) counts.topicNotes += 1;
+    if (pathUnderAnyPrefix(path, notePathPrefixes(settings, "domainPages"))) counts.domainNotes += 1;
     const ctime = Number(file.stat && file.stat.ctime ? file.stat.ctime : 0);
     const mtime = Number(file.stat && file.stat.mtime ? file.stat.mtime : 0);
     if (ctime >= since) counts.weeklyNew += 1;

@@ -41,6 +41,16 @@ function ensureAgentProviderSettings(plugin) {
   return plugin.settings.agentProvider;
 }
 
+function localizeProviderDisplayName(t, spec) {
+  const id = spec && spec.id ? String(spec.id) : "";
+  return t(`settings.agent.providerLabels.${id}`, (spec && spec.displayName) || id);
+}
+
+function localizeProviderModeLabel(t, spec, modeId, mode) {
+  const providerId = spec && spec.id ? String(spec.id) : "";
+  return t(`settings.agent.providerModeLabels.${providerId}.${modeId}`, (mode && mode.label) || modeId);
+}
+
 /**
  * Render the section into containerEl.
  *
@@ -168,7 +178,7 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
     .setDesc(t("settings.agent.providerDesc", "国内 Coding Plan / 各家 API 一键切换。"))
     .addDropdown((d) => {
       for (const spec of allSpecs) {
-        d.addOption(spec.id, spec.displayName);
+        d.addOption(spec.id, localizeProviderDisplayName(t, spec));
       }
       d.setValue(agent.direct.providerId);
       bindDropdownChange(d, async (providerId) => {
@@ -193,7 +203,7 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
       .addDropdown((d) => {
         for (const mid of modeIds) {
           const m = spec.modes[mid];
-          d.addOption(mid, m.label || mid);
+          d.addOption(mid, localizeProviderModeLabel(t, spec, mid, m));
         }
         d.setValue(agent.direct.providerMode || spec.defaultMode);
         bindDropdownChange(d, async (providerMode) => {

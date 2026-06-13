@@ -27,6 +27,8 @@ const FIXTURE_TEMPLATE_MAP = JSON.stringify({
 const FIXTURE_BUNDLE = {
   "template-map.json": FIXTURE_TEMPLATE_MAP,
   "ah-note/assets/每日笔记模板.md": "# Daily\n\n## 今日聚焦\n- \n",
+  "ah-note/assets/每日笔记模板.en.md": "# Daily\n\n## Today's Most Important Thing\n- \n",
+  "ah-note/assets/每日笔记模板.ru.md": "# День\n\n## Главное сегодня\n- \n",
   "ah-project/assets/项目模板.md": "# Project\n\n## Goal\n",
 };
 
@@ -94,8 +96,12 @@ function makeAdapter(initial = {}) {
   };
 }
 
-function makePlugin(adapter) {
-  return { app: { vault: { adapter } } };
+function makePlugin(adapter, locale = "zh-CN") {
+  return {
+    app: { vault: { adapter } },
+    settings: { uiLanguage: locale },
+    getEffectiveLocale: () => locale,
+  };
 }
 
 test("readTemplateMap returns entries + metaTemplatesDir from embedded bundle", async () => {
@@ -149,6 +155,18 @@ test("readTemplate falls back to bundled when no user copy exists", async () => 
   const r = await readTemplate(makePlugin(makeAdapter({})), "daily-note");
   assert.equal(r.source, "bundled");
   assert.match(r.content, /今日聚焦/);
+});
+
+test("readTemplate should use English bundled fallback when locale is en", async () => {
+  const r = await readTemplate(makePlugin(makeAdapter({}), "en"), "daily-note");
+  assert.equal(r.source, "bundled");
+  assert.match(r.content, /Today's Most Important Thing/);
+});
+
+test("readTemplate should use Russian bundled fallback when locale is ru", async () => {
+  const r = await readTemplate(makePlugin(makeAdapter({}), "ru"), "daily-note");
+  assert.equal(r.source, "bundled");
+  assert.match(r.content, /Главное сегодня/);
 });
 
 test("readTemplate returns null for unknown template id", async () => {

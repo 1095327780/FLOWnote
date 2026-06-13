@@ -1,5 +1,14 @@
 const LINK_RESOLVER_PROVIDER_IDS = ["tianapi", "showapi", "gugudata"];
 const { normalizeToolPermissionMode } = require("./agent/permission-policy");
+const { normalizeUiLanguage } = require("./i18n-locale-utils");
+const {
+  getDefaultDailyNotePath,
+  getDefaultNotePaths,
+  migrateMobileCaptureDefaultsForLocale,
+  migrateNotePathsForLocale,
+  normalizeNotePathsForLocale,
+  migrateSettingsLocaleDefaults,
+} = require("./localized-defaults");
 
 const LINK_RESOLVER_DEFAULTS = {
   enabled: true,
@@ -63,27 +72,10 @@ function normalizeLinkResolver(raw) {
 // these in settings → "笔记位置". The agent system prompt is rebuilt
 // per turn with whatever values are live in `settings.notePaths`, so a
 // path change takes effect immediately (no restart, no skill rewrite).
-const DEFAULT_NOTE_PATHS = {
-  dailyNotes:       "01-捕获层/每日笔记",
-  weeklyReviews:    "01-捕获层/周记",
-  monthlyReviews:   "01-捕获层/月记",
-  yearlyReviews:    "01-捕获层/年记",
-  permanentNotes:   "02-培养层/永久笔记",
-  topicNotes:       "02-培养层/主题笔记",
-  literatureNotes:  "02-培养层/文献笔记",
-  domainPages:      "03-连接层",
-  activeProjects:   "04-创造层/项目",
-  archive:          "04-创造层/归档",
-};
+const DEFAULT_NOTE_PATHS = getDefaultNotePaths("zh-CN");
 
-function normalizeNotePaths(raw) {
-  const data = raw && typeof raw === "object" ? raw : {};
-  const out = { ...DEFAULT_NOTE_PATHS };
-  for (const key of Object.keys(DEFAULT_NOTE_PATHS)) {
-    const v = String(data[key] || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
-    out[key] = v || DEFAULT_NOTE_PATHS[key];
-  }
-  return out;
+function normalizeNotePaths(raw, locale = "zh-CN") {
+  return normalizeNotePathsForLocale(raw, locale);
 }
 
 const DEFAULT_SETTINGS = {
@@ -108,7 +100,7 @@ const DEFAULT_SETTINGS = {
     apiKey: "",
     baseUrl: "",
     model: "",
-    dailyNotePath: "01-捕获层/每日笔记",
+    dailyNotePath: getDefaultDailyNotePath("zh-CN"),
     ideaSectionHeader: "## 记录",
     enableAiCleanup: true,
     enableUrlSummary: true,
@@ -152,19 +144,16 @@ function normalizeSettings(raw, options = {}) {
   const incomingAgentModePreference = normalizeAgentProviderModePreference(
     merged.agentProviderModePreference,
   );
-  {
-    const lang = String(merged.uiLanguage || "").trim().toLowerCase();
-    if (lang === "auto") merged.uiLanguage = "auto";
-    else if (lang === "zh-cn" || lang === "zh_cn" || lang === "zh") merged.uiLanguage = "zh-CN";
-    else if (lang.startsWith("en")) merged.uiLanguage = "en";
-    else merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
-  }
+  merged.uiLanguage = normalizeUiLanguage(merged.uiLanguage);
+  const defaultLocale = merged.uiLanguage === "auto" ? "zh-CN" : merged.uiLanguage;
 
   merged.sendWithEnter = typeof merged.sendWithEnter === "boolean" ? merged.sendWithEnter : DEFAULT_SETTINGS.sendWithEnter;
   if (!["auto", "native"].includes(String(merged.launchStrategy || "").trim().toLowerCase())) {
     merged.launchStrategy = "auto";
   }
-  merged.notePaths = normalizeNotePaths(merged.notePaths);
+  merged.notePaths = merged.uiLanguage === "auto"
+    ? normalizeNotePaths(merged.notePaths, defaultLocale)
+    : migrateNotePathsForLocale(merged.notePaths, defaultLocale, defaultLocale);
 
   merged.requestTimeoutMs = Math.max(10000, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
   merged.cliPath = String(merged.cliPath || "").trim();
@@ -189,9 +178,12 @@ function normalizeSettings(raw, options = {}) {
   mc.apiKey = String(mc.apiKey || "").trim();
   mc.baseUrl = String(mc.baseUrl || "").trim();
   mc.model = String(mc.model || "").trim();
-  mc.dailyNotePath = String(mc.dailyNotePath || mcDefaults.dailyNotePath).trim();
+  mc.dailyNotePath = String(mc.dailyNotePath || getDefaultDailyNotePath(defaultLocale)).trim();
   if (mc.dailyNotePath === "01-捕获层/记录") mc.dailyNotePath = "01-捕获层/每日笔记";
   if (mc.dailyNotePath === "01-Capture/Records") mc.dailyNotePath = "01-Capture/Daily Notes";
+  if (merged.uiLanguage !== "auto") {
+    migrateMobileCaptureDefaultsForLocale(mc, defaultLocale, defaultLocale);
+  }
   mc.ideaSectionHeader = String(mc.ideaSectionHeader || mcDefaults.ideaSectionHeader).trim();
   mc.enableAiCleanup = typeof mc.enableAiCleanup === "boolean" ? mc.enableAiCleanup : mcDefaults.enableAiCleanup;
   mc.enableUrlSummary = typeof mc.enableUrlSummary === "boolean" ? mc.enableUrlSummary : mcDefaults.enableUrlSummary;
@@ -261,6 +253,9 @@ module.exports = {
   DEFAULT_NOTE_PATHS,
   LINK_RESOLVER_DEFAULTS,
   LINK_RESOLVER_PROVIDER_IDS,
+  getDefaultDailyNotePath,
+  getDefaultNotePaths,
+  migrateSettingsLocaleDefaults,
   migrateLegacySettings,
   normalizeLinkResolver,
   normalizeNotePaths,

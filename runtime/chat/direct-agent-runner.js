@@ -30,6 +30,7 @@ const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
 const { loadSkills, formatSkillListing, SkillRegistry, parseFrontmatter, buildSkillManifest, normalizeResourcePaths } = require("../agent/skill-registry");
+const { NOTE_PATH_DEFAULTS_BY_LOCALE, getDefaultNotePaths, getSkillDocLocale } = require("../localized-defaults");
 
 // Embedded bundled-skills index — used as a fallback when the user's
 // vault doesn't have skill folders synced yet. The plugin bundle has
@@ -251,7 +252,7 @@ function buildSystemPrompt(skillManifests, opts) {
   // note kind lives in. The bundled SKILL.md files reference defaults
   // like `01-捕获层/每日笔记/` inline; this block tells the model to
   // treat those as DEFAULTS and prefer the user's configured paths.
-  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths);
+  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths, opts && opts.outputLocale);
   if (notePathBlock) parts.push(notePathBlock);
 
   const listing = formatSkillListing(skillManifests);
@@ -266,18 +267,7 @@ function buildSystemPrompt(skillManifests, opts) {
 // override to the model in a "Note path overrides" block of the system
 // prompt — the model is instructed to use the override whenever a skill
 // references the default path.
-const DEFAULT_NOTE_PATH_LAYOUT = {
-  dailyNotes:       "01-捕获层/每日笔记",
-  weeklyReviews:    "01-捕获层/周记",
-  monthlyReviews:   "01-捕获层/月记",
-  yearlyReviews:    "01-捕获层/年记",
-  permanentNotes:   "02-培养层/永久笔记",
-  topicNotes:       "02-培养层/主题笔记",
-  literatureNotes:  "02-培养层/文献笔记",
-  domainPages:      "03-连接层",
-  activeProjects:   "04-创造层/项目",
-  archive:          "04-创造层/归档",
-};
+const DEFAULT_NOTE_PATH_LAYOUT = getDefaultNotePaths("zh-CN");
 const NOTE_PATH_LABELS = {
   dailyNotes:       "Daily notes 每日笔记",
   weeklyReviews:    "Weekly reviews 周记",
@@ -291,8 +281,9 @@ const NOTE_PATH_LABELS = {
   archive:          "Archive 归档",
 };
 
-function formatNotePathOverrides(notePaths) {
+function formatNotePathOverrides(notePaths, locale = "zh-CN") {
   const live = (notePaths && typeof notePaths === "object") ? notePaths : {};
+  const defaults = getDefaultNotePaths(locale);
   // Always emit the full table so the model has a single source of
   // truth, even if every value matches the default — it's only ~10
   // lines and dramatically reduces "AI guessed the wrong path" cases.
@@ -300,15 +291,18 @@ function formatNotePathOverrides(notePaths) {
     "Note path conventions (USE THESE EXACT FOLDERS when reading or writing the listed note kinds; OVERRIDE any path mentioned inside a skill body):",
   ];
   for (const key of Object.keys(DEFAULT_NOTE_PATH_LAYOUT)) {
-    const dflt = DEFAULT_NOTE_PATH_LAYOUT[key];
+    const dflt = defaults[key] || DEFAULT_NOTE_PATH_LAYOUT[key];
     const v = String((live[key] || "")).replace(/\\/g, "/").replace(/\/+$/, "").trim() || dflt;
     const label = NOTE_PATH_LABELS[key] || key;
     const tag = v !== dflt ? "  (user-customized)" : "";
     lines.push(`  - ${label}: ${v}${tag}`);
   }
+  const defaultAliases = Object.values(NOTE_PATH_DEFAULTS_BY_LOCALE)
+    .flatMap((defaultsForLocale) => Object.values(defaultsForLocale || {}))
+    .filter(Boolean);
   lines.push(
     "",
-    "When a skill body contains a hardcoded path like \"01-捕获层/每日笔记/\" or \"02-培养层/永久笔记/\", that path is the DEFAULT. If the table above lists a different value for that note kind, use the table's value. Never invent a new folder.",
+    `When a skill body contains a hardcoded default path, treat it as an alias for the matching row above. Known default aliases include: ${[...new Set(defaultAliases)].join("; ")}. If the table above lists a different value for that note kind, use the table's value. If a skill body contains placeholders like "{{notePaths.dailyNotes}}" or "{{notePaths.activeProjects}}", replace them mentally with the matching folder from this table. Never invent a new folder.`,
   );
   return lines.join("\n");
 }
@@ -468,7 +462,10 @@ async function ensureSkillRegistry(plugin) {
     return new SkillRegistry([]);
   }
   const skillRoots = resolveSkillRoots(plugin);
-  const cacheKey = skillRoots.join("\n");
+  const locale = getSkillDocLocale(
+    typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : plugin.settings && plugin.settings.uiLanguage,
+  );
+  const cacheKey = `${locale}\n${skillRoots.join("\n")}`;
 
   // Cache key: ordered skill roots. Re-load if the user points elsewhere.
   if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === cacheKey) {
@@ -504,7 +501,7 @@ async function ensureSkillRegistry(plugin) {
   // sync correctly. Without this merge the user types `/ah`, the agent
   // doesn't see `ah` in its registry, and skill_invoke fails.
   let injectedFromEmbed = 0;
-  for (const embedded of buildEmbeddedSkillManifests()) {
+  for (const embedded of buildEmbeddedSkillManifests(locale)) {
     if (!embedded || !embedded.name) continue;
     const keys = skillIdentityKeys(embedded);
     if (keys.some((key) => seenSkillKeys.has(key))) continue;
@@ -538,22 +535,33 @@ function skillIdentityKeys(manifest) {
  * shape that `loadSkills` returns, so SkillRegistry / skill_invoke can
  * consume either without caring where the body came from.
  */
-function buildEmbeddedSkillManifests() {
+function localizedEmbeddedSkillDocPath(slug, locale = "zh-CN") {
+  const skillLocale = getSkillDocLocale(locale);
+  const candidates = skillLocale === "zh-CN"
+    ? [`${slug}/SKILL.zh-CN.md`, `${slug}/SKILL.md`, `${slug}/SKILL.en.md`]
+    : [`${slug}/SKILL.en.md`, `${slug}/SKILL.md`, `${slug}/SKILL.zh-CN.md`];
+  return candidates.find((candidate) => Object.prototype.hasOwnProperty.call(EMBEDDED_BUNDLED_SKILLS_FILES, candidate)) || "";
+}
+
+function buildEmbeddedSkillManifests(locale = "zh-CN") {
   const resourcesBySlug = {};
   for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
     const slash = filePath.indexOf("/");
     if (slash === -1) continue;
     const slug = filePath.slice(0, slash);
     const rel = filePath.slice(slash + 1);
-    if (!slug || !rel || rel === "SKILL.md") continue;
+    if (!slug || !rel || /^SKILL(\.(zh-CN|en|ru))?\.md$/.test(rel)) continue;
     if (!resourcesBySlug[slug]) resourcesBySlug[slug] = {};
     resourcesBySlug[slug][rel] = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
   }
   const out = [];
-  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
-    if (!filePath.endsWith("/SKILL.md")) continue;
-    const slug = filePath.split("/")[0];
+  const slugs = [...new Set(Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)
+    .map((filePath) => String(filePath || "").split("/")[0])
+    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  for (const slug of slugs) {
     if (!slug) continue;
+    const filePath = localizedEmbeddedSkillDocPath(slug, locale);
+    if (!filePath) continue;
     const raw = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
     const { frontmatter, body } = parseFrontmatter(raw);
     const embeddedResourceFiles = resourcesBySlug[slug] || {};

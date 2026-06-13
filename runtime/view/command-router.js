@@ -1,5 +1,7 @@
 const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
+const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { getLocalizedSkillDescription } = require("../skill-i18n");
 
 function tr(view, key, fallback, params = {}) {
   return tFromContext(view, key, fallback, params);
@@ -23,6 +25,12 @@ function syncInlineModelSelectLabelFromSelect(view) {
 
 function getSkillPrimaryDescription(skill) {
   if (!skill) return tr(this, "view.skill.primaryFallback", "Select a skill to see its primary description.");
+  const locale = normalizeSupportedLocale(
+    this && this.plugin && typeof this.plugin.getEffectiveLocale === "function"
+      ? this.plugin.getEffectiveLocale()
+      : this && this.plugin && this.plugin.settings && this.plugin.settings.uiLanguage,
+    "zh-CN",
+  );
 
   const cleanInline = (line) => String(line || "")
     .trim()
@@ -32,7 +40,7 @@ function getSkillPrimaryDescription(skill) {
     .replace(/`([^`]+)`/g, "$1")
     .trim();
 
-  const directRaw = String(skill.description || "").trim();
+  const directRaw = String(getLocalizedSkillDescription(skill, locale) || skill.description || "").trim();
   const isBlockMarker = /^([>|][+-]?)$/.test(directRaw);
   if (!isBlockMarker && directRaw) {
     const directLines = directRaw

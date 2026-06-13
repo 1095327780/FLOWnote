@@ -86,7 +86,7 @@ function getLocalizedMarkdownTokenOrder(locale, fallback = DEFAULT_UI_LOCALE) {
   const normalized = normalizeSupportedLocale(locale, fallback);
   if (normalized === "zh-CN") return ["zh-CN", "base", "en"];
   if (normalized === "en") return ["en", "base", "zh-CN"];
-  return [normalized, "base", "en", "zh-CN"];
+  return [normalized, "en", "base", "zh-CN"];
 }
 
 function createTranslator(options = {}) {

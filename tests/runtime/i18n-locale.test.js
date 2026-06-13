@@ -64,5 +64,7 @@ test("createTranslator should resolve locale, fallback, and interpolation", () =
 
 test("locale helpers should expose intl locale and markdown fallback order", () => {
   assert.equal(getIntlLocale("ru-RU"), "ru-RU");
-  assert.deepEqual(getLocalizedMarkdownTokenOrder("ru"), ["ru", "base", "en", "zh-CN"]);
+  assert.deepEqual(getLocalizedMarkdownTokenOrder("zh-CN"), ["zh-CN", "base", "en"]);
+  assert.deepEqual(getLocalizedMarkdownTokenOrder("en"), ["en", "base", "zh-CN"]);
+  assert.deepEqual(getLocalizedMarkdownTokenOrder("ru"), ["ru", "en", "base", "zh-CN"]);
 });

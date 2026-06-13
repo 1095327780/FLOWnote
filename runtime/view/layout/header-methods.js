@@ -60,13 +60,15 @@ function renderHeader(header) {
       this.render();
     });
   };
-  renderPanelButton("home", "layout-dashboard", "首页");
-  renderPanelButton("chat", "message-square", "聊天");
+  renderPanelButton("home", "layout-dashboard", tr(this, "view.header.home", "Home"));
+  renderPanelButton("chat", "message-square", tr(this, "view.header.chat", "Chat"));
 
   const actions = header.createDiv({ cls: "oc-header-actions" });
   actions.createDiv({
     cls: "oc-header-meta",
-    text: this.activePanel === "home" ? "Dashboard" : tr(this, "view.header.runtime", "Chat Runtime"),
+    text: this.activePanel === "home"
+      ? tr(this, "view.header.dashboard", "Dashboard")
+      : tr(this, "view.header.runtime", "Chat Runtime"),
   });
 
   const newBtn = this.buildIconButton(
