@@ -1,0 +1,68 @@
+function buildRussianSkillsMessages(base) {
+  return {
+    ...base,
+    heading: "Управление Skills",
+    intro: "Редактор изменяет только SKILL.md в корне skill. Если skill содержит references, assets, scripts или другие ресурсы, используйте Import Folder, чтобы сохранить всю папку.",
+    importFolder: "Импорт папки",
+    add: "+ Новый skill",
+    importUnsupported: "На этой платформе нельзя выбрать папку напрямую. Используйте Import Folder в Obsidian на компьютере или вручную скопируйте папку в каталог установки Skills.",
+    importing: "Импорт...",
+    importFailed: "Импорт не удался: {msg}",
+    importDone: "Импортировано skills: {imported} ({files} файлов), пропущено: {skipped}. {errors}",
+    created: "Skill \"{name}\" создан",
+    saveFailed: "Не удалось сохранить: {msg}",
+    listFailed: "Не удалось прочитать список skills: {msg}",
+    empty: "Skills пока нет. Нажмите New Skill выше, чтобы начать.",
+    sourceEmbedded: "Источник: встроенный fallback (только чтение)",
+    sourceReadonly: "Источник: {dir} (только чтение)",
+    sourceInstalled: "Источник: {dir}",
+    edit: "Редактировать SKILL.md",
+    delete: "Удалить",
+    readonly: "Только чтение",
+    saved: "Skill \"{name}\" сохранен",
+    deleteConfirm: "Удалить skill \"{name}\"? Будет удалена вся папка {dir}, включая текст skill, references и другие ресурсы. Это действие нельзя отменить.",
+    deleted: "Skill \"{name}\" удален",
+    deleteFailed: "Удаление не удалось: {msg}",
+    secretsIntro: "Установленным skills нужны эти секреты. Модель видит только placeholder $KEY; реальные секреты подставляет плагин во время выполнения инструментов.",
+    secretWereadDesc: "Используется официальным WeRead skill для API-вызовов. Рекомендуется официальный ключ с префиксом wrk-.",
+    secretGenericDesc: "Используется сторонними skills для API-вызовов.",
+  };
+}
+
+function buildRussianTemplateMessages(base) {
+  return {
+    ...base,
+    heading: "Управление шаблонами",
+    listFailed: "Не удалось прочитать список шаблонов: {msg}",
+    empty: "Шаблоны не найдены. Проверьте целостность пакета плагина.",
+    statusDefault: "По умолчанию (не изменен)",
+    statusCustom: "Изменен",
+    statusSynced: "Синхронизирован с default",
+    edit: "Редактировать",
+    reset: "Сбросить к default",
+    readFailed: "Чтение не удалось: {msg}",
+    readNone: "Содержимое шаблона не найдено",
+    saved: "Шаблон сохранен",
+    saveFailed: "Не удалось сохранить: {msg}",
+    resetConfirm: "Сбросить \"{name}\" к шаблону плагина по умолчанию? Ваши изменения будут перезаписаны.",
+    resetNoDefault: "Default-содержимое не найдено, сброс невозможен.",
+    resetDone: "Сброшено к default",
+    resetFailed: "Сброс не удался: {msg}",
+    labelDaily: "Ежедневная заметка",
+    labelWeekly: "Еженедельный обзор",
+    labelMonthly: "Ежемесячный обзор",
+    labelYearly: "Годовой обзор",
+    labelLiterature: "Литературная заметка",
+    labelEvergreen: "Evergreen заметка",
+    labelProject: "Проект",
+    labelProgress: "Прогресс",
+    labelHome: "HOME",
+    labelTopic: "Тематическая заметка",
+    labelDomain: "Страница области",
+  };
+}
+
+module.exports = {
+  buildRussianSkillsMessages,
+  buildRussianTemplateMessages,
+};

@@ -1,6 +1,6 @@
 const LINK_RESOLVER_PROVIDER_IDS = ["tianapi", "showapi", "gugudata"];
 const { normalizeToolPermissionMode } = require("./agent/permission-policy");
-const { normalizeUiLanguage } = require("./i18n-locale-utils");
+const { normalizeSupportedLocale, normalizeUiLanguage } = require("./i18n-locale-utils");
 const {
   getDefaultDailyNotePath,
   getDefaultNotePaths,
@@ -9,6 +9,46 @@ const {
   normalizeNotePathsForLocale,
   migrateSettingsLocaleDefaults,
 } = require("./localized-defaults");
+
+const DEFAULT_NOTE_PATHS_ZH = getDefaultNotePaths("zh-CN");
+const DEFAULT_NOTE_PATHS_EN = getDefaultNotePaths("en");
+const DEFAULT_NOTE_PATHS_RU = getDefaultNotePaths("ru");
+const DEFAULT_NOTE_PATHS = DEFAULT_NOTE_PATHS_ZH;
+
+const DEFAULT_META_PATHS_ZH = {
+  metaRoot: "Meta",
+  templates: "Meta/模板",
+  indexes: "Meta/索引",
+  indexPages: "Meta/索引页",
+  systemDocs: "Meta/系统文档",
+  homeViews: "Meta/Home视图",
+  memory: "Meta/ai-memory",
+  legacyMemory: "Meta/.ai-memory",
+};
+
+const DEFAULT_META_PATHS_EN = {
+  metaRoot: "Meta",
+  templates: "Meta/Templates",
+  indexes: "Meta/Indexes",
+  indexPages: "Meta/Index Pages",
+  systemDocs: "Meta/System Docs",
+  homeViews: "Meta/Home Views",
+  memory: "Meta/ai-memory",
+  legacyMemory: "Meta/.ai-memory",
+};
+
+const DEFAULT_META_PATHS_RU = {
+  metaRoot: "Meta",
+  templates: "Meta/Шаблоны",
+  indexes: "Meta/Индексы",
+  indexPages: "Meta/Страницы индекса",
+  systemDocs: "Meta/Системные документы",
+  homeViews: "Meta/Home Views",
+  memory: "Meta/ai-memory",
+  legacyMemory: "Meta/.ai-memory",
+};
+
+const DEFAULT_META_PATHS = DEFAULT_META_PATHS_ZH;
 
 const LINK_RESOLVER_DEFAULTS = {
   enabled: true,
@@ -68,35 +108,70 @@ function normalizeLinkResolver(raw) {
   return lr;
 }
 
-// Default folder locations the bundled skills expect. Users override
-// these in settings → "笔记位置". The agent system prompt is rebuilt
-// per turn with whatever values are live in `settings.notePaths`, so a
-// path change takes effect immediately (no restart, no skill rewrite).
-const DEFAULT_NOTE_PATHS = getDefaultNotePaths("zh-CN");
-
-function normalizeNotePaths(raw, locale = "zh-CN") {
-  return normalizeNotePathsForLocale(raw, locale);
-}
-
 function getDefaultNotePathsByLocale(locale) {
-  return normalizeSupportedLocale(locale || "zh-CN", "zh-CN") === "en"
-    ? { ...DEFAULT_NOTE_PATHS_EN }
-    : { ...DEFAULT_NOTE_PATHS_ZH };
+  const normalized = normalizeSupportedLocale(locale || "zh-CN", "zh-CN");
+  if (normalized === "en") return { ...DEFAULT_NOTE_PATHS_EN };
+  if (normalized === "ru") return { ...DEFAULT_NOTE_PATHS_RU };
+  return { ...DEFAULT_NOTE_PATHS_ZH };
 }
 
 function getDefaultMetaPathsByLocale(locale) {
-  return normalizeSupportedLocale(locale || "zh-CN", "zh-CN") === "en"
-    ? { ...DEFAULT_META_PATHS_EN }
-    : { ...DEFAULT_META_PATHS_ZH };
+  const normalized = normalizeSupportedLocale(locale || "zh-CN", "zh-CN");
+  if (normalized === "en") return { ...DEFAULT_META_PATHS_EN };
+  if (normalized === "ru") return { ...DEFAULT_META_PATHS_RU };
+  return { ...DEFAULT_META_PATHS_ZH };
 }
 
-function normalizeNotePaths(raw, defaults = DEFAULT_NOTE_PATHS) {
+function normalizeVaultFolderPath(value) {
+  return String(value || "")
+    .replace(/\\+/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .trim();
+}
+
+function joinVaultFolderPath(root, child) {
+  const base = normalizeVaultFolderPath(root);
+  const suffix = normalizeVaultFolderPath(child);
+  if (!base) return suffix;
+  if (!suffix) return base;
+  return `${base}/${suffix}`;
+}
+
+function getMetaPathSuffix(defaultPaths, key) {
+  const defaults = defaultPaths && typeof defaultPaths === "object" ? defaultPaths : DEFAULT_META_PATHS;
+  if (key === "metaRoot") return "";
+  const root = normalizeVaultFolderPath(defaults.metaRoot || DEFAULT_META_PATHS.metaRoot);
+  const path = normalizeVaultFolderPath(defaults[key]);
+  if (!path) return "";
+  if (root && path === root) return "";
+  if (root && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+  return path;
+}
+
+function deriveMetaPathsFromRoot(metaRoot, defaults = DEFAULT_META_PATHS) {
+  const base = defaults && typeof defaults === "object" ? defaults : DEFAULT_META_PATHS;
+  const root = normalizeVaultFolderPath(metaRoot) || normalizeVaultFolderPath(base.metaRoot) || DEFAULT_META_PATHS.metaRoot;
+  const out = {};
+  for (const key of Object.keys(DEFAULT_META_PATHS_ZH)) {
+    out[key] = key === "metaRoot"
+      ? root
+      : joinVaultFolderPath(root, getMetaPathSuffix(base, key));
+  }
+  return out;
+}
+
+function normalizeNotePaths(raw, localeOrDefaults = DEFAULT_NOTE_PATHS) {
+  if (typeof localeOrDefaults === "string") {
+    return normalizeNotePathsForLocale(raw, localeOrDefaults);
+  }
   const data = raw && typeof raw === "object" ? raw : {};
-  const base = defaults && typeof defaults === "object" ? defaults : DEFAULT_NOTE_PATHS;
+  const base = localeOrDefaults && typeof localeOrDefaults === "object" ? localeOrDefaults : DEFAULT_NOTE_PATHS;
   const out = { ...base };
   for (const key of Object.keys(DEFAULT_NOTE_PATHS_ZH)) {
-    const v = String(data[key] || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
-    out[key] = v || base[key] || DEFAULT_NOTE_PATHS_ZH[key];
+    const value = normalizeVaultFolderPath(data[key]);
+    out[key] = value || base[key] || DEFAULT_NOTE_PATHS_ZH[key];
   }
   return out;
 }
@@ -297,13 +372,17 @@ module.exports = {
   DEFAULT_NOTE_PATHS,
   DEFAULT_NOTE_PATHS_ZH,
   DEFAULT_NOTE_PATHS_EN,
+  DEFAULT_NOTE_PATHS_RU,
   DEFAULT_META_PATHS,
   DEFAULT_META_PATHS_ZH,
   DEFAULT_META_PATHS_EN,
+  DEFAULT_META_PATHS_RU,
   LINK_RESOLVER_DEFAULTS,
   LINK_RESOLVER_PROVIDER_IDS,
   getDefaultDailyNotePath,
   getDefaultNotePaths,
+  getDefaultNotePathsByLocale,
+  getDefaultMetaPathsByLocale,
   migrateSettingsLocaleDefaults,
   migrateLegacySettings,
   normalizeLinkResolver,

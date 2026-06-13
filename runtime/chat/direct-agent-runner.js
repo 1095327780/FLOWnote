@@ -29,7 +29,20 @@ const { createWebRequestTool } = require("../agent/tools/web-request");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
-const { loadSkills, formatSkillListing, SkillRegistry, parseFrontmatter, buildSkillManifest, normalizeResourcePaths } = require("../agent/skill-registry");
+const {
+  loadSkills,
+  formatSkillListing,
+  SkillRegistry,
+  parseFrontmatter,
+  buildSkillManifest,
+  normalizeResourcePaths,
+  substituteArguments,
+  renderSkillTemplateVariables,
+} = require("../agent/skill-registry");
+const {
+  shouldBlockUnbackedFileMutationClaim,
+  unbackedFileMutationWarning,
+} = require("./file-mutation-claim-guard");
 const { NOTE_PATH_DEFAULTS_BY_LOCALE, getDefaultNotePaths, getSkillDocLocale } = require("../localized-defaults");
 
 // Embedded bundled-skills index — used as a fallback when the user's
@@ -49,6 +62,19 @@ const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
 const { getIntlLocale, normalizeSupportedLocale } = require("../i18n-locale-utils");
+const {
+  DEFAULT_NOTE_PATHS_ZH,
+  DEFAULT_NOTE_PATHS_EN,
+  DEFAULT_NOTE_PATHS_RU,
+  DEFAULT_META_PATHS_ZH,
+  DEFAULT_META_PATHS_EN,
+  DEFAULT_META_PATHS_RU,
+  getDefaultNotePathsByLocale,
+  getDefaultMetaPathsByLocale,
+  normalizeNotePaths,
+  normalizeMetaPaths,
+} = require("../settings-utils");
+const { BASE_SYSTEM_PROMPT } = require("./direct-agent-system-prompt");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
@@ -83,6 +109,27 @@ function describeToday(now, locale = "zh-CN") {
   return `${getLocalISODate(d)} (${weekday})`;
 }
 
+function describeCurrentDateTime(now, locale = "zh-CN") {
+  const d = now instanceof Date ? now : new Date();
+  return `${describeToday(d, locale)} ${getLocalHHmm(d)}`;
+}
+
+function runnerText(locale, zh, en, ru) {
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  if (normalizedLocale === "zh-CN") return zh;
+  if (normalizedLocale === "ru") return ru || en;
+  return en;
+}
+
+function getRunnerLocale(owner) {
+  const plugin = owner && owner.plugin ? owner.plugin : owner;
+  if (plugin && typeof plugin.getEffectiveLocale === "function") {
+    return normalizeSupportedLocale(plugin.getEffectiveLocale(), "en");
+  }
+  const settings = plugin && plugin.settings ? plugin.settings : {};
+  return normalizeSupportedLocale(settings.uiLanguage, "en");
+}
+
 function describeOutputLanguage(locale) {
   const normalizedLocale = normalizeSupportedLocale(locale, "en");
   if (normalizedLocale === "zh-CN") return { label: "Simplified Chinese", instruction: "用简体中文输出。" };
@@ -99,146 +146,10 @@ function describeOutputLanguage(locale) {
   return { label: "English", instruction: "Reply and write user-facing note content in English unless the user explicitly asks for another language." };
 }
 
-const BASE_SYSTEM_PROMPT = [
-  "You are FLOWnote, an AI assistant running inside Obsidian. The user's notes live in an Obsidian vault.",
-  "",
-  "You have these tools available:",
-  "  • vault_read      — read a markdown note. Pass `path` (vault-relative, forward slashes).",
-  "                      Optional `offset` + `limit` to slice long files.",
-  "  • vault_list      — enumerate notes/folders. Optional `path`, `pattern` (glob), `extensions`,",
-  "                      `recursive`, `include_folders`, `limit`.",
-  "  • vault_search    — search note contents. Required `query` (substring; set `regex: true` for regex).",
-  "                      Optional `path`, `pattern`, `case_sensitive`, `extensions`, `max_files`, `max_matches`.",
-  "  • vault_edit      — precise string replacement in a single note. Pass `path`, `old_string`,",
-  "                      `new_string`, optional `replace_all`. The match must be unique unless replace_all.",
-  "                      Prefer this over vault_write for surgical edits (faster, safer).",
-  "  • vault_write     — create / overwrite / append text. Pass `path`, `content`, `mode`:",
-  "                        mode=\"create\"    → fails if the file already exists",
-  "                        mode=\"overwrite\" → replace existing content (full rewrite only)",
-  "                        mode=\"append\"   → add to the end",
-  "  • vault_daily     — read / append / create the user's daily note. Pass `mode` (read|append|create),",
-  "                      optional `date` (YYYY-MM-DD, defaults to today), optional `content`.",
-  "                      Uses the daily-notes plugin's folder + format + template automatically.",
-  "                      Prefer this whenever the user means \"today's note\" / \"昨日日记\" / \"周记\".",
-  "  • vault_property  — read/set/delete a YAML frontmatter property. Pass `path`, `name`, `op`",
-  "                      (get|set|delete), `value` (for set). Use for status / tags / source /",
-  "                      due-date / any frontmatter field.",
-  "  • vault_backlinks — list notes that link TO a given note. Pass `path`. Useful for finding",
-  "                      related notes (ah-card flow) without reading every file.",
-  "  • vault_tasks     — list checkbox tasks across the vault. Optional `path` scope, `status`",
-  "                      (open|done|all). Use for daily/weekly task review.",
-  "  • vault_tags      — `mode: list` returns top tags + counts; `mode: files` returns notes that",
-  "                      carry a given `tag` (with or without leading #).",
-  "  • vault_move      — rename or move a note OR folder. Pass `from` and `to` (both vault-relative).",
-  "                      Obsidian rewrites wikilinks pointing at the moved file(s) automatically —",
-  "                      ALWAYS prefer this over vault_write to a new path + delete.",
-  "  • vault_create_dir — `mkdir -p` for a vault folder. Pass `path`. Use BEFORE vault_write when",
-  "                      laying out a new directory structure (e.g. a fresh project folder).",
-  "  • vault_get_active_file — return the note currently open in the editor (path + basename +",
-  "                      parent folder). Use when the user says \"this note\" / \"add to here\".",
-  "  • web_fetch       — fetch a URL and return its readable text. WORKS without any API key —",
-  "                      Obsidian's requestUrl is the native HTTP client. Use this whenever the user",
-  "                      pastes a link and asks you to summarize / quote / extract content from it.",
-  "                      Do NOT claim you cannot access the web — you can, through web_fetch.",
-  "  • web_request     — send HTTP API requests with method, headers, and JSON body. Use this for",
-  "                      API-backed skills that need POST / Authorization, such as WeRead. Use",
-  "                      secret placeholders like `$WEREAD_API_KEY`; FLOWnote substitutes them from",
-  "                      Settings -> Skill management at execution time. If a secret is missing,",
-  "                      ask the user to fill it there; do not ask for shell export commands.",
-  "  • ask_user        — ask the user a multiple-choice question when truly ambiguous. Don't",
-  "                      abuse this — most ambiguity can be resolved with vault_list / vault_search.",
-  "  • skill_invoke    — load a vault skill's instructions so you can follow them. See \"Available",
-  "                      skills\" below. Pass `skill` (name) and optional `args` (string).",
-  "  • skill_resource_read — read a file inside an invoked skill folder, such as references/*.md",
-  "                      or assets/*.md. Use this when third-party skills point to relative",
-  "                      resources. Use vault_read for normal vault notes.",
-  "",
-  "Core rules:",
-  "  1. ALWAYS call the tools to do file operations. Don't describe what you would write — actually call the tool.",
-  "  2. Promise = tool call. If your reply claims a note/card was created/edited/saved/moved, the matching",
-  "     vault_* tool call MUST already be in this turn. Call the tools first, then summarize.",
-  "  3. Prefer vault_edit for small in-place changes; reserve vault_write/overwrite for wholesale rewrites.",
-  "     vault_edit requires the file to have been read this session (vault_read or a prior vault_write satisfies it).",
-  "  4. When the user attaches files, they appear in the conversation wrapped like this:",
-  "       <<<FLOWNOTE_FILE path=\"some/path.md\">>>",
-  "       ...file contents...",
-  "       <<<END_FLOWNOTE_FILE>>>",
-  "     The `path` attribute is the REAL vault path. Use it directly with vault_read/vault_write/vault_edit.",
-  "  5. Reply in the same language the user used. Be concise.",
-  "  6. If you finish without needing tools, respond naturally with text only.",
-  "",
-  "obsidian-cli compatibility map:",
-  "  Some skills reference `obsidian-cli` (Obsidian's official CLI tool) for vault operations. " +
-  "The CLI itself is desktop-only and not available in this runtime, but the same operations " +
-  "are exposed as native tools here. Translate as follows:",
-  "    obsidian read              → vault_read",
-  "    obsidian create            → vault_write mode=\"create\"",
-  "    obsidian append            → vault_write mode=\"append\"",
-  "    obsidian search            → vault_search",
-  "    obsidian daily:read        → vault_daily mode=\"read\"",
-  "    obsidian daily:append      → vault_daily mode=\"append\"",
-  "    obsidian property:set      → vault_property op=\"set\"",
-  "    obsidian backlinks         → vault_backlinks",
-  "    obsidian tasks             → vault_tasks",
-  "    obsidian tags              → vault_tags",
-  "  Claude Code tool compatibility:",
-  "    Read / FileRead         → vault_read for vault notes; skill_resource_read for skill-relative resources",
-  "    Write / FileWrite       → vault_write",
-  "    Edit / MultiEdit        → vault_edit",
-  "    LS / Glob               → vault_list",
-  "    Grep                    → vault_search",
-  "    WebFetch                → web_fetch for readable pages; web_request for API POST/custom headers",
-  "    curl / HTTP API calls   → web_request",
-  "    AskUserQuestion         → ask_user",
-  "    Skill                   → skill_invoke",
-  "    Bash / shell / scripts  → not available in Obsidian direct mode or mobile; read the",
-  "                              referenced resource/script and use native vault_* / web_fetch / web_request",
-  "                              equivalents. If no equivalent exists, explain that the step",
-  "                              requires the desktop OpenCode bridge or external tooling.",
-  "",
-  "Vault navigation (read this BEFORE searching):",
-  "",
-  "  The user's vault uses a PARA + Zettelkasten hybrid:",
-  "    01-捕获层/  daily notes, inbox, reading clippings (capture stage)",
-  "    02-培养层/  permanent notes, literature notes, topic pages (📍 prefix)",
-  "    03-连接层/  domain pages (🌱 prefix) — top-level knowledge hubs",
-  "    04-创造层/  active projects, archives",
-  "",
-  "  When the user asks about a topic, asks \"what do I know about X\", asks to extract notes,",
-  "  asks to summarize their thinking, or otherwise needs you to RETRIEVE knowledge from the vault:",
-  "",
-  "    STEP 1 — Read the authoritative index FIRST: `Meta/索引/kb-manifest.md`. This file is",
-  "             maintained by the user's /ah-index skill and lists every domain page, topic",
-  "             page, and permanent-note grouping. It is the FAST PATH — do not search before",
-  "             you have read it.",
-  "",
-  "    STEP 2 — If kb-manifest.md exists AND was updated recently, follow the link hierarchy",
-  "             it describes: domain page (🌱) → topic page (📍) → permanent note. Use",
-  "             vault_read on the specific page the user cares about, then vault_read again on",
-  "             the permanent notes it links to.",
-  "",
-  "    STEP 3 — If kb-manifest.md is MISSING, EMPTY, or its `更新时间` / `version` frontmatter",
-  "             field shows it's older than ~30 days, tell the user (in their language):",
-  "               \"你的知识库索引看起来过期/不存在，建议运行 /ah-index 重建一下，AI 才能高效",
-  "                  地通过领域页 → 主题页 → 永久笔记的层级帮你找东西。\"",
-  "             Then proceed to STEP 4.",
-  "",
-  "    STEP 4 — Fallback (no usable index): vault_list to enumerate 02-培养层/永久笔记 and",
-  "             03-连接层, vault_search to find by content. Tell the user EXPLICITLY that you're",
-  "             doing a manual scan because the index is unavailable.",
-  "",
-  "  Naming conventions (use to identify file type WITHOUT reading content):",
-  "    🌱 *.md    → domain page (knowledge hub)",
-  "    📍 *.md    → topic page (groups permanent notes)",
-  "    《...》*.md → literature note (book/article)",
-  "    YYYY-MM-DD.md → daily note",
-  "    no prefix → permanent note (atomic assertion)",
-].join("\n");
-
 function buildSystemPrompt(skillManifests, opts) {
   const parts = [BASE_SYSTEM_PROMPT];
   const ctxLines = [];
-  const locale = opts && opts.locale === "zh-CN" ? "zh-CN" : "en";
+  const locale = normalizeSupportedLocale(opts && opts.locale, "en");
   if (opts && opts.todayLabel) {
     ctxLines.push(runnerText(
       locale,
@@ -480,12 +391,12 @@ function buildSkillTemplateVariables(plugin, now = new Date()) {
   const metaPaths = normalizeMetaPaths(settings.metaPaths, metaLocaleDefaults);
   const skillsDir = String(settings.skillsDir || DEFAULT_SKILL_ROOT).replace(/\\/g, "/").replace(/\/+$/, "").trim() || DEFAULT_SKILL_ROOT;
   const defaultPathReplacements = [];
-  for (const defaults of [DEFAULT_NOTE_PATHS_ZH, DEFAULT_NOTE_PATHS_EN]) {
+  for (const defaults of [DEFAULT_NOTE_PATHS_ZH, DEFAULT_NOTE_PATHS_EN, DEFAULT_NOTE_PATHS_RU]) {
     for (const key of Object.keys(defaults || {})) {
       defaultPathReplacements.push({ from: defaults[key], to: notePaths[key] });
     }
   }
-  for (const defaults of [DEFAULT_META_PATHS_ZH, DEFAULT_META_PATHS_EN]) {
+  for (const defaults of [DEFAULT_META_PATHS_ZH, DEFAULT_META_PATHS_EN, DEFAULT_META_PATHS_RU]) {
     for (const key of Object.keys(defaults || {})) {
       defaultPathReplacements.push({ from: defaults[key], to: metaPaths[key] });
     }
@@ -588,7 +499,7 @@ async function ensureSkillRegistry(plugin) {
 
   let manifests = [];
   const seenSkillKeys = new Set();
-  const embeddedManifests = buildEmbeddedSkillManifests();
+  const embeddedManifests = buildEmbeddedSkillManifests(locale);
   const bundledSkillKeys = new Set();
   let skippedVaultBundled = 0;
 
@@ -627,26 +538,8 @@ async function ensureSkillRegistry(plugin) {
       for (const key of keys) seenSkillKeys.add(key);
     }
   }
-  // Merge in any embedded skills the vault scan missed. We don't
-  // replace the vault version when present (the user may have customized
-  // it on disk), but we backfill anything missing.
-  //
-  // Why this matters specifically: on iOS, Obsidian Sync sometimes
-  // skips individual files inside a synced dotfolder — e.g. the 2-char
-  // `ah/` directory gets dropped while `ah-card/`, `ah-archive/` etc
-  // sync correctly. Without this merge the user types `/ah`, the agent
-  // doesn't see `ah` in its registry, and skill_invoke fails.
-  let injectedFromEmbed = 0;
-  for (const embedded of buildEmbeddedSkillManifests(locale)) {
-    if (!embedded || !embedded.name) continue;
-    const keys = skillIdentityKeys(embedded);
-    if (keys.some((key) => seenSkillKeys.has(key))) continue;
-    manifests.push(embedded);
-    for (const key of keys) seenSkillKeys.add(key);
-    injectedFromEmbed += 1;
-  }
-  if (injectedFromEmbed > 0 && typeof plugin.log === "function") {
-    plugin.log(`[direct-agent] vault skill scan missing ${injectedFromEmbed} skill(s); backfilled from embedded bundle`);
+  if (skippedVaultBundled > 0 && typeof plugin.log === "function") {
+    plugin.log(`[direct-agent] ignored ${skippedVaultBundled} vault copy/copies of bundled skill(s); using embedded bundle`);
   }
   const registry = new SkillRegistry(manifests);
   plugin.__flownoteSkillCache = { root: cacheKey, registry };
@@ -954,10 +847,15 @@ async function runDirectAgentTurn({
     ? String(view.app.vault.getName() || "")
     : "";
   const notePaths = (plugin.settings && plugin.settings.notePaths) || null;
-  const locale = typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : "zh-CN";
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    { todayLabel: describeToday(undefined, locale), outputLocale: locale, vaultName, notePaths },
+    {
+      todayLabel: describeToday(turnNow, locale),
+      currentDateTimeLabel: describeCurrentDateTime(turnNow, locale),
+      outputLocale: locale,
+      vaultName,
+      notePaths,
+    },
   );
 
   // ---------------------------------------------------------------------

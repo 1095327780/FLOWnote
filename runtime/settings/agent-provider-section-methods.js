@@ -51,6 +51,139 @@ function localizeProviderModeLabel(t, spec, modeId, mode) {
   return t(`settings.agent.providerModeLabels.${providerId}.${modeId}`, (mode && mode.label) || modeId);
 }
 
+function shouldShowModelRefreshButton(spec) {
+  return Boolean(
+    spec
+    && !spec.userMustProvideModels
+    && Array.isArray(spec.models)
+    && spec.models.length > 0
+  );
+}
+
+function shouldKeepStaticModelsAfterRefreshFailure(spec) {
+  return Boolean(spec && spec.id !== "ollama");
+}
+
+function buildModelRefreshUserConfig(agent, spec) {
+  return {
+    providerId: spec.id,
+    mode: agent.direct.providerMode || spec.defaultMode,
+    region: agent.direct.region,
+    apiKey: getActiveApiKey(agent),
+    model: agent.direct.model || spec.defaultModel,
+    baseUrlOverride: agent.direct.baseUrlOverride || "",
+    userAgentOverride: agent.direct.userAgentOverride || "",
+    versionHeaderOverride: agent.direct.versionHeaderOverride || "",
+    stream: false,
+  };
+}
+
+async function refreshOllamaModelListNow({ plugin, agent, spec }) {
+  if (!plugin || !agent || !spec || spec.id !== "ollama") return false;
+  if (!plugin.__flownoteFetchedModels) plugin.__flownoteFetchedModels = {};
+  const provider = buildProviderFromSpec({
+    spec,
+    userConfig: buildModelRefreshUserConfig(agent, spec),
+  });
+  if (typeof provider.listModels !== "function") return false;
+  const list = await provider.listModels();
+  plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
+  if (Array.isArray(list) && list.length > 0) {
+    const currentModel = String(agent.direct.model || spec.defaultModel || "").trim();
+    if (!list.some((m) => m && m.id === currentModel)) {
+      agent.direct.model = list[0].id;
+      if (typeof plugin.saveSettings === "function") await plugin.saveSettings();
+    }
+  }
+  return true;
+}
+
+function scheduleOllamaModelAutofetch({ plugin, agent, spec, refresh }) {
+  if (!plugin || !agent || !spec || spec.id !== "ollama") return;
+  if (!plugin.__flownoteFetchedModels) plugin.__flownoteFetchedModels = {};
+  const cached = plugin.__flownoteFetchedModels[spec.id];
+  if (cached && cached.fetchedAt && Date.now() - cached.fetchedAt < 60000) return;
+  if (plugin.__flownoteOllamaFetchInFlight) return;
+  plugin.__flownoteOllamaFetchInFlight = true;
+  refreshOllamaModelListNow({ plugin, agent, spec })
+    .then((changed) => {
+      if (changed && typeof refresh === "function") refresh();
+    })
+    .catch(() => {
+      // The settings UI still works with the registry placeholder models.
+    })
+    .finally(() => {
+      plugin.__flownoteOllamaFetchInFlight = false;
+    });
+}
+
+function renderOllamaLocalModelNotice({ containerEl, plugin, tab }) {
+  const t = (key, fallback, params = {}) =>
+    tFromContext(tab || plugin, key, fallback, params);
+  containerEl.createEl("p", {
+    cls: "setting-item-description",
+    text: t(
+      "settings.agent.ollamaLocalNotice",
+      "Ollama 是本机服务。桌面端会连接 localhost:11434；手机端无法直接访问电脑的 localhost。",
+    ),
+  });
+}
+
+function renderOllamaMobileAiOverride({ containerEl, plugin, tab, refresh }) {
+  const t = (key, fallback, params = {}) =>
+    tFromContext(tab || plugin, key, fallback, params);
+  const mobile = plugin.settings.mobileCapture || {};
+  const providers = [
+    ["deepseek", "DeepSeek"],
+    ["qwen", "Qwen"],
+    ["moonshot", "Moonshot"],
+    ["zhipu", "Zhipu"],
+    ["siliconflow", "SiliconFlow"],
+    ["openrouter", "OpenRouter"],
+    ["custom", "Custom"],
+  ];
+
+  new Setting(containerEl)
+    .setName(t("mobile.settings.providerName", "移动端 AI 服务商"))
+    .setDesc(t(
+      "mobile.settings.providerDesc",
+      "仅在桌面 Agent 使用 Ollama 时生效，用于手机端聊天和快速捕获 AI 清理。",
+    ))
+    .addDropdown((d) => {
+      for (const [id, label] of providers) d.addOption(id, t(`mobile.providers.${id}`, label));
+      d.setValue(mobile.provider || "deepseek");
+      bindDropdownChange(d, async (provider) => {
+        mobile.provider = provider || "deepseek";
+        plugin.settings.mobileCapture = mobile;
+        await plugin.saveSettings();
+        if (typeof refresh === "function") refresh();
+      });
+    });
+
+  new Setting(containerEl)
+    .setName(t("mobile.settings.apiKeyName", "移动端 API Key"))
+    .setDesc(t("mobile.settings.apiKeyDesc", "服务商 API Key。留空时手机端跳过 AI 清理。"))
+    .addText((tx) => {
+      if (tx.inputEl) tx.inputEl.type = "password";
+      tx.setValue(mobile.apiKey || "").onChange(async (value) => {
+        mobile.apiKey = String(value || "");
+        plugin.settings.mobileCapture = mobile;
+        await plugin.saveSettings();
+      });
+    });
+
+  new Setting(containerEl)
+    .setName(t("mobile.settings.modelName", "移动端模型（可选）"))
+    .setDesc(t("mobile.settings.modelDesc", "留空使用预设模型。"))
+    .addText((tx) => {
+      tx.setValue(mobile.model || "").onChange(async (value) => {
+        mobile.model = String(value || "").trim();
+        plugin.settings.mobileCapture = mobile;
+        await plugin.saveSettings();
+      });
+    });
+}
+
 /**
  * Render the section into containerEl.
  *

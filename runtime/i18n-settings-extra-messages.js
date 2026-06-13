@@ -39,6 +39,7 @@ const I18N_SETTINGS_EXTRA_MESSAGES = {
         activeProjects: "进行中项目",
         archive: "归档",
         fieldDesc: "默认：{default}",
+        metaDerivedDesc: "由 Meta 根目录自动派生：{default}",
       },
     },
     mobile: {
@@ -99,6 +100,7 @@ const I18N_SETTINGS_EXTRA_MESSAGES = {
         activeProjects: "Active projects",
         archive: "Archive",
         fieldDesc: "Default: {default}",
+        metaDerivedDesc: "Derived from the Meta root: {default}",
       },
     },
     mobile: {
@@ -159,6 +161,7 @@ const I18N_SETTINGS_EXTRA_MESSAGES = {
         activeProjects: "Активные проекты",
         archive: "Архив",
         fieldDesc: "По умолчанию: {default}",
+        metaDerivedDesc: "Автоматически выводится из корня Meta: {default}",
       },
       mobileCapture: {
         heading: "Быстрая запись на мобильном",
