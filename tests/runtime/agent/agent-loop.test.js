@@ -139,6 +139,49 @@ test("consumeStream parses input_json_delta into tool_use.input", async () => {
   assert.deepEqual(r.toolUses[0].input, { path: "x.md" });
 });
 
+test("consumeStream preserves provider metadata on tool_use blocks", async () => {
+  async function* gen() {
+    yield ev.messageStart();
+    yield {
+      type: "content_block_start",
+      index: 0,
+      content_block: {
+        type: "tool_use",
+        id: "tu-1",
+        name: "vault_read",
+        input: {},
+        extra_content: { google: { thought_signature: "sig-1" } },
+      },
+    };
+    yield ev.toolUseJson(0, "{\"path\":\"x.md\"}");
+    yield ev.blockStop(0);
+    yield ev.messageDelta("tool_use");
+    yield ev.messageStop();
+  }
+  const r = await consumeStream(gen());
+  assert.deepEqual(r.toolUses[0].input, { path: "x.md" });
+  assert.deepEqual(r.toolUses[0].extra_content, { google: { thought_signature: "sig-1" } });
+});
+
+test("consumeStream applies late tool metadata deltas", async () => {
+  async function* gen() {
+    yield ev.messageStart();
+    yield ev.toolUseStart(0, "tu-1", "vault_read");
+    yield {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "tool_metadata_delta", extra_content: { google: { thought_signature: "sig-1" } } },
+    };
+    yield ev.toolUseJson(0, "{\"path\":\"x.md\"}");
+    yield ev.blockStop(0);
+    yield ev.messageDelta("tool_use");
+    yield ev.messageStop();
+  }
+  const r = await consumeStream(gen());
+  assert.deepEqual(r.toolUses[0].input, { path: "x.md" });
+  assert.deepEqual(r.toolUses[0].extra_content, { google: { thought_signature: "sig-1" } });
+});
+
 test("consumeStream surfaces error events as fatalError", async () => {
   async function* gen() {
     yield { type: "error", error: { type: "http_500", message: "boom" } };

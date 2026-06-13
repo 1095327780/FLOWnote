@@ -233,6 +233,8 @@ async function* consumeStreamGenerator(stream, uiAdapter) {
       } else if (slot.type === "tool_use" && ev.delta.type === "input_json_delta") {
         const buf = toolUseBuffers[ev.index];
         if (buf) buf.partialJson += ev.delta.partial_json || "";
+      } else if (slot.type === "tool_use" && ev.delta.type === "tool_metadata_delta") {
+        if (ev.delta.extra_content !== undefined) slot.extra_content = ev.delta.extra_content;
       }
       continue;
     }
@@ -261,7 +263,9 @@ async function* consumeStreamGenerator(stream, uiAdapter) {
   const assistantContent = slots.filter(Boolean).map((b) => {
     if (b.type === "tool_use") {
       const { type, id, name, input } = b;
-      return { type, id, name, input };
+      const out = { type, id, name, input };
+      if (b.extra_content !== undefined) out.extra_content = b.extra_content;
+      return out;
     }
     return b;
   });
