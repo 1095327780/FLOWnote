@@ -82,6 +82,14 @@ function getDefaultDailyNotePath(locale = "zh-CN") {
 function isKnownDefaultNotePath(key, value) {
   const normalized = normalizePathValue(value);
   if (!normalized) return true;
+  // Intentionally matches ANY locale's default. This powers auto re-localization
+  // of untouched (default-valued) note paths when the UI language changes — a
+  // path still sitting at the zh-CN bundled default should follow the user to
+  // the ru/en default after a locale switch (pinned by the "normalizeSettings
+  // should use localized note path defaults" test). The trade-off — a path a
+  // user deliberately typed to equal a different locale's default is treated as
+  // untouched — is accepted because the two cases are indistinguishable from
+  // stored data alone.
   return Object.values(NOTE_PATH_DEFAULTS_BY_LOCALE).some((defaults) => defaults[key] === normalized);
 }
 

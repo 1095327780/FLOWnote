@@ -122,6 +122,22 @@ test("listTemplates marks templates with no user copy as default", async () => {
   }
 });
 
+test("listTemplates honors a custom Meta root (settings.metaPaths)", async () => {
+  // Regression: the locale refactor stopped consulting settings.metaPaths, so a
+  // user who relocated their Meta root saw their templates vanish from the UI.
+  const adapter = makeAdapter({ "我的Meta/模板/每日笔记模板.md": "## custom daily\n" });
+  const plugin = {
+    app: { vault: { adapter } },
+    settings: { uiLanguage: "zh-CN", metaPaths: { metaRoot: "我的Meta" } },
+    getEffectiveLocale: () => "zh-CN",
+  };
+  const out = await listTemplates(plugin);
+  const daily = out.find((item) => item.id === "daily-note");
+  assert.ok(daily, "daily-note template should be listed");
+  assert.match(daily.userPath, /^我的Meta\/模板\//, "userPath must resolve under the custom Meta root");
+  assert.equal(daily.hasUserCopy, true, "the user copy under the custom root must be found");
+});
+
 test("listTemplates marks templates as customized when user copy differs", async () => {
   const adapter = makeAdapter({
     "Meta/模板/每日笔记模板.md": "# Daily\n\nUSER OVERRIDE\n",

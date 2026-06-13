@@ -278,15 +278,20 @@ const PROVIDERS = {
         label: "OpenRouter API",
         baseUrl: "https://openrouter.ai/api/v1",
         planUrl: "https://openrouter.ai/keys",
-        recommendedModel: "openrouter/free",
+        recommendedModel: "openrouter/auto",
       },
     },
     defaultMode: "api",
     auth: { headerName: "Authorization", scheme: "bearer" },
+    // OpenRouter exposes hundreds of models; "openrouter/auto" is its real
+    // Auto Router slug that picks a model per prompt, so it works out of the
+    // box. Users can refresh the model list (GET {baseUrl}/models) to pick a
+    // specific model. (The old "openrouter/free" was not a valid slug and 400'd
+    // on first use.)
     models: [
-      { id: "openrouter/free", label: "OpenRouter Free Router", tier: "fast", isDefault: true },
+      { id: "openrouter/auto", label: "Auto Router（自动选择）", tier: "high", isDefault: true },
     ],
-    defaultModel: "openrouter/free",
+    defaultModel: "openrouter/auto",
   },
 
   "openai-compat-custom": {

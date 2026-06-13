@@ -78,6 +78,31 @@ function buildModelRefreshUserConfig(agent, spec) {
   };
 }
 
+// Ollama "cloud" models (e.g. "gpt-oss:120b-cloud", "deepseek-v3.1:671b-cloud")
+// are hosted on ollama.com and require sign-in / a subscription. They appear in
+// the local daemon's /v1/models response with no distinguishing flag — only the
+// "-cloud" id suffix marks them.
+function isOllamaCloudModelId(id) {
+  return /-cloud\b/i.test(String(id || "")) || /:cloud\b/i.test(String(id || ""));
+}
+
+// When the saved Ollama model is not in the daemon's current list, adopt a
+// sensible LOCAL fallback so the user isn't stuck on a non-installed default —
+// but NEVER silently adopt a cloud model. Auto-selecting a cloud model is what
+// made chats fail with Ollama's raw "sign in / subscription required" error
+// (which the user reads as "升级订阅"). If only cloud models are installed, leave
+// the saved model untouched and let the user opt in explicitly from the dropdown.
+async function adoptOllamaModelFromList({ plugin, agent, list }) {
+  if (!agent || !agent.direct || !Array.isArray(list) || list.length === 0) return false;
+  const currentModel = String(agent.direct.model || "").trim();
+  if (currentModel && list.some((m) => m && m.id === currentModel)) return false;
+  const firstLocal = list.find((m) => m && m.id && !isOllamaCloudModelId(m.id));
+  if (!firstLocal) return false;
+  agent.direct.model = firstLocal.id;
+  if (plugin && typeof plugin.saveSettings === "function") await plugin.saveSettings();
+  return true;
+}
+
 async function refreshOllamaModelListNow({ plugin, agent, spec }) {
   if (!plugin || !agent || !spec || spec.id !== "ollama") return false;
   if (!plugin.__flownoteFetchedModels) plugin.__flownoteFetchedModels = {};
@@ -88,13 +113,9 @@ async function refreshOllamaModelListNow({ plugin, agent, spec }) {
   if (typeof provider.listModels !== "function") return false;
   const list = await provider.listModels();
   plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
-  if (Array.isArray(list) && list.length > 0) {
-    const currentModel = String(agent.direct.model || spec.defaultModel || "").trim();
-    if (!list.some((m) => m && m.id === currentModel)) {
-      agent.direct.model = list[0].id;
-      if (typeof plugin.saveSettings === "function") await plugin.saveSettings();
-    }
-  }
+  await adoptOllamaModelFromList({ plugin, agent, list });
+  // Always signal success so the caller re-renders to show the freshly fetched
+  // list, even when the saved model was left unchanged.
   return true;
 }
 
@@ -461,7 +482,12 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
     // depends on the local daemon's current /v1/models response.
     const registryIds = new Set(spec.models.map((m) => m.id));
     const merged = spec.id === "ollama" && fetchedList.length > 0
-      ? fetchedList.map((m) => ({ id: m.id, label: m.label || m.id }))
+      ? fetchedList.map((m) => ({
+        id: m.id,
+        label: isOllamaCloudModelId(m.id)
+          ? t("settings.agent.modelCloudSuffix", "{model}（云端·需登录 ollama.com）", { model: m.label || m.id })
+          : (m.label || m.id),
+      }))
       : [
         ...spec.models.map((m) => ({ id: m.id, label: m.deprecated ? `${m.label} (deprecated)` : m.label })),
         ...fetchedList
@@ -532,12 +558,8 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
             }
             const list = await provider.listModels();
             plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
-            if (spec.id === "ollama" && list.length > 0) {
-              const currentModel = String(agent.direct.model || spec.defaultModel || "").trim();
-              if (!list.some((m) => m && m.id === currentModel)) {
-                agent.direct.model = list[0].id;
-                await plugin.saveSettings();
-              }
+            if (spec.id === "ollama") {
+              await adoptOllamaModelFromList({ plugin, agent, list });
             }
             new Notice(t("settings.agent.modelRefreshOk", "已拉取 {n} 个模型，刷新界面查看。", { n: list.length }));
             // Re-render the settings tab so the dropdown picks up the new list.
@@ -784,4 +806,6 @@ module.exports = {
   renderAgentProviderAdvanced,
   agentProviderSectionMethods,
   getEffectiveAgentProviderMode,
+  isOllamaCloudModelId,
+  adoptOllamaModelFromList,
 };

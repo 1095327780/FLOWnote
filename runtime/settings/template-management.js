@@ -32,6 +32,7 @@ const DEFAULT_META_TEMPLATES_DIR = "Meta/模板";
 const TEMPLATE_MAP_FILE = "template-map.json";
 const { getLocalizedMarkdownTokenOrder, normalizeSupportedLocale } = require("../i18n-locale-utils");
 const { getMetaTemplatesDir } = require("../localized-defaults");
+const { normalizeMetaPaths, getDefaultMetaPathsByLocale } = require("../settings-utils");
 
 function joinPath(a, b) {
   return `${String(a).replace(/\/+$/, "")}/${String(b).replace(/^\/+/, "")}`;
@@ -131,14 +132,17 @@ function resolveTemplateLocale(plugin) {
   return normalizeSupportedLocale(locale, "zh-CN");
 }
 
-function metaTemplatesDirByLocale(plugin, baseDir, locale) {
+function metaTemplatesDirByLocale(plugin, baseDir, baseDirs, locale) {
   const normalizedLocale = normalizeSupportedLocale(locale, "zh-CN");
   const defaults = getDefaultMetaPathsByLocale(normalizedLocale);
+  // Honor a user-configured Meta root (settings.metaPaths.templates is derived
+  // from it) so a custom Meta location is not silently ignored; otherwise fall
+  // back to the locale-specific bundled default.
   const metaPaths = normalizeMetaPaths(plugin && plugin.settings && plugin.settings.metaPaths, defaults);
   if (metaPaths.templates) return metaPaths.templates;
-  return normalizedLocale === "en"
-    ? "Meta/Templates"
-    : (String(baseDir || "").trim() || DEFAULT_META_TEMPLATES_DIR);
+  const fromMap = baseDirs && baseDirs[normalizedLocale];
+  return String(fromMap || getMetaTemplatesDir(normalizedLocale) || baseDir).trim()
+    || (String(baseDir || "").trim() || DEFAULT_META_TEMPLATES_DIR);
 }
 
 function resolveTemplateEntryByLocale(raw, locale) {
@@ -207,8 +211,7 @@ async function listTemplates(plugin) {
   const { entries, metaTemplatesDir, metaTemplatesDirs } = await readTemplateMap(plugin);
   const root = skillsRoot(plugin);
   const locale = getPluginLocale(plugin);
-  const localizedMetaTemplatesDir = String(metaTemplatesDirs[locale] || getMetaTemplatesDir(locale) || metaTemplatesDir).trim()
-    || metaTemplatesDir;
+  const localizedMetaTemplatesDir = metaTemplatesDirByLocale(plugin, metaTemplatesDir, metaTemplatesDirs, locale);
   const out = [];
   for (const raw of entries) {
     if (!raw || typeof raw !== "object") continue;

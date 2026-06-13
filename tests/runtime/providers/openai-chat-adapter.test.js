@@ -448,6 +448,42 @@ test("formatProviderHttpError explains Ollama models without tool support", () =
   assert.doesNotMatch(message, /电脑卡顿|Ollama 没启动/);
 });
 
+test("formatProviderHttpError explains Ollama cloud sign-in / subscription errors", () => {
+  // A cloud model (e.g. one auto-selected from the local /v1/models list) returns
+  // a sign-in/subscription error; surface an actionable hint, not the raw text.
+  for (const raw of [
+    "you must sign in at ollama.com to use cloud models",
+    "this model requires an Ollama subscription",
+    "unauthorized: cloud model requires an account",
+  ]) {
+    const message = formatProviderHttpError({
+      spec: PROVIDERS.ollama,
+      status: 401,
+      text: JSON.stringify({ error: { message: raw } }),
+    });
+    assert.match(message, /云端模型|ollama\.com/);
+    assert.match(message, /本机已安装|不带 -cloud/);
+    assert.match(message, new RegExp(raw.slice(0, 12).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
+test("formatProviderHttpError explains OpenRouter credit / auth errors", () => {
+  for (const raw of [
+    "Insufficient credits. Add more at openrouter.ai/credits",
+    "This request requires more credits, or a higher tier",
+    "No auth credentials found",
+  ]) {
+    const message = formatProviderHttpError({
+      spec: PROVIDERS.openrouter,
+      status: 402,
+      text: JSON.stringify({ error: { message: raw } }),
+    });
+    assert.match(message, /OpenRouter/);
+    assert.match(message, /额度|:free/);
+    assert.match(message, new RegExp(raw.slice(0, 10).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("formatProviderHttpError explains missing Ollama models", () => {
   const message = formatProviderHttpError({
     spec: PROVIDERS.ollama,
@@ -499,4 +535,41 @@ test("factory rejects mismatched protocol", () => {
     spec: PROVIDERS.deepseek,
     userConfig: { providerId: "deepseek", mode: "api", apiKey: "k", model: "deepseek-v4-flash" },
   }), /protocol must be openai-chat/);
+});
+
+test("translateOpenAIChunk does not split args into a phantom tool call when continuations lack index and id", () => {
+  // Some OpenAI-compatible gateways send the tool-call `id` only on the first
+  // delta and then continuation deltas carrying neither `index` nor `id`. The
+  // argument fragments must accumulate onto the SAME tool call, not spawn a
+  // second empty-named one. (Regression for resolveToolCallStateKey.)
+  const state = newState();
+  const events = [
+    ...translateOpenAIChunk({ id: "x", choices: [{ delta: { tool_calls: [{ id: "call_abc", function: { name: "vault_write", arguments: "" } }] } }] }, state),
+    ...translateOpenAIChunk({ choices: [{ delta: { tool_calls: [{ function: { arguments: '{"path":"a.md"' } }] } }] }, state),
+    ...translateOpenAIChunk({ choices: [{ delta: { tool_calls: [{ function: { arguments: ',"content":"hi"}' } }] } }] }, state),
+    ...translateOpenAIChunk({ choices: [{ finish_reason: "tool_calls" }] }, state),
+  ];
+
+  const toolStarts = events.filter((e) => e.type === "content_block_start" && e.content_block && e.content_block.type === "tool_use");
+  assert.equal(toolStarts.length, 1, "exactly one tool_use block should open");
+
+  const keys = Object.keys(state.toolCalls);
+  assert.equal(keys.length, 1, "no phantom tool call should be created");
+  const tc = state.toolCalls[keys[0]];
+  assert.equal(tc.name, "vault_write");
+  assert.equal(tc.argsBuffer, '{"path":"a.md","content":"hi"}');
+  assert.deepEqual(JSON.parse(tc.argsBuffer), { path: "a.md", content: "hi" });
+});
+
+test("translateOpenAIChunk still keys parallel indexed tool calls independently", () => {
+  const state = newState();
+  const events = [
+    ...translateOpenAIChunk({ id: "x", choices: [{ delta: { tool_calls: [
+      { index: 0, id: "c0", function: { name: "vault_read", arguments: '{"a":1}' } },
+      { index: 1, id: "c1", function: { name: "vault_write", arguments: '{"b":2}' } },
+    ] } }] }, state),
+    ...translateOpenAIChunk({ choices: [{ finish_reason: "tool_calls" }] }, state),
+  ];
+  const toolStarts = events.filter((e) => e.type === "content_block_start" && e.content_block && e.content_block.type === "tool_use");
+  assert.equal(toolStarts.length, 2);
 });
