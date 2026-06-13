@@ -17,6 +17,7 @@ const PROVIDER_PRESETS = {
   moonshot: { name: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai", defaultModel: "kimi-k2.6", keyUrl: "https://platform.kimi.ai/console/api-keys", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   zhipu: { name: "Zhipu (GLM)", baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-5.1", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", chatPath: "/v4/chat/completions", modelsPath: "/v4/models" },
   siliconflow: { name: "SiliconFlow", baseUrl: "https://api.siliconflow.cn", defaultModel: "deepseek-ai/DeepSeek-V3", keyUrl: "https://cloud.siliconflow.cn/account/ak", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
+  openrouter: { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", defaultModel: "openrouter/free", keyUrl: "https://openrouter.ai/keys", chatPath: "/chat/completions", modelsPath: "/models", models: ["openrouter/free"] },
   custom: { name: "Custom", baseUrl: "", defaultModel: "", keyUrl: "", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
 };
 
@@ -70,6 +71,22 @@ const CAPTURE_SYSTEM_PROMPT_EN = [
   "Return only the cleaned text, with no explanation, prefix, or quotes.",
 ].join("\n");
 
+const CAPTURE_SYSTEM_PROMPT_RU = [
+  "Вы помощник для очистки голосовой расшифровки. Ваша задача - превратить быстрые устные заметки в ясный текст, который можно сразу записать в ежедневную заметку.",
+  "Что можно делать:",
+  "1. Удалять слова-паразиты и речевые заполнители, например: эм, ну, типа, значит, как бы.",
+  "2. Удалять очевидные повторы, фальстарты и запинки.",
+  "3. Исправлять ошибки распознавания речи, омонимы и явные опечатки, когда правильная формулировка понятна из контекста.",
+  "4. Добавлять нужную пунктуацию и делить текст на предложения; длинный ввод можно разделить на 2-4 естественных абзаца.",
+  "5. Сохранять основные мысли, факты, имена собственные, числа, URL и личный стиль пользователя.",
+  "Нельзя:",
+  "1. Не добавляйте идеи, примеры или выводы, которых нет в исходном тексте.",
+  "2. Не превращайте заметку в резюме, заголовок, список или эссе, если исходный текст не имеет такой структуры.",
+  "3. Не переписывайте текст в маркетинговом или чрезмерно официальном стиле.",
+  "4. Не удаляйте содержательную информацию.",
+  "Верните только очищенный текст, без объяснений, префиксов и кавычек.",
+].join("\n");
+
 const URL_SUMMARY_PROMPT = [
   "你是一个 URL 摘要助手。用户文本中包含 URL，且页面内容已抓取。",
   "输出时保留原文不变，并追加摘要行。",
@@ -94,6 +111,18 @@ const URL_SUMMARY_PROMPT_EN = [
   "- Return full processed text without explanation",
 ].join("\n");
 
+const URL_SUMMARY_PROMPT_RU = [
+  "Вы помощник для краткого описания URL. В пользовательском тексте есть URL, и содержимое страниц уже получено.",
+  "Верните исходный текст без изменений и добавьте строки с кратким описанием.",
+  "Формат: каждая строка `> 📎 OriginalURL - Краткое описание`",
+  "Правила:",
+  "- Сохраняйте все исходные URL без изменений",
+  "- Описание не длиннее 50 символов",
+  "- Не меняйте текст вне URL",
+  "- Если данных недостаточно, используйте \"Не удалось обработать, исходная ссылка сохранена\"",
+  "- Верните полный обработанный текст без объяснений",
+].join("\n");
+
 const URL_FALLBACK_PROMPT = [
   "你是一个 URL 兜底助手。",
   "任务：当页面内容不可用时，仅做最小处理。",
@@ -114,29 +143,89 @@ const URL_FALLBACK_PROMPT_EN = [
   "4. Return processed full text directly",
 ].join("\n");
 
-function isZh(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN";
+const URL_FALLBACK_PROMPT_RU = [
+  "Вы помощник для резервной обработки URL.",
+  "Задача: выполнить минимальную обработку, когда содержимое страницы недоступно.",
+  "Правила:",
+  "1. Сохраняйте исходный текст и все URL точно как есть",
+  "2. Не переписывайте текст и не выдумывайте содержимое страницы",
+  "3. Можно только добавить строки вида `> 📎 OriginalURL - Не удалось обработать, исходная ссылка сохранена`",
+  "4. Верните полный обработанный текст напрямую",
+].join("\n");
+
+function localeCode(locale) {
+  return normalizeSupportedLocale(locale, "en");
 }
 
 function getCaptureSystemPrompt(locale) {
-  return isZh(locale) ? CAPTURE_SYSTEM_PROMPT : CAPTURE_SYSTEM_PROMPT_EN;
+  const code = localeCode(locale);
+  if (code === "zh-CN") return CAPTURE_SYSTEM_PROMPT;
+  if (code === "ru") return CAPTURE_SYSTEM_PROMPT_RU;
+  return CAPTURE_SYSTEM_PROMPT_EN;
 }
 
 function getUrlSummaryPrompt(locale) {
-  return isZh(locale) ? URL_SUMMARY_PROMPT : URL_SUMMARY_PROMPT_EN;
+  const code = localeCode(locale);
+  if (code === "zh-CN") return URL_SUMMARY_PROMPT;
+  if (code === "ru") return URL_SUMMARY_PROMPT_RU;
+  return URL_SUMMARY_PROMPT_EN;
 }
 
 function getUrlFallbackPrompt(locale) {
-  return isZh(locale) ? URL_FALLBACK_PROMPT : URL_FALLBACK_PROMPT_EN;
+  const code = localeCode(locale);
+  if (code === "zh-CN") return URL_FALLBACK_PROMPT;
+  if (code === "ru") return URL_FALLBACK_PROMPT_RU;
+  return URL_FALLBACK_PROMPT_EN;
 }
 
 function getAiProviderDisplayName(providerId, fallbackName, locale = "en") {
   const id = String(providerId || "").trim().toLowerCase();
-  if (id === "custom") return isZh(locale) ? "自定义" : "Custom";
-  if (id === "openai") return "OpenAI";
-  if (id === "qwen") return isZh(locale) ? "通义千问" : "Qwen";
-  if (id === "zhipu") return isZh(locale) ? "智谱 (GLM)" : "Zhipu (GLM)";
+  const code = localeCode(locale);
+  if (id === "custom") return code === "zh-CN" ? "自定义" : code === "ru" ? "Пользовательский" : "Custom";
+  if (id === "qwen") return code === "zh-CN" ? "通义千问" : "Qwen";
+  if (id === "zhipu") return code === "zh-CN" ? "智谱 (GLM)" : "Zhipu (GLM)";
   return fallbackName || String(providerId || "");
+}
+
+function mobileAiMessage(locale, key, params = {}) {
+  const code = localeCode(locale);
+  const messages = {
+    aiMissingConfig: {
+      "zh-CN": "AI 服务未配置：缺少 Base URL 或 API Key",
+      en: "AI is not configured: missing Base URL or API Key",
+      ru: "AI не настроен: отсутствует Base URL или API Key",
+    },
+    aiRequestFailed: {
+      "zh-CN": "AI 请求失败 ({status}): {snippet}",
+      en: "AI request failed ({status}): {snippet}",
+      ru: "Запрос к AI не удался ({status}): {snippet}",
+    },
+    aiResponseEmpty: {
+      "zh-CN": "AI 返回内容为空",
+      en: "AI returned empty content",
+      ru: "AI вернул пустой ответ",
+    },
+    modelListFailed: {
+      "zh-CN": "模型列表请求失败 ({status}): {snippet}",
+      en: "Model list request failed ({status}): {snippet}",
+      ru: "Не удалось получить список моделей ({status}): {snippet}",
+    },
+    testProbe: {
+      "zh-CN": "嗯，这是一个测试",
+      en: "um, this is a test",
+      ru: "эм, это тест",
+    },
+    connected: {
+      "zh-CN": "连接成功，返回: \"{result}\"",
+      en: "Connected. Response: \"{result}\"",
+      ru: "Подключено. Ответ: \"{result}\"",
+    },
+  };
+  const template = (messages[key] && (messages[key][code] || messages[key].en)) || key;
+  return String(template).replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => {
+    const value = params[name];
+    return value === undefined || value === null ? "" : String(value);
+  });
 }
 
 function resolveAiConfig(mcSettings) {
@@ -259,11 +348,9 @@ function pickFirstText(values) {
 
 async function requestAiCompletion(messages, mcSettings, options = {}) {
   const locale = normalizeSupportedLocale(options.locale || "en");
-  const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
-  if (!ai.baseUrl || (!ai.apiKey && !ai.preset.apiKeyOptional)) {
-    throw new Error(isZh(locale)
-      ? "AI 服务未配置：缺少 Base URL 或 API Key"
-      : "AI is not configured: missing Base URL or API Key");
+  const ai = resolveAiConfig(mcSettings || {});
+  if (!ai.baseUrl || !ai.apiKey) {
+    throw new Error(mobileAiMessage(locale, "aiMissingConfig"));
   }
   const headers = { "Content-Type": "application/json" };
   if (ai.apiKey || !ai.preset.apiKeyOptional) {
@@ -285,8 +372,7 @@ async function requestAiCompletion(messages, mcSettings, options = {}) {
 
   if (response.status !== 200) {
     const snippet = JSON.stringify(response.json || response.text).slice(0, 200);
-    if (isZh(locale)) throw new Error(`AI 请求失败 (${response.status}): ${snippet}`);
-    throw new Error(`AI request failed (${response.status}): ${snippet}`);
+    throw new Error(mobileAiMessage(locale, "aiRequestFailed", { status: response.status, snippet }));
   }
 
   const data = response.json;
@@ -294,7 +380,7 @@ async function requestAiCompletion(messages, mcSettings, options = {}) {
     data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content,
   ]);
   if (!content) {
-    throw new Error(isZh(locale) ? "AI 返回内容为空" : "AI returned empty content");
+    throw new Error(mobileAiMessage(locale, "aiResponseEmpty"));
   }
   return content;
 }
@@ -302,10 +388,8 @@ async function requestAiCompletion(messages, mcSettings, options = {}) {
 async function listCaptureModels(mcSettings, options = {}) {
   const locale = normalizeSupportedLocale(options.locale || "en");
   const ai = resolveAiConfig(resolveEffectiveCaptureSettings(mcSettings || {}));
-  if (!ai.baseUrl || (!ai.apiKey && !ai.preset.apiKeyOptional)) {
-    throw new Error(isZh(locale)
-      ? "AI 服务未配置：缺少 Base URL 或 API Key"
-      : "AI is not configured: missing Base URL or API Key");
+  if (!ai.baseUrl || !ai.apiKey) {
+    throw new Error(mobileAiMessage(locale, "aiMissingConfig"));
   }
   const headers = { "Content-Type": "application/json" };
   if (ai.apiKey || !ai.preset.apiKeyOptional) {
@@ -321,8 +405,7 @@ async function listCaptureModels(mcSettings, options = {}) {
   });
   if (response.status !== 200) {
     const snippet = JSON.stringify(response.json || response.text).slice(0, 200);
-    if (isZh(locale)) throw new Error(`模型列表请求失败 (${response.status}): ${snippet}`);
-    throw new Error(`Model list request failed (${response.status}): ${snippet}`);
+    throw new Error(mobileAiMessage(locale, "modelListFailed", { status: response.status, snippet }));
   }
   const data = response.json;
   const items = data && Array.isArray(data.data) ? data.data : [];
@@ -357,11 +440,11 @@ async function summarizeTextWithAi(text, mcSettings, options = {}) {
 async function testConnection(mcSettings, options = {}) {
   const locale = normalizeSupportedLocale(options.locale || "en");
   try {
-    const probe = isZh(locale) ? "嗯，这是一个测试" : "um, this is a test";
+    const probe = mobileAiMessage(locale, "testProbe");
     const result = await cleanupCapture(probe, mcSettings, { locale });
     return {
       ok: true,
-      message: isZh(locale) ? `连接成功，返回: "${result}"` : `Connected. Response: "${result}"`,
+      message: mobileAiMessage(locale, "connected", { result }),
     };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
@@ -372,6 +455,7 @@ module.exports = {
   PROVIDER_PRESETS,
   CAPTURE_SYSTEM_PROMPT,
   CAPTURE_SYSTEM_PROMPT_EN,
+  CAPTURE_SYSTEM_PROMPT_RU,
   getAiProviderDisplayName,
   getCaptureSystemPrompt,
   getUrlSummaryPrompt,

@@ -9,7 +9,6 @@ Goal: create or repair the minimum folder and template structure required by FLO
 
 ## English Default Structure
 
-- `{{notePaths.inbox}}`
 - `{{notePaths.dailyNotes}}`
 - `{{notePaths.weeklyReviews}}`
 - `{{notePaths.monthlyReviews}}`
@@ -20,8 +19,8 @@ Goal: create or repair the minimum folder and template structure required by FLO
 - `{{notePaths.domainPages}}`
 - `{{notePaths.activeProjects}}`
 - `{{notePaths.archive}}`
-- `{{metaPaths.memory}}`
-- `{{metaPaths.templates}}`
+- `Meta/.ai-memory`
+- `Meta/Templates`
 
 ## Rules
 
@@ -38,9 +37,8 @@ Use this mode when the user asks to update the home document, fix Home, refresh 
 1. Find the existing home document in this order:
    - `🏠Home.md`
    - `🏠 Home.md`
-   - `🏠 主页.md`
    - `Home.md`
-2. If no home document exists, create `🏠Home.md` from `references/HOME模板.en.md`.
+2. If no home document exists, create `🏠Home.md` from `references/HOME Template.md`.
 3. The first-created home document includes a plugin note at the top:
    - Dataview is required for automatic status panels.
    - Banners is optional for page banners.
@@ -57,8 +55,8 @@ Use this mode when the user asks to update the home document, fix Home, refresh 
    - `.flownote/`
    - `.opencode/`
    - `.agents/`
-   - `{{metaPaths.memory}}/`
-   - `{{metaPaths.legacyMemory}}/`
+   - `Meta/.ai-memory/`
+   - `Meta/ai-memory/`
    - `{{notePaths.archive}}/`
    - `Clippings/`
 10. Active projects should count only project overview files under the active projects folder. Do not count the root project index as a project.
@@ -70,7 +68,7 @@ Use this mode when the user asks to update the home document, fix Home, refresh 
 - Detect missing or incomplete FLOWnote folders while the vault already contains other notes.
 - Do not move or delete the user's existing folders unless the user explicitly confirms migration.
 - Create the minimum FLOWnote folder structure.
-- Automatically create `🏠Home.md` from `references/HOME模板.en.md`.
+- Automatically create `🏠Home.md` from `references/HOME Template.md`.
 - Keep the plugin note at the top because this is the first home document creation.
 - Use Dataview panels instead of hardcoded projects or counts, so the home document remains usable while migration is incomplete.
 
@@ -83,7 +81,7 @@ Use this mode when the user asks to update the home document, fix Home, refresh 
 
 ### 3. Existing user upgrading without a home document
 
-- Automatically create `🏠Home.md` from `references/HOME模板.en.md`.
+- Automatically create `🏠Home.md` from `references/HOME Template.md`.
 - Keep the plugin note at the top because this is the first home document creation.
 - Continue the normal index refresh and report the created path.
 

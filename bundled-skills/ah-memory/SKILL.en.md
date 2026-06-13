@@ -9,8 +9,8 @@ Goal: keep cross-skill state readable, current, and useful.
 
 ## Canonical Files
 
-- `{{metaPaths.memory}}/STATUS.md`
-- `{{metaPaths.memory}}/BUFFER.md` when needed
+- `Meta/.ai-memory/STATUS.md`
+- `Meta/.ai-memory/BUFFER.md` when needed
 
 ## Workflow
 
@@ -23,6 +23,5 @@ Goal: keep cross-skill state readable, current, and useful.
 ## Rules
 
 - Missing memory files are normal on first use.
-- Do not recreate the old hidden `{{metaPaths.legacyMemory}}` path.
+- Do not recreate the old hidden `Meta/ai-memory` path.
 - Keep user wording where possible.
-

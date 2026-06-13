@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  getDefaultNotePaths,
+  migrateSettingsLocaleDefaults,
   normalizeSettings,
   normalizeSettingsInPlace,
   normalizeMetaPaths,
@@ -64,6 +66,8 @@ test("normalizeSettings should normalize uiLanguage aliases", () => {
   assert.equal(normalizeSettings({ uiLanguage: "zh" }).uiLanguage, "zh-CN");
   assert.equal(normalizeSettings({ uiLanguage: "zh_cn" }).uiLanguage, "zh-CN");
   assert.equal(normalizeSettings({ uiLanguage: "en-US" }).uiLanguage, "en");
+  assert.equal(normalizeSettings({ uiLanguage: "ru" }).uiLanguage, "ru");
+  assert.equal(normalizeSettings({ uiLanguage: "ru-RU" }).uiLanguage, "ru");
 });
 
 test("normalizeSettings should fallback invalid uiLanguage to auto", () => {
@@ -71,33 +75,31 @@ test("normalizeSettings should fallback invalid uiLanguage to auto", () => {
   assert.equal(out.uiLanguage, "auto");
 });
 
-test("normalizeSettings should use English note folders for fresh English installs", () => {
-  const out = normalizeSettings({}, { locale: "en", existingInstall: false });
-  assert.equal(out.notePaths.dailyNotes, "01-Capture/Daily Notes");
-  assert.equal(out.notePaths.permanentNotes, "02-Cultivate/Permanent Notes");
-  assert.equal(out.notePaths.activeProjects, "04-Create/Projects");
-  assert.equal(out.mobileCapture.dailyNotePath, "01-Capture/Daily Notes");
-  assert.equal(out.mobileCapture.ideaSectionHeader, "## Records");
-});
-
-test("normalizeSettings should keep Chinese note folders for existing installs", () => {
-  const out = normalizeSettings({}, { locale: "en", existingInstall: true });
-  assert.equal(out.notePaths.dailyNotes, "01-捕获层/每日笔记");
-  assert.equal(out.mobileCapture.dailyNotePath, "01-捕获层/每日笔记");
-});
-
-test("normalizeMetaPaths derives all Meta children from the root directory", () => {
-  const out = normalizeMetaPaths({
-    metaRoot: "System",
-    templates: "Ignored/Templates",
-    memory: "Ignored/Memory",
+test("normalizeSettings should use localized note path defaults", () => {
+  const out = normalizeSettings({
+    uiLanguage: "ru",
+    notePaths: getDefaultNotePaths("zh-CN"),
+    mobileCapture: { dailyNotePath: "01-捕获层/每日笔记" },
   });
+  assert.equal(out.notePaths.dailyNotes, "01-Захват/Ежедневные заметки");
+  assert.equal(out.notePaths.activeProjects, "04-Создание/Проекты");
+  assert.equal(out.mobileCapture.dailyNotePath, "01-Захват/Ежедневные заметки");
+});
 
-  assert.equal(out.metaRoot, "System");
-  assert.equal(out.templates, "System/模板");
-  assert.equal(out.indexes, "System/索引");
-  assert.equal(out.memory, "System/ai-memory");
-  assert.equal(out.legacyMemory, "System/.ai-memory");
+test("migrateSettingsLocaleDefaults should migrate only known defaults", () => {
+  const settings = {
+    notePaths: {
+      ...getDefaultNotePaths("zh-CN"),
+      activeProjects: "Work/Projects",
+    },
+    mobileCapture: {
+      dailyNotePath: "01-捕获层/每日笔记",
+    },
+  };
+  migrateSettingsLocaleDefaults(settings, "zh-CN", "ru");
+  assert.equal(settings.notePaths.dailyNotes, "01-Захват/Ежедневные заметки");
+  assert.equal(settings.notePaths.activeProjects, "Work/Projects");
+  assert.equal(settings.mobileCapture.dailyNotePath, "01-Захват/Ежедневные заметки");
 });
 
 test("normalizeSettings should drop deprecated wsl launch settings", () => {

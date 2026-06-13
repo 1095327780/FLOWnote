@@ -10,7 +10,7 @@ Goal: close today's loop and leave tomorrow clean.
 ## Startup
 
 1. Read today's daily note from the configured `dailyNotes` folder.
-2. Read `{{metaPaths.memory}}/STATUS.md` if it exists.
+2. Read `Meta/.ai-memory/STATUS.md` if it exists.
 3. Read yesterday's daily note if it exists.
 4. Read the latest weekly review if available.
 5. Extract Focus, Records, Tasks, Tomorrow Plan, and yesterday's Tomorrow Plan.
@@ -31,4 +31,3 @@ Goal: close today's loop and leave tomorrow clean.
 - If time is short, process the highest-value items and mark the rest for `ah-inbox`.
 - Do not say the review is complete until note updates and `STATUS.md` updates are handled or explicitly skipped.
 - Use configured note paths over examples.
-

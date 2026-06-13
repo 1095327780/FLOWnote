@@ -12,6 +12,8 @@ const {
   importSkillsFromFileList,
   listSkillSecretRefs,
 } = require("./skill-management");
+const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { getLocalizedSkillDescription } = require("../skill-i18n");
 const { SkillEditorModal } = require("../modals");
 
 function tr(ctx, key, fallback, params = {}) {
@@ -153,6 +155,10 @@ async function renderSkillManagementSection(containerEl) {
     }
 
     const list = host.createDiv({ cls: "oc-skill-mgmt-list" });
+    const locale = normalizeSupportedLocale(
+      typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : plugin.settings && plugin.settings.uiLanguage,
+      "zh-CN",
+    );
     for (const skill of skills) {
       const row = list.createDiv({ cls: "oc-skill-mgmt-row" });
       const main = row.createDiv({ cls: "oc-skill-mgmt-row-main" });
@@ -171,7 +177,7 @@ async function renderSkillManagementSection(containerEl) {
         source.setText(tr(this, "settings.skills.sourceInstalled", "来源：{dir}", { dir: skill.dirPath }));
       }
       const desc = main.createDiv({ cls: "oc-skill-mgmt-desc" });
-      desc.setText(truncate(skill.description, PREVIEW_DESC_LEN));
+      desc.setText(truncate(getLocalizedSkillDescription(skill, locale), PREVIEW_DESC_LEN));
 
       const actions = row.createDiv({ cls: "oc-skill-mgmt-actions" });
       const editBtn = actions.createEl("button", { text: tr(this, "settings.skills.edit", "编辑 SKILL.md") });

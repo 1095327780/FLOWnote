@@ -1,4 +1,5 @@
 const { Notice, setIcon } = require("obsidian");
+const { getIntlLocale, normalizeSupportedLocale } = require("../../i18n-locale-utils");
 const { tr, normalizeLinkedContextPath } = require("./shared-utils");
 const {
   findOrCreateTodayDailyNote,
@@ -10,45 +11,32 @@ const {
   toggleTaskInFile,
 } = require("../../home/home-service");
 
-function getHomeLocale(view) {
-  if (view && view.plugin && typeof view.plugin.getEffectiveLocale === "function") {
-    return view.plugin.getEffectiveLocale() === "zh-CN" ? "zh-CN" : "en";
-  }
-  return "zh-CN";
-}
-
-function homeText(view, zh, en) {
-  return getHomeLocale(view) === "zh-CN" ? zh : en;
-}
-
 function formatRelativeTime(timestamp, locale = "zh-CN") {
   const value = Number(timestamp || 0);
   if (!value) return "";
   const diff = Date.now() - value;
-  const isZh = locale === "zh-CN";
-  if (diff < 60 * 1000) return isZh ? "刚刚" : "Just now";
-  if (diff < 60 * 60 * 1000) {
-    const minutes = Math.max(1, Math.floor(diff / 60000));
-    return isZh ? `${minutes}分钟前` : `${minutes} min ago`;
-  }
-  if (diff < 24 * 60 * 60 * 1000) {
-    const hours = Math.max(1, Math.floor(diff / 3600000));
-    return isZh ? `${hours}小时前` : `${hours}h ago`;
-  }
-  if (diff < 7 * 24 * 60 * 60 * 1000) {
-    const days = Math.max(1, Math.floor(diff / 86400000));
-    return isZh ? `${days}天前` : `${days}d ago`;
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  if (normalizedLocale === "zh-CN") {
+    if (diff < 60 * 1000) return "刚刚";
+    if (diff < 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 60000))}分钟前`;
+    if (diff < 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 3600000))}小时前`;
+    if (diff < 7 * 24 * 60 * 60 * 1000) return `${Math.max(1, Math.floor(diff / 86400000))}天前`;
+  } else {
+    const rtf = new Intl.RelativeTimeFormat(getIntlLocale(normalizedLocale), { numeric: "auto" });
+    if (diff < 60 * 1000) return rtf.format(0, "second");
+    if (diff < 60 * 60 * 1000) return rtf.format(-Math.max(1, Math.floor(diff / 60000)), "minute");
+    if (diff < 24 * 60 * 60 * 1000) return rtf.format(-Math.max(1, Math.floor(diff / 3600000)), "hour");
+    if (diff < 7 * 24 * 60 * 60 * 1000) return rtf.format(-Math.max(1, Math.floor(diff / 86400000)), "day");
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString(getIntlLocale(normalizedLocale), { month: "short", day: "numeric" });
 }
 
 function formatWeekday(dateStr, locale = "zh-CN") {
   const date = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "";
-  const dateLocale = locale === "zh-CN" ? "zh-CN" : "en-US";
-  return date.toLocaleDateString(dateLocale, { weekday: "short" });
+  return date.toLocaleDateString(getIntlLocale(locale), { weekday: "short" });
 }
 
 function setButtonIcon(button, icon, fallback = "") {
@@ -69,6 +57,25 @@ function createActionButton(parent, icon, label, onClick, cls = "") {
   button.createSpan({ cls: "oc-home-action-label", text: label });
   button.addEventListener("click", onClick);
   return button;
+}
+
+function homeText(view, key, fallback, params = {}) {
+  return tr(view, `view.home.${key}`, fallback, params);
+}
+
+function recentTypeKey(type) {
+  const text = String(type || "");
+  if (text === "每日笔记") return "recentTypeDaily";
+  if (text === "永久笔记") return "recentTypeEvergreen";
+  if (text === "文献笔记") return "recentTypeLiterature";
+  if (text === "主题页") return "recentTypeTopic";
+  if (text === "领域页") return "recentTypeDomain";
+  if (text === "项目") return "recentTypeProject";
+  return "recentTypeNote";
+}
+
+function localizeRecentType(view, type) {
+  return homeText(view, recentTypeKey(type), String(type || "笔记"));
 }
 
 function resolveVaultFile(view, fileOrPath) {
@@ -123,7 +130,7 @@ function findHomeDocument(view) {
 async function openHomeDocument(view) {
   const file = findHomeDocument(view);
   if (!file) {
-    new Notice(homeText(view, "未找到 🏠 主页.md", "Home document not found"));
+    new Notice(homeText(view, "homeDocumentMissing", "未找到 🏠 主页.md"));
     return;
   }
   await openVaultFile(view, file);
@@ -320,17 +327,14 @@ async function toggleTodayTask(view, today, task) {
 function renderTodayTasks(view, parent, today, taskItems) {
   const section = parent.createDiv({ cls: "oc-home-task-section" });
   const header = section.createDiv({ cls: "oc-home-task-header" });
-  header.createDiv({ cls: "oc-home-kicker", text: homeText(view, "今日待办", "Today's Tasks") });
+  header.createDiv({ cls: "oc-home-kicker", text: homeText(view, "taskHeading", "今日待办") });
   if (taskItems.length) {
-    header.createDiv({ cls: "oc-home-task-hint", text: homeText(view, "点击同步勾选", "Click to sync") });
+    header.createDiv({ cls: "oc-home-task-hint", text: homeText(view, "taskSyncHint", "点击同步勾选") });
   }
 
   const list = section.createDiv({ cls: "oc-home-task-list" });
   if (!taskItems.length) {
-    list.createDiv({
-      cls: "oc-home-empty-copy",
-      text: homeText(view, "今日任务区还没有可勾选的待办。", "No checkbox tasks in today's note yet."),
-    });
+    list.createDiv({ cls: "oc-home-empty-copy", text: homeText(view, "taskEmpty", "今日任务区还没有可勾选的待办。") });
     return;
   }
 
@@ -341,9 +345,7 @@ function renderTodayTasks(view, parent, today, taskItems) {
     row.setAttr("tabindex", "0");
     row.setAttr("role", "checkbox");
     row.setAttr("aria-checked", task.done ? "true" : "false");
-    row.setAttr("title", task.done
-      ? homeText(view, "标记为未完成", "Mark as incomplete")
-      : homeText(view, "标记为已完成", "Mark as complete"));
+    row.setAttr("title", task.done ? homeText(view, "taskMarkTodo", "标记为未完成") : homeText(view, "taskMarkDone", "标记为已完成"));
     const checkbox = row.createSpan({ cls: "oc-home-task-checkbox", attr: { "aria-hidden": "true" } });
     if (task.done) setButtonIcon(checkbox, "check");
     const text = row.createSpan({ cls: "oc-home-task-text" });
@@ -365,10 +367,10 @@ function renderTodayCard(view, parent, today) {
   const title = header.createDiv({ cls: "oc-home-card-title" });
   const icon = title.createSpan({ cls: "oc-home-card-icon" });
   setButtonIcon(icon, "calendar-days");
-  title.createSpan({ text: homeText(view, "今日", "Today") });
+  title.createSpan({ text: homeText(view, "todayTitle", "今日") });
   header.createDiv({
     cls: `oc-home-pill ${today.exists ? "is-ok" : "is-warn"}`,
-    text: today.exists ? homeText(view, "已创建", "Created") : homeText(view, "待创建", "Not Created"),
+    text: today.exists ? homeText(view, "statusCreated", "已创建") : homeText(view, "statusPending", "待创建"),
   });
 
   card.createDiv({ cls: "oc-home-date", text: today.dateStr });
@@ -376,30 +378,26 @@ function renderTodayCard(view, parent, today) {
   if (!today.exists) {
     card.createDiv({
       cls: "oc-home-empty-copy",
-      text: homeText(
-        view,
-        "今天的日记还没创建。先把今日聚焦立起来，后面的记录和复盘才有承接点。",
-        "Today's note has not been created yet. Start with a focus, then capture and review from there.",
-      ),
+      text: homeText(view, "todayMissingCopy", "今天的日记还没创建。先把今日聚焦立起来，后面的记录和复盘才有承接点。"),
     });
     const actions = card.createDiv({ cls: "oc-home-card-actions" });
-    createActionButton(actions, "plus", homeText(view, "创建今日日记", "Create Today"), () => createAndOpenToday(view), "is-primary");
-    createActionButton(actions, "message-square", homeText(view, "和 FLOWnote 规划今天", "Plan with FLOWnote"), () => prefillHomePrompt(view, "/ah-note "), "");
+    createActionButton(actions, "plus", homeText(view, "createDaily", "创建今日日记"), () => createAndOpenToday(view), "is-primary");
+    createActionButton(actions, "message-square", homeText(view, "planTodayWithFlow", "和 FLOWnote 规划今天"), () => prefillHomePrompt(view, "/ah-note "), "");
     return;
   }
 
   const summary = today.summary || {};
-  const focusText = summary.focus || homeText(view, "还没有写下今日聚焦", "No focus written yet");
+  const focusText = summary.focus || homeText(view, "focusEmpty", "还没有写下今日聚焦");
   const tasks = summary.tasks || { open: 0, done: 0, total: 0, completionRate: 0 };
   const taskItems = Array.isArray(summary.taskItems) ? summary.taskItems : [];
   const completionRate = Math.max(0, Math.min(100, Number(tasks.completionRate || 0)));
 
   const focus = card.createDiv({ cls: "oc-home-focus" });
-  focus.createDiv({ cls: "oc-home-kicker", text: homeText(view, "今日聚焦", "Today's Focus") });
+  focus.createDiv({ cls: "oc-home-kicker", text: homeText(view, "focusTitle", "今日聚焦") });
   focus.createDiv({ cls: "oc-home-focus-text", text: focusText });
 
   const progress = card.createDiv({ cls: "oc-home-today-progress" });
-  progress.setAttr("aria-label", homeText(view, `今日待办完成率 ${completionRate}%`, `Today's task completion ${completionRate}%`));
+  progress.setAttr("aria-label", homeText(view, "todayProgressAria", "今日待办完成率 {rate}%", { rate: completionRate }));
   const progressTrack = progress.createDiv({ cls: "oc-home-today-progress-track" });
   const progressFill = progressTrack.createDiv({ cls: "oc-home-today-progress-fill" });
   progressFill.style.width = `${completionRate}%`;
@@ -408,36 +406,13 @@ function renderTodayCard(view, parent, today) {
   renderTodayTasks(view, card, today, taskItems);
 
   const actions = card.createDiv({ cls: "oc-home-card-actions" });
-  createActionButton(actions, "file-text", homeText(view, "打开日记", "Open Note"), () => openVaultFile(view, today.file), "is-primary");
-  createActionButton(actions, "message-square", homeText(view, "推进今天", "Move Today"), () => prefillHomePrompt(
+  createActionButton(actions, "file-text", homeText(view, "openDaily", "打开日记"), () => openVaultFile(view, today.file), "is-primary");
+  createActionButton(actions, "message-square", homeText(view, "pushToday", "推进今天"), () => prefillHomePrompt(
     view,
-    homeText(
-      view,
-      "基于今日日记，帮我梳理今天下一步最应该推进什么，并给出一个简洁的行动清单。",
-      "Based on today's note, help me decide the most important next step and give me a concise action list.",
-    ),
+    homeText(view, "pushTodayPrompt", "基于今日日记，帮我梳理今天下一步最应该推进什么，并给出一个简洁的行动清单。"),
     { linkedFiles: [today.file] },
   ), "");
-  createActionButton(actions, "pen-line", homeText(view, "继续记录", "Keep Capturing"), () => prefillHomePrompt(view, `/ah-capture `), "");
-}
-
-function displayProjectStatus(view, status) {
-  const raw = String(status || "").trim();
-  if (getHomeLocale(view) === "zh-CN") return raw || "进行中";
-  if (/已完成|完成|done/i.test(raw)) return "Done";
-  if (/归档|archived/i.test(raw)) return "Archived";
-  if (/暂停|搁置|paused|hold/i.test(raw)) return "Paused";
-  if (/进行中|active|in[- ]?progress|doing/i.test(raw)) return "In Progress";
-  return raw || "In Progress";
-}
-
-function displayPriority(view, priority) {
-  const raw = String(priority || "").trim();
-  if (!raw || getHomeLocale(view) === "zh-CN") return raw;
-  if (/高|high/i.test(raw)) return "High";
-  if (/中|medium/i.test(raw)) return "Medium";
-  if (/低|low/i.test(raw)) return "Low";
-  return raw;
+  createActionButton(actions, "pen-line", homeText(view, "continueCapture", "继续记录"), () => prefillHomePrompt(view, `/ah-capture `), "");
 }
 
 function renderProjectCard(view, parent, project) {
@@ -445,28 +420,26 @@ function renderProjectCard(view, parent, project) {
     cls: `oc-home-project ${/高|high/i.test(String(project.priority || "")) ? "is-high-priority" : ""}`.trim(),
   });
   item.style.setProperty("--home-project-accent", projectAccent(project));
-  const title = item.createDiv({ cls: "oc-home-project-title", text: project.title || homeText(view, "未命名项目", "Untitled Project") });
+  const title = item.createDiv({ cls: "oc-home-project-title", text: project.title || homeText(view, "unnamedProject", "未命名项目") });
   title.setAttr("title", project.title || "");
   const tags = item.createDiv({ cls: "oc-home-project-tags" });
   const tagValues = [project.domain, project.category].map((tag) => String(tag || "").trim()).filter(Boolean);
   [...new Set(tagValues)].slice(0, 2).forEach((tag) => tags.createSpan({ cls: "oc-home-project-tag", text: tag }));
-  tags.createDiv({ cls: `oc-home-project-status ${project.isActive ? "is-active" : ""}`.trim(), text: displayProjectStatus(view, project.status) });
-  if (project.priority) tags.createDiv({ cls: `oc-home-pill ${/高|high/i.test(project.priority) ? "is-hot" : ""}`, text: displayPriority(view, project.priority) });
+  tags.createDiv({ cls: `oc-home-project-status ${project.isActive ? "is-active" : ""}`.trim(), text: project.status || homeText(view, "defaultProjectStatus", "进行中") });
+  if (project.priority) tags.createDiv({ cls: `oc-home-pill ${/高|high/i.test(project.priority) ? "is-hot" : ""}`, text: project.priority });
   const chatBtn = tags.createEl("button", { cls: "oc-home-project-chat" });
   chatBtn.setAttr("type", "button");
-  chatBtn.setAttr("aria-label", homeText(view, "聊这个项目", "Chat about this project"));
-  chatBtn.setAttr("title", homeText(view, "聊这个项目", "Chat about this project"));
+  chatBtn.setAttr("aria-label", homeText(view, "chatProject", "聊这个项目"));
+  chatBtn.setAttr("title", homeText(view, "chatProject", "聊这个项目"));
   setButtonIcon(chatBtn, "message-square");
   chatBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     prefillHomePrompt(
       view,
-      homeText(
-        view,
-        `基于「${project.title || "这个项目"}」项目总览，帮我判断当前最应该推进的下一步，并给出 3 条具体行动建议。`,
-        `Based on the project overview for "${project.title || "this project"}", identify the next best step and give me 3 concrete actions.`,
-      ),
+      homeText(view, "chatProjectPrompt", "基于「{title}」项目总览，帮我判断当前最应该推进的下一步，并给出 3 条具体行动建议。", {
+        title: project.title || homeText(view, "thisProject", "这个项目"),
+      }),
       { linkedFiles: [project.file] },
     );
   });
@@ -476,7 +449,10 @@ function renderProjectCard(view, parent, project) {
   fill.style.width = `${completionRate}%`;
   bar.createSpan({ cls: "oc-home-progress-label", text: `${completionRate}%` });
   const progressMeta = item.createDiv({ cls: "oc-home-project-progress-meta" });
-  progressMeta.createSpan({ text: homeText(view, `待办 ${project.tasks.open} · 完成 ${project.tasks.done}`, `${project.tasks.open} open · ${project.tasks.done} done`) });
+  progressMeta.createSpan({ text: homeText(view, "projectProgressMeta", "待办 {open} · 完成 {done}", {
+    open: project.tasks.open,
+    done: project.tasks.done,
+  }) });
   if (project.dueDate) progressMeta.createSpan({ text: project.dueDate });
   item.addEventListener("click", () => openVaultFile(view, project.file));
 }
@@ -517,8 +493,8 @@ function heatmapRangeFromState(state) {
   };
 }
 
-function heatmapLabel(state, view) {
-  return homeText(view, `${state.year}年`, `${state.year}`);
+function heatmapLabel(view, state) {
+  return homeText(view, "heatmapYear", "{year}年", { year: state.year });
 }
 
 function rerenderHomeAfterHeatmapChange(view) {
@@ -539,21 +515,21 @@ function renderActivityHeatmap(view, parent, heatmap) {
   const title = header.createDiv({ cls: "oc-home-card-title" });
   const icon = title.createSpan({ cls: "oc-home-card-icon" });
   setButtonIcon(icon, "activity");
-  title.createSpan({ text: homeText(view, "记录热力图", "Record Heatmap") });
+  title.createSpan({ text: homeText(view, "heatmapTitle", "记录热力图") });
   const actions = header.createDiv({ cls: "oc-home-heatmap-actions" });
   const period = actions.createDiv({ cls: "oc-home-heatmap-period" });
   const prev = period.createEl("button", { cls: "oc-home-heatmap-nav" });
   prev.setAttr("type", "button");
-  prev.setAttr("aria-label", homeText(view, "上一年", "Previous year"));
+  prev.setAttr("aria-label", homeText(view, "previousYear", "上一年"));
   setButtonIcon(prev, "chevron-left", "<");
   prev.addEventListener("click", () => shiftHeatmapPeriod(view, -1));
-  period.createSpan({ cls: "oc-home-heatmap-label", text: heatmapLabel(state, view) });
+  period.createSpan({ cls: "oc-home-heatmap-label", text: heatmapLabel(view, state) });
   const next = period.createEl("button", { cls: "oc-home-heatmap-nav" });
   next.setAttr("type", "button");
-  next.setAttr("aria-label", homeText(view, "下一年", "Next year"));
+  next.setAttr("aria-label", homeText(view, "nextYear", "下一年"));
   setButtonIcon(next, "chevron-right", ">");
   next.addEventListener("click", () => shiftHeatmapPeriod(view, 1));
-  actions.createDiv({ cls: "oc-home-pill", text: homeText(view, `${heatmap.total} 条记录`, `${heatmap.total} records`) });
+  actions.createDiv({ cls: "oc-home-pill", text: homeText(view, "recordCount", "{count} 条记录", { count: heatmap.total }) });
 
   const graph = card.createDiv({ cls: "oc-home-heatmap-wrap" });
   const grid = graph.createDiv({ cls: `oc-home-heatmap-grid is-${state.mode}` });
@@ -561,31 +537,42 @@ function renderActivityHeatmap(view, parent, heatmap) {
   (Array.isArray(heatmap.cells) ? heatmap.cells : []).forEach((cell) => {
     const level = heatmapLevel(cell, maxCount);
     const square = grid.createDiv({ cls: `oc-home-heatmap-cell is-level-${level}` });
-    square.setAttr("title", homeText(view, `${cell.date} · ${cell.count || 0} 条记录`, `${cell.date} · ${cell.count || 0} records`));
-    square.setAttr("aria-label", homeText(view, `${cell.date} · ${cell.count || 0} 条记录`, `${cell.date} · ${cell.count || 0} records`));
+    const cellLabel = homeText(view, "heatmapCell", "{date} · {count} 条记录", { date: cell.date, count: cell.count || 0 });
+    square.setAttr("title", cellLabel);
+    square.setAttr("aria-label", cellLabel);
     if (cell.file) {
       square.addClass("is-clickable");
       square.addEventListener("click", () => openVaultFile(view, cell.file));
     }
   });
   const footer = card.createDiv({ cls: "oc-home-heatmap-footer" });
-  footer.createSpan({ text: homeText(view, `${heatmap.activeDays} 天有记录 · ${heatmap.startDate} 至 ${heatmap.endDate}`, `${heatmap.activeDays} active days · ${heatmap.startDate} to ${heatmap.endDate}`) });
+  footer.createSpan({ text: homeText(view, "heatmapFooter", "{activeDays} 天有记录 · {startDate} 至 {endDate}", {
+    activeDays: heatmap.activeDays,
+    startDate: heatmap.startDate,
+    endDate: heatmap.endDate,
+  }) });
   const legend = footer.createSpan({ cls: "oc-home-heatmap-legend" });
-  legend.createSpan({ text: homeText(view, "少", "Less") });
+  legend.createSpan({ text: homeText(view, "heatmapLow", "少") });
   for (let i = 0; i <= 4; i += 1) {
     legend.createSpan({ cls: `oc-home-heatmap-cell is-level-${i}` });
   }
-  legend.createSpan({ text: homeText(view, "多", "More") });
+  legend.createSpan({ text: homeText(view, "heatmapHigh", "多") });
 }
 
 function renderRecentItem(view, parent, item) {
+  const locale = view && view.plugin && typeof view.plugin.getEffectiveLocale === "function"
+    ? view.plugin.getEffectiveLocale()
+    : "zh-CN";
   const row = parent.createDiv({ cls: "oc-home-recent-item" });
   const icon = row.createDiv({ cls: "oc-home-recent-icon" });
   const typeIcon = /项目|Project/i.test(item.type) ? "folder-kanban" : /永久笔记|Permanent/i.test(item.type) ? "badge-check" : "file-text";
   setButtonIcon(icon, typeIcon);
   const body = row.createDiv({ cls: "oc-home-recent-body" });
   body.createDiv({ cls: "oc-home-recent-title", text: item.title || item.path });
-  body.createDiv({ cls: "oc-home-recent-meta", text: `${item.type} · ${formatRelativeTime(item.mtime, getHomeLocale(view))}` });
+  body.createDiv({ cls: "oc-home-recent-meta", text: homeText(view, "recentMeta", "{type} · {time}", {
+    type: localizeRecentType(view, item.type),
+    time: formatRelativeTime(item.mtime, locale),
+  }) });
   row.addEventListener("click", () => openVaultFile(view, item.file));
 }
 
@@ -598,15 +585,15 @@ function renderQuickActions(view, parent, options = {}) {
     const title = header.createDiv({ cls: "oc-home-card-title" });
     const icon = title.createSpan({ cls: "oc-home-card-icon" });
     setButtonIcon(icon, "zap");
-    title.createSpan({ text: homeText(view, "快捷动作", "Quick Actions") });
+    title.createSpan({ text: homeText(view, "quickActions", "快捷动作") });
   }
 
   const grid = host.createDiv({ cls: `oc-home-action-grid ${isInline ? "oc-home-action-grid-hero" : ""}`.trim() });
-  createActionButton(grid, "home", homeText(view, "打开主页文档", "Open Home"), () => openHomeDocument(view), "is-soft is-icon-only");
-  createActionButton(grid, "sun", homeText(view, "规划今天", "Plan Today"), () => runHomePrompt(view, "/ah-note"), "is-soft");
-  createActionButton(grid, "inbox", homeText(view, "快速捕获", "Quick Capture"), () => prefillHomePrompt(view, "/ah-capture "), "is-soft");
-  createActionButton(grid, "check-circle-2", homeText(view, "每日回顾", "Daily Review"), () => runHomePrompt(view, "/ah-review"), "is-soft");
-  createActionButton(grid, "folder-plus", homeText(view, "新建项目", "New Project"), () => prefillHomePrompt(view, "/ah-project "), "is-soft");
+  createActionButton(grid, "home", homeText(view, "openHome", "打开主页文档"), () => openHomeDocument(view), "is-soft is-icon-only");
+  createActionButton(grid, "sun", homeText(view, "planToday", "规划今天"), () => runHomePrompt(view, "/ah-note"), "is-soft");
+  createActionButton(grid, "inbox", homeText(view, "quickCapture", "快速捕获"), () => prefillHomePrompt(view, "/ah-capture "), "is-soft");
+  createActionButton(grid, "check-circle-2", homeText(view, "dailyReview", "每日回顾"), () => runHomePrompt(view, "/ah-review"), "is-soft");
+  createActionButton(grid, "folder-plus", homeText(view, "newProject", "新建项目"), () => prefillHomePrompt(view, "/ah-project "), "is-soft");
 }
 
 function renderHomeError(view, container, error) {
@@ -615,20 +602,22 @@ function renderHomeError(view, container, error) {
   const title = card.createDiv({ cls: "oc-home-card-title" });
   const icon = title.createSpan({ cls: "oc-home-card-icon" });
   setButtonIcon(icon, "triangle-alert");
-  title.createSpan({ text: homeText(view, "主页加载失败", "Home Failed to Load") });
+  title.createSpan({ text: homeText(view, "loadFailed", "主页加载失败") });
   card.createDiv({ cls: "oc-home-empty-copy", text: error instanceof Error ? error.message : String(error || "Unknown error") });
 }
 
 function renderHomeDashboard(container) {
   const currentRun = Date.now();
+  const locale = this.plugin && typeof this.plugin.getEffectiveLocale === "function"
+    ? this.plugin.getEffectiveLocale()
+    : "zh-CN";
   this.homeRenderRun = currentRun;
   const heatmapState = currentHeatmapState(this);
   const heatmapRange = heatmapRangeFromState(heatmapState);
   container.empty();
   container.addClass("oc-home");
   this.bindHomeScrollTracking(container);
-  const homeSettings = { ...(this.plugin.settings || {}), uiLanguage: getHomeLocale(this) };
-  container.createDiv({ cls: "oc-home-loading", text: homeText(this, "正在读取知识库状态...", "Reading vault status...") });
+  container.createDiv({ cls: "oc-home-loading", text: homeText(this, "loading", "正在读取知识库状态...") });
 
   Promise.all([
     getDashboardStats(this.app, homeSettings),
@@ -644,59 +633,60 @@ function renderHomeDashboard(container) {
       const hero = container.createDiv({ cls: "oc-home-hero" });
       const heroText = hero.createDiv({ cls: "oc-home-hero-text" });
       heroText.createDiv({ cls: "oc-home-eyebrow", text: "FLOWnote" });
-      heroText.createDiv({ cls: "oc-home-heading", text: homeText(this, "今天从这里开始", "Start Here Today") });
+      heroText.createDiv({ cls: "oc-home-heading", text: homeText(this, "heroHeading", "今天从这里开始") });
       heroText.createDiv({
         cls: "oc-home-subtitle",
-        text: today.exists
-          ? homeText(this, "专注当下，持续创造。", "Focus now, keep creating.")
-          : homeText(this, "先创建今日日记，再把记录和复盘串起来。", "Create today's note first, then connect capture and review."),
+        text: today.exists ? homeText(this, "heroSubtitleExists", "专注当下，持续创造。") : homeText(this, "heroSubtitleMissing", "先创建今日日记，再把记录和复盘串起来。"),
       });
       const heroPanel = hero.createDiv({ cls: "oc-home-hero-panel" });
       const datePanel = heroPanel.createDiv({ cls: "oc-home-hero-date" });
       datePanel.createSpan({ cls: "oc-home-hero-date-main", text: today.dateStr });
-      const weekday = formatWeekday(today.dateStr, getHomeLocale(this));
+      const weekday = formatWeekday(today.dateStr, locale);
       if (weekday) datePanel.createSpan({ cls: "oc-home-hero-date-sub", text: weekday });
-      datePanel.createSpan({
-        cls: `oc-home-hero-date-pill ${today.exists ? "is-ok" : "is-warn"}`,
-        text: today.exists ? homeText(this, "今日日记已创建", "Today's Note Created") : homeText(this, "今日日记待创建", "Today's Note Missing"),
-      });
+      datePanel.createSpan({ cls: `oc-home-hero-date-pill ${today.exists ? "is-ok" : "is-warn"}`, text: today.exists ? homeText(this, "dailyCreatedPill", "今日日记已创建") : homeText(this, "dailyPendingPill", "今日日记待创建") });
       renderQuickActions(this, heroPanel, { inline: true });
 
       const statsGrid = container.createDiv({ cls: "oc-home-stats" });
       this.bindHomeScrollTracking(container, statsGrid);
       renderStatCard(statsGrid, {
         icon: today.exists ? "calendar-check" : "calendar-plus",
-        value: today.exists ? homeText(this, "已创建", "Created") : homeText(this, "待创建", "Missing"),
-        label: homeText(this, "今日记录", "Today's Note"),
+        value: today.exists ? homeText(this, "statusCreated", "已创建") : homeText(this, "statusPending", "待创建"),
+        label: homeText(this, "statTodayLabel", "今日记录"),
         detail: today.dateStr,
         tone: today.exists ? "ok" : "warn",
       });
       renderStatCard(statsGrid, {
         icon: "folder-kanban",
         value: stats.activeProjects,
-        label: homeText(this, "进行中项目", "Active Projects"),
-        detail: homeText(this, `${stats.highPriorityProjects} 个高优先级`, `${stats.highPriorityProjects} high priority`),
+        label: homeText(this, "statActiveProjects", "进行中项目"),
+        detail: homeText(this, "statHighPriorityDetail", "{count} 个高优先级", { count: stats.highPriorityProjects }),
         tone: "project",
       });
       renderStatCard(statsGrid, {
         icon: "sparkles",
         value: stats.weeklyNew,
-        label: homeText(this, "本周新增", "New This Week"),
-        detail: homeText(this, `${stats.recentActive} 篇最近活跃`, `${stats.recentActive} recently active`),
+        label: homeText(this, "statWeeklyNew", "本周新增"),
+        detail: homeText(this, "statRecentActiveDetail", "{count} 篇最近活跃", { count: stats.recentActive }),
         tone: "growth",
       });
       renderStatCard(statsGrid, {
         icon: "brain",
         value: stats.knowledgeAssets,
-        label: homeText(this, "知识资产", "Knowledge Assets"),
-        detail: homeText(this, `${stats.evergreenNotes} 永久 · ${stats.literatureNotes} 文献`, `${stats.evergreenNotes} permanent · ${stats.literatureNotes} literature`),
+        label: homeText(this, "statKnowledgeAssets", "知识资产"),
+        detail: homeText(this, "statKnowledgeDetail", "{evergreen} 永久 · {literature} 文献", {
+          evergreen: stats.evergreenNotes,
+          literature: stats.literatureNotes,
+        }),
         tone: "knowledge",
       });
       renderStatCard(statsGrid, {
         icon: "list-checks",
         value: `${stats.tasks.completionRate}%`,
-        label: homeText(this, "任务完成率", "Task Completion"),
-        detail: homeText(this, `${stats.tasks.open} 待办 · ${stats.tasks.done} 完成`, `${stats.tasks.open} open · ${stats.tasks.done} done`),
+        label: homeText(this, "statTaskCompletion", "任务完成率"),
+        detail: homeText(this, "statTaskDetail", "{open} 待办 · {done} 完成", {
+          open: stats.tasks.open,
+          done: stats.tasks.done,
+        }),
         tone: "task",
       });
 
@@ -712,16 +702,13 @@ function renderHomeDashboard(container) {
       const projectTitle = projectHeader.createDiv({ cls: "oc-home-card-title" });
       const projectIcon = projectTitle.createSpan({ cls: "oc-home-card-icon" });
       setButtonIcon(projectIcon, "folder-kanban");
-      projectTitle.createSpan({ text: homeText(this, "所有项目", "All Projects") });
-      projectHeader.createDiv({ cls: "oc-home-pill", text: homeText(this, `${projects.length} 个项目`, `${projects.length} projects`) });
+      projectTitle.createSpan({ text: homeText(this, "projectsTitle", "所有项目") });
+      projectHeader.createDiv({ cls: "oc-home-pill", text: homeText(this, "projectCount", "{count} 个项目", { count: projects.length }) });
       const projectList = projectCard.createDiv({ cls: "oc-home-project-list" });
       if (projects.length) {
         projects.forEach((project) => renderProjectCard(this, projectList, project));
       } else {
-        projectList.createDiv({
-          cls: "oc-home-empty-copy",
-          text: homeText(this, "暂无项目。可以用 /ah-project 创建一个新的项目。", "No projects yet. Use /ah-project to create one."),
-        });
+        projectList.createDiv({ cls: "oc-home-empty-copy", text: homeText(this, "projectsEmpty", "暂无项目。可以用 /ah-project 创建一个新的项目。") });
       }
 
       const recentCard = side.createDiv({ cls: "oc-home-card" });
@@ -729,12 +716,12 @@ function renderHomeDashboard(container) {
       const recentTitle = recentHeader.createDiv({ cls: "oc-home-card-title" });
       const recentIcon = recentTitle.createSpan({ cls: "oc-home-card-icon" });
       setButtonIcon(recentIcon, "clock-3");
-      recentTitle.createSpan({ text: homeText(this, "最近活动", "Recent Activity") });
+      recentTitle.createSpan({ text: homeText(this, "recentTitle", "最近活动") });
       const recentList = recentCard.createDiv({ cls: "oc-home-recent-list" });
       if (recent.length) {
         recent.slice(0, 8).forEach((item) => renderRecentItem(this, recentList, item));
       } else {
-        recentList.createDiv({ cls: "oc-home-empty-copy", text: homeText(this, "暂无最近活动。", "No recent activity yet.") });
+        recentList.createDiv({ cls: "oc-home-empty-copy", text: homeText(this, "recentEmpty", "暂无最近活动。") });
       }
       this.restoreHomeScrollPosition(container, statsGrid);
     })

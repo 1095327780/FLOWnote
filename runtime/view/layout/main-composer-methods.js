@@ -90,19 +90,15 @@ function renderDirectConnectionStatus(popover, view, summary) {
   };
 
   if (!summary.configComplete) {
-    title.setText(viewText(view, "Direct 模式 · 未就绪", "Direct Mode · Not Ready"));
-    appendLine(viewText(view, `服务商：${summary.providerLabel}`, `Provider: ${summary.providerLabel}`));
-    if (summary.missingReason) appendLine(viewText(view, `待补全：${summary.missingReason}`, `Missing: ${summary.missingReason}`));
-    appendLine(viewText(view, "打开 Obsidian → 设置 → FLOWnote 完成配置。", "Open Obsidian → Settings → FLOWnote to finish setup."));
+    title.setText(tr(view, "view.connection.directNotReady", "Direct 模式 · 未就绪"));
+    appendLine(tr(view, "view.connection.providerLine", "服务商：{provider}", { provider: summary.providerLabel }));
+    if (summary.missingReason) appendLine(tr(view, "view.connection.missingLine", "待补全：{reason}", { reason: summary.missingReason }));
+    appendLine(tr(view, "view.connection.openSettingsHint", "打开 Obsidian → 设置 → FLOWnote 完成配置。"));
     return;
   }
-  title.setText(viewText(view, `${summary.providerLabel} 已就绪`, `${summary.providerLabel} Ready`));
-  appendLine(viewText(view, `模型：${summary.modelLabel || summary.modelId}`, `Model: ${summary.modelLabel || summary.modelId}`));
-  appendLine(viewText(
-    view,
-    "API Key 已配置。点击「测试连接」按钮可发起一次真实请求验证。",
-    "API Key is configured. Use Test Connection in settings to verify it with a real request."
-  ));
+  title.setText(tr(view, "view.connection.providerReady", "{provider} 已就绪", { provider: summary.providerLabel }));
+  appendLine(tr(view, "view.connection.modelLine", "模型：{model}", { model: summary.modelLabel || summary.modelId }));
+  appendLine(tr(view, "view.connection.apiKeyConfigured", "API Key 已配置。点击「测试连接」按钮可发起一次真实请求验证。"));
 }
 
 function renderConnectionStatusPopoverContent(view, result) {
@@ -146,20 +142,20 @@ function renderConnectionStatusPopoverContent(view, result) {
     if (!value) return;
     const panel = body.createDiv({ cls: "oc-copyable-panel oc-copyable-panel--compact" });
     const actions = panel.createDiv({ cls: "oc-copyable-actions" });
-    const copyBtn = actions.createEl("button", { text: viewText(view, "复制详情", "Copy Details") });
+    const copyBtn = actions.createEl("button", { text: tr(view, "view.connection.copyDetails", "复制详情") });
     copyBtn.type = "button";
     copyBtn.addEventListener("click", async () => {
       const copied = await copyText(value);
       new Notice(copied
-        ? viewText(view, "详情已复制", "Details copied")
-        : viewText(view, "复制失败，请手动选择文本复制", "Copy failed. Select the text manually."));
+        ? tr(view, "view.connection.detailsCopied", "详情已复制")
+        : tr(view, "view.connection.copyFailed", "复制失败，请手动选择文本复制"));
     });
     const area = panel.createEl("textarea", {
       cls: "oc-copyable-textarea",
       attr: {
         readonly: "true",
         spellcheck: "false",
-        "aria-label": viewText(view, "连接诊断详情", "Connection diagnostics"),
+        "aria-label": tr(view, "view.connection.detailsAria", "连接诊断详情"),
       },
     });
     area.value = value;
@@ -172,55 +168,55 @@ function renderConnectionStatusPopoverContent(view, result) {
     connectionCheckCommands().forEach((cmd) => appendCommand(cmd));
   };
   const appendWindowsInstallGuide = () => {
-    appendLine(viewText(view, "请在 Windows 本机用 Node.js 安装 OpenCode，不要使用 WSL：", "Install OpenCode with Node.js on native Windows, not WSL:"));
+    appendLine(tr(view, "view.connection.installWindowsNative", "请在 Windows 本机用 Node.js 安装 OpenCode，不要使用 WSL："));
     windowsInstallGuideCommands().forEach((cmd) => appendCommand(cmd));
-    appendLink(viewText(view, "官方安装文档", "Official install docs"), OPENCODE_DOCS_URL);
+    appendLink(tr(view, "view.connection.officialDocs", "官方安装文档"), OPENCODE_DOCS_URL);
   };
 
   if (!hasResult) {
-    title.setText(viewText(view, "正在检测 OpenCode 连接状态", "Checking OpenCode Connection"));
-    appendLine(viewText(view, "点击绿色状态点会自动刷新连接状态。", "Click the status dot to refresh the connection."));
-    appendLine(viewText(view, "如果长时间无法连接，可先检查本机安装：", "If it stays disconnected, check the local installation first:"));
+    title.setText(tr(view, "view.connection.checkingOpenCode", "正在检测 OpenCode 连接状态"));
+    appendLine(tr(view, "view.connection.refreshHint", "点击绿色状态点会自动刷新连接状态。"));
+    appendLine(tr(view, "view.connection.localCheckHint", "如果长时间无法连接，可先检查本机安装："));
     appendCheckCommands();
     return;
   }
 
   if (normalized.connection.ok) {
-    title.setText(viewText(view, "OpenCode成功连接", "OpenCode Connected"));
-    appendLine(viewText(view, `连接模式：${normalized.connection.mode.toUpperCase()}`, `Connection mode: ${normalized.connection.mode.toUpperCase()}`));
-    if (normalized.executable.path) appendLine(viewText(view, `执行路径：${normalized.executable.path}`, `Executable path: ${normalized.executable.path}`));
+    title.setText(tr(view, "view.connection.openCodeConnected", "OpenCode成功连接"));
+    appendLine(tr(view, "view.connection.modeLine", "连接模式：{mode}", { mode: normalized.connection.mode.toUpperCase() }));
+    if (normalized.executable.path) appendLine(tr(view, "view.connection.executableLine", "执行路径：{path}", { path: normalized.executable.path }));
     return;
   }
 
   if (isLikelyMissingOpenCode(normalized)) {
-    title.setText(viewText(view, "OpenCode连接失败：未检测到可用安装", "OpenCode Connection Failed: No Usable Install Found"));
+    title.setText(tr(view, "view.connection.openCodeMissing", "OpenCode连接失败：未检测到可用安装"));
     if (typeof process !== "undefined" && process && process.platform === "win32") {
       appendWindowsInstallGuide();
-      appendLine(viewText(view, "安装后重启 Obsidian，再点击状态点刷新连接。", "Restart Obsidian after installing, then click the status dot to refresh."));
+      appendLine(tr(view, "view.connection.restartAfterInstall", "安装后重启 Obsidian，再点击状态点刷新连接。"));
     } else {
-      appendLine(viewText(view, "请先在终端检查 OpenCode 是否安装正常：", "Check whether OpenCode is installed correctly in a terminal:"));
+      appendLine(tr(view, "view.connection.checkTerminalInstall", "请先在终端检查 OpenCode 是否安装正常："));
       appendCheckCommands();
     }
     appendCopyableDetails([
-      normalized.executable.hint ? viewText(view, `提示：${normalized.executable.hint}`, `Hint: ${normalized.executable.hint}`) : "",
-      normalized.connection.error ? viewText(view, `错误：${normalized.connection.error}`, `Error: ${normalized.connection.error}`) : "",
+      normalized.executable.hint ? tr(view, "view.connection.hintLine", "提示：{hint}", { hint: normalized.executable.hint }) : "",
+      normalized.connection.error ? tr(view, "view.connection.errorLine", "错误：{error}", { error: normalized.connection.error }) : "",
     ].filter(Boolean).join("\n\n"));
     return;
   }
 
   if (isLikelyWindowsWslInstallIssue(normalized)) {
-    title.setText(viewText(view, "OpenCode连接失败：检测到 WSL 安装", "OpenCode Connection Failed: WSL Install Detected"));
-    appendLine(viewText(view, "请改用 Windows 本机 Node.js 安装。", "Install with native Windows Node.js instead."));
+    title.setText(tr(view, "view.connection.openCodeWslDetected", "OpenCode连接失败：检测到 WSL 安装"));
+    appendLine(tr(view, "view.connection.useNativeNode", "请使用 Node.js 在 Windows 本机安装。"));
     appendWindowsInstallGuide();
-    appendLine(viewText(view, "安装后重启 Obsidian，再点击状态点刷新连接。", "Restart Obsidian after installing, then click the status dot to refresh."));
-    appendCopyableDetails(normalized.connection.error ? viewText(view, `错误：${normalized.connection.error}`, `Error: ${normalized.connection.error}`) : "");
+    appendLine(tr(view, "view.connection.restartAfterInstall", "安装后重启 Obsidian，再点击状态点刷新连接。"));
+    appendCopyableDetails(normalized.connection.error ? tr(view, "view.connection.errorLine", "错误：{error}", { error: normalized.connection.error }) : "");
     return;
   }
 
-  title.setText(viewText(view, "OpenCode连接失败", "OpenCode Connection Failed"));
-  appendLine(viewText(view, "可先执行以下命令检查连接：", "Run these commands to check the connection:"));
+  title.setText(tr(view, "view.connection.openCodeFailed", "OpenCode连接失败"));
+  appendLine(tr(view, "view.connection.commandCheckHint", "可先执行以下命令检查连接："));
   appendCheckCommands();
-  appendCopyableDetails(normalized.connection.error ? viewText(view, `错误：${normalized.connection.error}`, `Error: ${normalized.connection.error}`) : "");
+  appendCopyableDetails(normalized.connection.error ? tr(view, "view.connection.errorLine", "错误：{error}", { error: normalized.connection.error }) : "");
 }
 
 function closeConnectionStatusPopover(view) {

@@ -1,5 +1,9 @@
 const { normalizePath } = require("obsidian");
-const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const {
+  getIntlLocale,
+  getLocalizedMarkdownTokenOrder,
+  normalizeSupportedLocale,
+} = require("../i18n-locale-utils");
 
 const URL_REGEX = /https?:\/\/[^\s)\]>，。！？]+/g;
 const URL_TRAILING_ASCII_PUNCTUATION_REGEX = /[.,;:!?]+$/;
@@ -53,34 +57,89 @@ Reflect on what worked, what can improve, and one priority for tomorrow.
 List 1-3 important items to carry into tomorrow's daily note.
 `;
 
-function isZh(locale) {
-  return normalizeSupportedLocale(locale) === "zh-CN";
+const DAILY_NOTE_TEMPLATE_RU = `---
+Создано: {{date}}
+Тип: Ежедневная заметка
+---
+
+# 📅 {{date}} Weekday
+
+## ⭐ Главное сегодня
+Запишите одну самую важную задачу, которую нужно продвинуть сегодня.
+
+## ✅ Задачи
+Составьте список задач на день; первая должна быть связана с главным фокусом.
+
+## 📝 Записи
+Фиксируйте важный прогресс, идеи или события дня.
+
+## 🌙 Вечерний обзор
+Отметьте, что получилось, что можно улучшить, и один приоритет на завтра.
+
+## 📅 План на завтра
+Запишите 1-3 важных пункта, которые стоит перенести в завтрашнюю заметку.
+`;
+
+const DAILY_NOTE_TEMPLATE_BY_LOCALE = {
+  "zh-CN": DAILY_NOTE_TEMPLATE,
+  en: DAILY_NOTE_TEMPLATE_EN,
+  ru: DAILY_NOTE_TEMPLATE_RU,
+};
+
+const DAILY_NOTE_LABELS = {
+  "zh-CN": {
+    summaryFallback: "暂无法解析，已保留原始链接",
+    summaryPrefix: "链接摘要",
+    emptyValue: "（空）",
+    originalPrefix: "原文",
+    linkLabel: (index) => `链接${index}`,
+    recordHeading: "## 📝 记录",
+  },
+  en: {
+    summaryFallback: "Unable to resolve, original URL preserved",
+    summaryPrefix: "URL Summary",
+    emptyValue: "(Empty)",
+    originalPrefix: "Original",
+    linkLabel: (index) => `Link ${index}`,
+    recordHeading: "## 📝 Records",
+  },
+  ru: {
+    summaryFallback: "Не удалось обработать, исходная ссылка сохранена",
+    summaryPrefix: "Краткое описание URL",
+    emptyValue: "(Пусто)",
+    originalPrefix: "Оригинал",
+    linkLabel: (index) => `Ссылка ${index}`,
+    recordHeading: "## 📝 Записи",
+  },
+};
+
+function labelsForLocale(locale) {
+  const normalized = normalizeSupportedLocale(locale, "en");
+  return DAILY_NOTE_LABELS[normalized] || DAILY_NOTE_LABELS.en;
 }
 
 function summaryFallback(locale) {
-  return isZh(locale)
-    ? "暂无法解析，已保留原始链接"
-    : "Unable to resolve, original URL preserved";
+  return labelsForLocale(locale).summaryFallback;
 }
 
 function summaryPrefix(locale) {
-  return isZh(locale) ? "链接摘要" : "URL Summary";
+  return labelsForLocale(locale).summaryPrefix;
 }
 
 function emptyValue(locale) {
-  return isZh(locale) ? "（空）" : "(Empty)";
+  return labelsForLocale(locale).emptyValue;
 }
 
 function originalPrefix(locale) {
-  return isZh(locale) ? "原文" : "Original";
+  return labelsForLocale(locale).originalPrefix;
 }
 
 function linkLabel(index, locale) {
-  return isZh(locale) ? `链接${index}` : `Link ${index}`;
+  return labelsForLocale(locale).linkLabel(index);
 }
 
 function recordHeading(locale) {
-  return isZh(locale) ? "## 📝 记录" : "## 📝 Records";
+  return labelsForLocale(locale).recordHeading;
 }
 
 function normalizeHeadingForCompare(value) {
@@ -102,6 +161,8 @@ function isRecordSectionHeading(value) {
     "## records",
     "## today notes",
     "## 📝 today notes",
+    "## 📝 записи",
+    "## записи",
   ].includes(normalized);
 }
 
@@ -115,8 +176,11 @@ function listRecordSectionAnchors() {
     "## Records",
     "## Today Notes",
     "## 📝 Today Notes",
+    "## 📝 Записи",
+    "## Записи",
     recordHeading("zh-CN"),
     recordHeading("en"),
+    recordHeading("ru"),
   ];
 }
 
@@ -162,7 +226,8 @@ function appendEntryAtPosition(content, entry, insertPos) {
 }
 
 function getDailyNoteTemplate(locale) {
-  return isZh(locale) ? DAILY_NOTE_TEMPLATE : DAILY_NOTE_TEMPLATE_EN;
+  const normalized = normalizeSupportedLocale(locale, "en");
+  return DAILY_NOTE_TEMPLATE_BY_LOCALE[normalized] || DAILY_NOTE_TEMPLATE_EN;
 }
 
 function getWeekdayByDateStr(dateStr) {
@@ -189,11 +254,11 @@ function renderDailyNoteTemplate(template, dateStr, locale = "zh-CN") {
   const weekday = getWeekdayByDateStr(date);
   if (weekday !== null) {
     const zhWeekdays = ["日", "一", "二", "三", "四", "五", "六"];
-    const enWeekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const weekdayZh = zhWeekdays[weekday] || "X";
-    const weekdayEn = enWeekdays[weekday] || "";
+    const parsedDate = new Date(`${date}T00:00:00`);
+    const weekdayLocalized = parsedDate.toLocaleDateString(getIntlLocale(localeCode), { weekday: "long" });
     rendered = rendered.replace(/星期[一二三四五六日天Xx]/g, `星期${weekdayZh}`);
-    rendered = rendered.replace(/\bWeekday\b/g, localeCode === "zh-CN" ? `星期${weekdayZh}` : weekdayEn);
+    rendered = rendered.replace(/\bWeekday\b/g, localeCode === "zh-CN" ? `星期${weekdayZh}` : weekdayLocalized);
   }
 
   return rendered;
@@ -204,9 +269,7 @@ function localizedTemplateCandidates(basePath, locale = "en") {
   const canonicalBase = normalizePath(String(basePath || ""));
   if (!canonicalBase || !canonicalBase.endsWith(".md")) return [];
   const suffixless = canonicalBase.slice(0, -".md".length);
-  const tokenOrder = normalizedLocale === "zh-CN"
-    ? ["zh-CN", "base", "en"]
-    : ["en", "base", "zh-CN"];
+  const tokenOrder = getLocalizedMarkdownTokenOrder(normalizedLocale);
   const candidates = [];
   for (const token of tokenOrder) {
     if (token === "base") candidates.push(`${suffixless}.md`);

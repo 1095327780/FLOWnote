@@ -29,17 +29,8 @@ const { createWebRequestTool } = require("../agent/tools/web-request");
 const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
-const { shouldBlockUnbackedFileMutationClaim, unbackedFileMutationWarning } = require("./file-mutation-claim-guard");
-const {
-  loadSkills,
-  formatSkillListing,
-  SkillRegistry,
-  parseFrontmatter,
-  buildSkillManifest,
-  normalizeResourcePaths,
-  substituteArguments,
-  renderSkillTemplateVariables,
-} = require("../agent/skill-registry");
+const { loadSkills, formatSkillListing, SkillRegistry, parseFrontmatter, buildSkillManifest, normalizeResourcePaths } = require("../agent/skill-registry");
+const { NOTE_PATH_DEFAULTS_BY_LOCALE, getDefaultNotePaths, getSkillDocLocale } = require("../localized-defaults");
 
 // Embedded bundled-skills index — used as a fallback when the user's
 // vault doesn't have skill folders synced yet. The plugin bundle has
@@ -57,16 +48,7 @@ const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
-const {
-  DEFAULT_NOTE_PATHS_ZH,
-  DEFAULT_NOTE_PATHS_EN,
-  DEFAULT_META_PATHS_ZH,
-  DEFAULT_META_PATHS_EN,
-  getDefaultNotePathsByLocale,
-  getDefaultMetaPathsByLocale,
-  normalizeNotePaths,
-  normalizeMetaPaths,
-} = require("../settings-utils");
+const { getIntlLocale, normalizeSupportedLocale } = require("../i18n-locale-utils");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
@@ -92,31 +74,29 @@ function getLocalHHmm(now) {
 
 const ZH_WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
-function getRunnerLocale(viewOrPlugin) {
-  const plugin = viewOrPlugin && viewOrPlugin.plugin ? viewOrPlugin.plugin : viewOrPlugin;
-  if (plugin && typeof plugin.getEffectiveLocale === "function") {
-    return plugin.getEffectiveLocale() === "zh-CN" ? "zh-CN" : "en";
-  }
-  const raw = plugin && plugin.settings ? String(plugin.settings.uiLanguage || "") : "";
-  return /^zh/i.test(raw) ? "zh-CN" : "en";
-}
-
-function runnerText(locale, zh, en) {
-  return locale === "zh-CN" ? zh : en;
-}
-
 function describeToday(now, locale = "zh-CN") {
   const d = now instanceof Date ? now : new Date();
-  if (locale === "zh-CN") {
-    return `${getLocalISODate(d)} (星期${ZH_WEEKDAY[d.getDay()]})`;
-  }
-  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  const weekday = normalizedLocale === "zh-CN"
+    ? `星期${ZH_WEEKDAY[d.getDay()]}`
+    : d.toLocaleDateString(getIntlLocale(normalizedLocale), { weekday: "long" });
   return `${getLocalISODate(d)} (${weekday})`;
 }
 
-function describeCurrentDateTime(now, locale = "zh-CN") {
-  const d = now instanceof Date ? now : new Date();
-  return `${describeToday(d, locale)} ${getLocalHHmm(d)}`;
+function describeOutputLanguage(locale) {
+  const normalizedLocale = normalizeSupportedLocale(locale, "en");
+  if (normalizedLocale === "zh-CN") return { label: "Simplified Chinese", instruction: "用简体中文输出。" };
+  if (normalizedLocale === "ru") {
+    return {
+      label: "Russian",
+      instruction: [
+        "Reply and write user-facing note content in Russian unless the user explicitly asks for another language.",
+        "Bundled skill instructions may be written in Chinese or English; follow their workflow, but translate user-facing output.",
+        "Do not translate file paths, tool names, code, frontmatter keys, or quoted source text unless the user asks.",
+      ].join(" "),
+    };
+  }
+  return { label: "English", instruction: "Reply and write user-facing note content in English unless the user explicitly asks for another language." };
 }
 
 const BASE_SYSTEM_PROMPT = [
@@ -273,6 +253,10 @@ function buildSystemPrompt(skillManifests, opts) {
       `# currentDateTime\nThe current local time is ${opts.currentDateTimeLabel}. Use this real local time for capture entries, update times, and timestamps; do not guess.`,
     ));
   }
+  if (opts && opts.outputLocale) {
+    const outputLanguage = describeOutputLanguage(opts.outputLocale);
+    ctxLines.push(`# outputLanguage\nUI language: ${outputLanguage.label}. ${outputLanguage.instruction}`);
+  }
   if (opts && typeof opts.vaultName === "string" && opts.vaultName) {
     ctxLines.push(runnerText(
       locale,
@@ -283,12 +267,63 @@ function buildSystemPrompt(skillManifests, opts) {
   if (ctxLines.length > 0) {
     parts.push(`Context:\n${ctxLines.join("\n\n")}`);
   }
+  // Note path overrides — the user has configured which folders each
+  // note kind lives in. The bundled SKILL.md files reference defaults
+  // like `01-捕获层/每日笔记/` inline; this block tells the model to
+  // treat those as DEFAULTS and prefer the user's configured paths.
+  const notePathBlock = formatNotePathOverrides(opts && opts.notePaths, opts && opts.outputLocale);
+  if (notePathBlock) parts.push(notePathBlock);
 
   const listing = formatSkillListing(skillManifests);
   if (listing) {
     parts.push(`Available skills (call via skill_invoke):\n${listing}`);
   }
   return parts.join("\n\n");
+}
+
+// Default folder layout the bundled skills hardcode. When the user
+// overrides any of these in `settings.notePaths`, we surface the
+// override to the model in a "Note path overrides" block of the system
+// prompt — the model is instructed to use the override whenever a skill
+// references the default path.
+const DEFAULT_NOTE_PATH_LAYOUT = getDefaultNotePaths("zh-CN");
+const NOTE_PATH_LABELS = {
+  dailyNotes:       "Daily notes 每日笔记",
+  weeklyReviews:    "Weekly reviews 周记",
+  monthlyReviews:   "Monthly reviews 月记",
+  yearlyReviews:    "Yearly reviews 年记",
+  permanentNotes:   "Permanent notes 永久笔记",
+  topicNotes:       "Topic notes 主题笔记 (📍)",
+  literatureNotes:  "Literature notes 文献笔记 (《》)",
+  domainPages:      "Domain pages 领域页 (🌱)",
+  activeProjects:   "Active projects 项目",
+  archive:          "Archive 归档",
+};
+
+function formatNotePathOverrides(notePaths, locale = "zh-CN") {
+  const live = (notePaths && typeof notePaths === "object") ? notePaths : {};
+  const defaults = getDefaultNotePaths(locale);
+  // Always emit the full table so the model has a single source of
+  // truth, even if every value matches the default — it's only ~10
+  // lines and dramatically reduces "AI guessed the wrong path" cases.
+  const lines = [
+    "Note path conventions (USE THESE EXACT FOLDERS when reading or writing the listed note kinds; OVERRIDE any path mentioned inside a skill body):",
+  ];
+  for (const key of Object.keys(DEFAULT_NOTE_PATH_LAYOUT)) {
+    const dflt = defaults[key] || DEFAULT_NOTE_PATH_LAYOUT[key];
+    const v = String((live[key] || "")).replace(/\\/g, "/").replace(/\/+$/, "").trim() || dflt;
+    const label = NOTE_PATH_LABELS[key] || key;
+    const tag = v !== dflt ? "  (user-customized)" : "";
+    lines.push(`  - ${label}: ${v}${tag}`);
+  }
+  const defaultAliases = Object.values(NOTE_PATH_DEFAULTS_BY_LOCALE)
+    .flatMap((defaultsForLocale) => Object.values(defaultsForLocale || {}))
+    .filter(Boolean);
+  lines.push(
+    "",
+    `When a skill body contains a hardcoded default path, treat it as an alias for the matching row above. Known default aliases include: ${[...new Set(defaultAliases)].join("; ")}. If the table above lists a different value for that note kind, use the table's value. If a skill body contains placeholders like "{{notePaths.dailyNotes}}" or "{{notePaths.activeProjects}}", replace them mentally with the matching folder from this table. Never invent a new folder.`,
+  );
+  return lines.join("\n");
 }
 
 /**
@@ -541,13 +576,10 @@ async function ensureSkillRegistry(plugin) {
     return new SkillRegistry([]);
   }
   const skillRoots = resolveSkillRoots(plugin);
-  const skillTemplateVariables = buildSkillTemplateVariables(plugin);
-  const cacheKey = [
-    skillRoots.join("\n"),
-    JSON.stringify(skillTemplateVariables.notePaths || {}),
-    JSON.stringify(skillTemplateVariables.metaPaths || {}),
-    String(skillTemplateVariables.skillsDir || ""),
-  ].join("\n---\n");
+  const locale = getSkillDocLocale(
+    typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : plugin.settings && plugin.settings.uiLanguage,
+  );
+  const cacheKey = `${locale}\n${skillRoots.join("\n")}`;
 
   // Cache key: ordered skill roots. Re-load if the user points elsewhere.
   if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === cacheKey) {
@@ -595,8 +627,26 @@ async function ensureSkillRegistry(plugin) {
       for (const key of keys) seenSkillKeys.add(key);
     }
   }
-  if (skippedVaultBundled > 0 && typeof plugin.log === "function") {
-    plugin.log(`[direct-agent] ignored ${skippedVaultBundled} vault copy/copies of bundled skill(s); using embedded read-only versions`);
+  // Merge in any embedded skills the vault scan missed. We don't
+  // replace the vault version when present (the user may have customized
+  // it on disk), but we backfill anything missing.
+  //
+  // Why this matters specifically: on iOS, Obsidian Sync sometimes
+  // skips individual files inside a synced dotfolder — e.g. the 2-char
+  // `ah/` directory gets dropped while `ah-card/`, `ah-archive/` etc
+  // sync correctly. Without this merge the user types `/ah`, the agent
+  // doesn't see `ah` in its registry, and skill_invoke fails.
+  let injectedFromEmbed = 0;
+  for (const embedded of buildEmbeddedSkillManifests(locale)) {
+    if (!embedded || !embedded.name) continue;
+    const keys = skillIdentityKeys(embedded);
+    if (keys.some((key) => seenSkillKeys.has(key))) continue;
+    manifests.push(embedded);
+    for (const key of keys) seenSkillKeys.add(key);
+    injectedFromEmbed += 1;
+  }
+  if (injectedFromEmbed > 0 && typeof plugin.log === "function") {
+    plugin.log(`[direct-agent] vault skill scan missing ${injectedFromEmbed} skill(s); backfilled from embedded bundle`);
   }
   const registry = new SkillRegistry(manifests);
   plugin.__flownoteSkillCache = { root: cacheKey, registry };
@@ -621,22 +671,33 @@ function skillIdentityKeys(manifest) {
  * shape that `loadSkills` returns, so SkillRegistry / skill_invoke can
  * consume either without caring where the body came from.
  */
-function buildEmbeddedSkillManifests() {
+function localizedEmbeddedSkillDocPath(slug, locale = "zh-CN") {
+  const skillLocale = getSkillDocLocale(locale);
+  const candidates = skillLocale === "zh-CN"
+    ? [`${slug}/SKILL.zh-CN.md`, `${slug}/SKILL.md`, `${slug}/SKILL.en.md`]
+    : [`${slug}/SKILL.en.md`, `${slug}/SKILL.md`, `${slug}/SKILL.zh-CN.md`];
+  return candidates.find((candidate) => Object.prototype.hasOwnProperty.call(EMBEDDED_BUNDLED_SKILLS_FILES, candidate)) || "";
+}
+
+function buildEmbeddedSkillManifests(locale = "zh-CN") {
   const resourcesBySlug = {};
   for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
     const slash = filePath.indexOf("/");
     if (slash === -1) continue;
     const slug = filePath.slice(0, slash);
     const rel = filePath.slice(slash + 1);
-    if (!slug || !rel || rel === "SKILL.md") continue;
+    if (!slug || !rel || /^SKILL(\.(zh-CN|en|ru))?\.md$/.test(rel)) continue;
     if (!resourcesBySlug[slug]) resourcesBySlug[slug] = {};
     resourcesBySlug[slug][rel] = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
   }
   const out = [];
-  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
-    if (!filePath.endsWith("/SKILL.md")) continue;
-    const slug = filePath.split("/")[0];
+  const slugs = [...new Set(Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)
+    .map((filePath) => String(filePath || "").split("/")[0])
+    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  for (const slug of slugs) {
     if (!slug) continue;
+    const filePath = localizedEmbeddedSkillDocPath(slug, locale);
+    if (!filePath) continue;
     const raw = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
     const { frontmatter, body } = parseFrontmatter(raw);
     const embeddedResourceFiles = resourcesBySlug[slug] || {};
@@ -892,14 +953,11 @@ async function runDirectAgentTurn({
   const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
     ? String(view.app.vault.getName() || "")
     : "";
+  const notePaths = (plugin.settings && plugin.settings.notePaths) || null;
+  const locale = typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : "zh-CN";
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
-    {
-      todayLabel: describeToday(turnNow, locale),
-      currentDateTimeLabel: describeCurrentDateTime(turnNow, locale),
-      vaultName,
-      locale,
-    },
+    { todayLabel: describeToday(undefined, locale), outputLocale: locale, vaultName, notePaths },
   );
 
   // ---------------------------------------------------------------------

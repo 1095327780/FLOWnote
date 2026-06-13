@@ -14,6 +14,7 @@ const {
   createCancelledError,
   isCancelledError,
 } = require("./bundled-skills-utils");
+const { getMetaTemplatesDir } = require("../localized-defaults");
 
 async function resolveBundledSyncAction(conflict, options = {}, state = {}) {
   if (state.globalAction === "replace") return "replace";
@@ -254,7 +255,7 @@ async function syncBundledContent(vaultPath, options = {}) {
       targetRoot: templateOptions.targetRoot,
       bundledRoot: this.getBundledSkillsRoot(),
       mapPath: this.getBundledTemplateMapPath(),
-      metaRoot: path.join(vaultPath, DEFAULT_META_TEMPLATES_DIR),
+      metaRoot: path.join(vaultPath, getMetaTemplatesDir(skillResult.locale || options.locale || "zh-CN") || DEFAULT_META_TEMPLATES_DIR),
       backupRoot: "",
       errors: [],
     };

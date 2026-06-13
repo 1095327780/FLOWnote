@@ -66,7 +66,9 @@ function renderHeader(header) {
   const actions = header.createDiv({ cls: "oc-header-actions" });
   actions.createDiv({
     cls: "oc-header-meta",
-    text: this.activePanel === "home" ? "Dashboard" : tr(this, "view.header.runtime", "Chat Runtime"),
+    text: this.activePanel === "home"
+      ? tr(this, "view.header.dashboard", "Dashboard")
+      : tr(this, "view.header.runtime", "Chat Runtime"),
   });
 
   const newBtn = this.buildIconButton(

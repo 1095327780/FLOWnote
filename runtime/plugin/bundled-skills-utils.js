@@ -69,6 +69,7 @@ function normalizeTemplateLocaleKey(value) {
   const lowered = raw.toLowerCase();
   if (lowered === "zh-cn" || lowered.startsWith("zh")) return "zh-CN";
   if (lowered === "en" || lowered.startsWith("en")) return "en";
+  if (lowered === "ru" || lowered.startsWith("ru")) return "ru";
   return "";
 }
 

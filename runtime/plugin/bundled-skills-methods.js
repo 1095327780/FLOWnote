@@ -19,6 +19,7 @@ try {
   if (real && typeof real.createHash === "function") crypto = real;
 } catch { /* mobile */ }
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { getMetaTemplatesDir } = require("../localized-defaults");
 const {
   TEMPLATE_MAP_FILE,
   DEFAULT_META_TEMPLATES_DIR,
@@ -176,6 +177,7 @@ function createBundledSkillsMethods(options = {}) {
       if (!value.endsWith(".md")) return value;
       if (value.endsWith(".zh-CN.md")) return `${value.slice(0, -".zh-CN.md".length)}.md`;
       if (value.endsWith(".en.md")) return `${value.slice(0, -".en.md".length)}.md`;
+      if (value.endsWith(".ru.md")) return `${value.slice(0, -".ru.md".length)}.md`;
       return value;
     },
 
@@ -183,15 +185,17 @@ function createBundledSkillsMethods(options = {}) {
       const canonical = this.toCanonicalLocalizedMdPath(basePath);
       if (!canonical.endsWith(".md")) return canonical;
       if (token === "base") return canonical;
-      if (token === "zh-CN" || token === "en") return `${canonical.slice(0, -".md".length)}.${token}.md`;
+      if (token === "zh-CN" || token === "en" || token === "ru") return `${canonical.slice(0, -".md".length)}.${token}.md`;
       return canonical;
     },
 
     resolveLocalizedMarkdownSource(basePath, locale, options = {}) {
       const normalizedLocale = normalizeSupportedLocale(locale, "en");
       const defaultOrder = normalizedLocale === "zh-CN"
-        ? ["zh-CN", "base", "en"]
-        : ["en", "base", "zh-CN"];
+        ? ["zh-CN", "base", "en", "ru"]
+        : normalizedLocale === "ru"
+          ? ["ru", "en", "base", "zh-CN"]
+          : ["en", "base", "zh-CN", "ru"];
       const order = Array.isArray(options.order) && options.order.length
         ? options.order
         : defaultOrder;
@@ -236,7 +240,7 @@ function createBundledSkillsMethods(options = {}) {
       let removed = 0;
       for (const relPath of relFiles) {
         const normalizedRel = String(relPath || "").replace(/\\/g, "/");
-        if (!normalizedRel.endsWith(".en.md") && !normalizedRel.endsWith(".zh-CN.md")) continue;
+        if (!normalizedRel.endsWith(".en.md") && !normalizedRel.endsWith(".zh-CN.md") && !normalizedRel.endsWith(".ru.md")) continue;
         const absPath = path.join(rootDir, normalizedRel);
         try {
           if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {
@@ -254,8 +258,10 @@ function createBundledSkillsMethods(options = {}) {
       if (!skillDir) return "";
       const normalizedLocale = normalizeSupportedLocale(locale, "en");
       const order = normalizedLocale === "zh-CN"
-        ? ["zh-CN", "base", "en"]
-        : ["en", "base", "zh-CN"];
+        ? ["zh-CN", "base", "en", "ru"]
+        : normalizedLocale === "ru"
+          ? ["en", "base", "zh-CN"]
+          : ["en", "base", "zh-CN", "ru"];
       return this.resolveLocalizedMarkdownSource(path.join(skillDir, "SKILL.md"), normalizedLocale, { order });
     },
 
@@ -377,6 +383,7 @@ function createBundledSkillsMethods(options = {}) {
         path: mapPath,
         version: 1,
         metaTemplatesDir: DEFAULT_META_TEMPLATES_DIR,
+        metaTemplatesDirs: {},
         entries: [],
       };
       if (!fs.existsSync(mapPath)) return fallback;
@@ -416,11 +423,20 @@ function createBundledSkillsMethods(options = {}) {
           .filter(Boolean);
         const metaTemplatesDir = normalizeSafeRelativePath(parsed.metaTemplatesDir)
           || DEFAULT_META_TEMPLATES_DIR;
+        const metaTemplatesDirs = {};
+        if (parsed.metaTemplatesDirs && typeof parsed.metaTemplatesDirs === "object") {
+          for (const [rawLocale, rawDir] of Object.entries(parsed.metaTemplatesDirs)) {
+            const locale = normalizeTemplateLocaleKey(rawLocale);
+            const dir = normalizeSafeRelativePath(rawDir);
+            if (locale && dir) metaTemplatesDirs[locale] = dir;
+          }
+        }
 
         return {
           path: mapPath,
           version: Number(parsed.version || 1),
           metaTemplatesDir,
+          metaTemplatesDirs,
           entries: normalizedEntries,
         };
       } catch (e) {
@@ -509,16 +525,23 @@ function createBundledSkillsMethods(options = {}) {
     resolveTemplateSource(vaultPath, bundledRoot, templateMap, entry, locale = "en") {
       const normalizedLocale = this.resolveBundledSkillLocale(locale);
       const localizedEntry = this.resolveTemplateEntryByLocale(entry, normalizedLocale);
-      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, normalizedLocale));
+      const localizedMetaTemplatesDir = templateMap.metaTemplatesDirs && templateMap.metaTemplatesDirs[normalizedLocale]
+        ? templateMap.metaTemplatesDirs[normalizedLocale]
+        : getMetaTemplatesDir(normalizedLocale) || templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR;
+      const metaRoot = path.join(vaultPath, localizedMetaTemplatesDir);
       const metaBase = path.join(metaRoot, localizedEntry.metaSource);
       const fallbackBase = path.join(bundledRoot, localizedEntry.fallback);
 
       const metaOrders = normalizedLocale === "zh-CN"
-        ? [["zh-CN", "base", "en"]]
-        : [["en"], ["base", "zh-CN"]];
+        ? [["zh-CN", "base", "en", "ru"]]
+        : normalizedLocale === "ru"
+          ? [["ru"], ["en"], ["base", "zh-CN"]]
+          : [["en"], ["base", "zh-CN", "ru"]];
       const fallbackOrders = normalizedLocale === "zh-CN"
-        ? [["zh-CN", "base", "en"]]
-        : [["en"], ["base", "zh-CN"]];
+        ? [["zh-CN", "base", "en", "ru"]]
+        : normalizedLocale === "ru"
+          ? [["ru"], ["en"], ["base", "zh-CN"]]
+          : [["en"], ["base", "zh-CN", "ru"]];
 
       const tryResolve = (basePath, sourceType, orders) => {
         for (const order of orders) {
@@ -590,11 +613,13 @@ function createBundledSkillsMethods(options = {}) {
       }
 
       const metaCandidates = [
+        this.localizedMdPathByToken(metaBase, "ru"),
         this.localizedMdPathByToken(metaBase, "zh-CN"),
         this.localizedMdPathByToken(metaBase, "base"),
         this.localizedMdPathByToken(metaBase, "en"),
       ];
       const fallbackCandidates = [
+        this.localizedMdPathByToken(fallbackBase, "ru"),
         this.localizedMdPathByToken(fallbackBase, "zh-CN"),
         this.localizedMdPathByToken(fallbackBase, "base"),
         this.localizedMdPathByToken(fallbackBase, "en"),
@@ -625,7 +650,12 @@ function createBundledSkillsMethods(options = {}) {
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
       const targetRoot = String(options.targetRoot || "")
         || path.join(vaultPath, this.settings.skillsDir);
-      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, skillLocale));
+      const metaRoot = path.join(
+        vaultPath,
+        templateMap.metaTemplatesDirs && templateMap.metaTemplatesDirs[skillLocale]
+          ? templateMap.metaTemplatesDirs[skillLocale]
+          : getMetaTemplatesDir(skillLocale) || templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR,
+      );
       const entries = Array.isArray(templateMap.entries) ? templateMap.entries : [];
 
       const errors = Array.isArray(templateMap.errors) ? [...templateMap.errors] : [];
@@ -787,7 +817,12 @@ function createBundledSkillsMethods(options = {}) {
       const skillLocale = this.resolveBundledSkillLocale(options.locale);
       const bundledRoot = this.getBundledSkillsRoot();
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
-      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, skillLocale));
+      const metaRoot = path.join(
+        vaultPath,
+        templateMap.metaTemplatesDirs && templateMap.metaTemplatesDirs[skillLocale]
+          ? templateMap.metaTemplatesDirs[skillLocale]
+          : getMetaTemplatesDir(skillLocale) || templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR,
+      );
       const entries = Array.isArray(templateMap.entries) ? templateMap.entries : [];
 
       const errors = Array.isArray(templateMap.errors) ? [...templateMap.errors] : [];

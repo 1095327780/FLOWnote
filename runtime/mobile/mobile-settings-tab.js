@@ -1,6 +1,6 @@
 const { PluginSettingTab, Setting, Notice, Platform = {} } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
-const { normalizeUiLanguage } = require("../i18n-locale-utils");
+const { UI_LANGUAGE_OPTIONS, normalizeUiLanguage } = require("../i18n-locale-utils");
 const { bindDropdownChange } = require("../settings/component-value-utils");
 const {
   LINK_RESOLVER_PROVIDER_IDS,
@@ -76,9 +76,23 @@ class MobileSettingsTab extends PluginSettingTab {
       .setName(t("settings.language.name", "UI Language"))
       .setDesc(t("settings.language.desc", "Follows system by default. UI updates immediately after switching."))
       .addDropdown((d) => {
-        d.addOption("auto", t("settings.language.optionAuto", "Follow system (recommended)"));
-        d.addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"));
-        d.addOption("en", t("settings.language.optionEn", "English"));
+        for (const option of UI_LANGUAGE_OPTIONS) {
+          const key = option === "zh-CN"
+            ? "optionZhCN"
+            : option === "en"
+              ? "optionEn"
+              : option === "ru"
+                ? "optionRu"
+                : "optionAuto";
+          const fallback = option === "zh-CN"
+            ? "简体中文"
+            : option === "en"
+              ? "English"
+              : option === "ru"
+                ? "Русский"
+                : "Follow system (recommended)";
+          d.addOption(option, t(`settings.language.${key}`, fallback));
+        }
         d.setValue(normalizeUiLanguage(this.plugin.settings.uiLanguage));
         bindDropdownChange(d, async (value) => {
           this.plugin.settings.uiLanguage = normalizeUiLanguage(value);

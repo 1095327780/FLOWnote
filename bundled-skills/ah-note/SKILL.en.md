@@ -12,7 +12,7 @@ Goal: create a usable daily note with one clear focus and a realistic task list.
 1. Use the rendered `{{notePaths.dailyNotes}}` folder in this skill. English default: `{{notePaths.dailyNotes}}/{{YYYY-MM-DD}}.md`.
 2. If today's note does not exist, create it from the daily-note template.
 3. If it exists, enter light update mode instead of overwriting.
-4. Read available context: yesterday's note, yesterday's `Tomorrow Plan`, `{{metaPaths.memory}}/STATUS.md`, current weekly/monthly review notes, and active projects.
+4. Read available context: yesterday's note, yesterday's `Tomorrow Plan`, `Meta/.ai-memory/STATUS.md`, current weekly/monthly review notes, and active projects.
 
 ## Required Sections
 
@@ -40,4 +40,3 @@ Ensure the daily note has these sections, localized to the user's language:
 - If a task is imported from `STATUS.md`, remove it from the buffer only after the user confirms it belongs today.
 - Preserve existing user-written content.
 - If configured note paths differ from examples in this file, use the configured paths.
-

@@ -11,7 +11,7 @@ Goal: turn loose captures into clear next states.
 
 Use configured note paths. English defaults:
 
-- Inbox: `{{notePaths.inbox}}`
+- Leftover records: `{{notePaths.dailyNotes}}` sections handed off by `ah-review`
 - Daily notes: `{{notePaths.dailyNotes}}`
 - Permanent notes: `{{notePaths.permanentNotes}}`
 - Projects: `{{notePaths.activeProjects}}`
@@ -30,4 +30,3 @@ Use configured note paths. English defaults:
 - Preserve source links and timestamps where useful.
 - High-value ideas should become `ah-card` candidates.
 - Operational items should become tasks or project notes.
-

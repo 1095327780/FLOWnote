@@ -1,9 +1,12 @@
 const { Setting, Notice, Platform = {} } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
-const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const { UI_LANGUAGE_OPTIONS, normalizeSupportedLocale } = require("../i18n-locale-utils");
 const { bindDropdownChange } = require("./component-value-utils");
 const {
   LINK_RESOLVER_DEFAULTS,
+  getDefaultDailyNotePath,
+  getDefaultNotePaths,
+  migrateSettingsLocaleDefaults,
   normalizeLinkResolver,
   normalizeResolverProviderId,
 } = require("../settings-utils");
@@ -133,23 +136,37 @@ class BasicSettingsSectionMethods {
           .setDesc(t("settings.language.desc",
             "默认跟随设备语言。切换后界面即时刷新；命令名与 Ribbon 提示重载后生效。"))
           .addDropdown((dropdown) => {
-            dropdown
-              .addOption("auto", t("settings.language.optionAuto", "跟随系统（推荐）"))
-              .addOption("zh-CN", t("settings.language.optionZhCN", "简体中文"))
-              .addOption("en", t("settings.language.optionEn", "English"))
-              .setValue(String(this.plugin.settings.uiLanguage || "auto"));
+            for (const option of UI_LANGUAGE_OPTIONS) {
+              const key = option === "zh-CN"
+                ? "optionZhCN"
+                : option === "en"
+                  ? "optionEn"
+                  : option === "ru"
+                    ? "optionRu"
+                    : "optionAuto";
+              const fallback = option === "zh-CN"
+                ? "简体中文"
+                : option === "en"
+                  ? "English"
+                  : option === "ru"
+                    ? "Русский"
+                    : "跟随系统（推荐）";
+              dropdown.addOption(option, t(`settings.language.${key}`, fallback));
+            }
+            dropdown.setValue(String(this.plugin.settings.uiLanguage || "auto"));
             bindDropdownChange(dropdown, async (selectedLanguage) => {
                 const previousLocale = normalizeSupportedLocale(
                   typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
                   "en",
                 );
                 this.plugin.settings.uiLanguage = String(selectedLanguage || "auto");
-                await this.plugin.saveSettings();
-                if (typeof this.plugin.refreshLocaleUi === "function") this.plugin.refreshLocaleUi();
                 const nextLocale = normalizeSupportedLocale(
                   typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : "en",
                   "en",
                 );
+                migrateSettingsLocaleDefaults(this.plugin.settings, previousLocale, nextLocale);
+                await this.plugin.saveSettings();
+                if (typeof this.plugin.refreshLocaleUi === "function") this.plugin.refreshLocaleUi();
                 this.display();
                 new Notice(t(
                   "notices.languageAppliedReloadTip",
@@ -160,7 +177,9 @@ class BasicSettingsSectionMethods {
                 if (!explicitLocale) return;
                 const languageLabel = nextLocale === "zh-CN"
                   ? t("settings.language.optionZhCN", "简体中文")
-                  : t("settings.language.optionEn", "English");
+                  : nextLocale === "ru"
+                    ? t("settings.language.optionRu", "Русский")
+                    : t("settings.language.optionEn", "English");
                 if (typeof this.showConfirmModal !== "function") return;
                 const shouldReinstall = await this.showConfirmModal({
                   title: t("settings.language.reinstallPromptTitle", "重装对应语言 Skills？"),
@@ -759,11 +778,12 @@ class BasicSettingsSectionMethods {
     new Setting(containerEl)
       .setName(t("mobile.settings.dailyPathName", "每日笔记路径"))
       .addText((text) => {
+        const defaultDailyPath = getDefaultDailyNotePath(locale);
         text
-          .setPlaceholder(locale === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes")
+          .setPlaceholder(defaultDailyPath)
           .setValue(mc.dailyNotePath)
           .onChange(async (v) => {
-            mc.dailyNotePath = v.trim() || (locale === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes");
+            mc.dailyNotePath = v.trim() || defaultDailyPath;
             await this.plugin.saveSettings();
           });
       });
@@ -772,10 +792,10 @@ class BasicSettingsSectionMethods {
       .setName(t("mobile.settings.headerName", "记录区标题"))
       .addText((text) => {
         text
-          .setPlaceholder(locale === "zh-CN" ? "## 记录" : "## Records")
+          .setPlaceholder(locale === "zh-CN" ? "## 记录" : locale === "ru" ? "## Записи" : "## Records")
           .setValue(mc.ideaSectionHeader)
           .onChange(async (v) => {
-            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "## 记录" : "## Records");
+            mc.ideaSectionHeader = v.trim() || (locale === "zh-CN" ? "## 记录" : locale === "ru" ? "## Записи" : "## Records");
             await this.plugin.saveSettings();
           });
       });
@@ -918,12 +938,11 @@ class BasicSettingsSectionMethods {
   }
 
   renderNotePathsSection(containerEl, t) {
-    const { getDefaultNotePathsByLocale, getDefaultMetaPathsByLocale, deriveMetaPathsFromRoot } = require("../settings-utils");
-    const locale = typeof this.plugin.getEffectiveLocale === "function"
-      ? this.plugin.getEffectiveLocale()
-      : "zh-CN";
-    const localeDefaults = getDefaultNotePathsByLocale(locale);
-    const metaLocaleDefaults = getDefaultMetaPathsByLocale(locale);
+    const locale = normalizeSupportedLocale(
+      typeof this.plugin.getEffectiveLocale === "function" ? this.plugin.getEffectiveLocale() : this.plugin.settings.uiLanguage,
+      "zh-CN",
+    );
+    const DEFAULT_NOTE_PATHS = getDefaultNotePaths(locale);
     if (!this.plugin.settings.notePaths) {
       this.plugin.settings.notePaths = { ...localeDefaults };
     }
@@ -934,37 +953,22 @@ class BasicSettingsSectionMethods {
     const metaPaths = this.plugin.settings.metaPaths;
 
     const fields = [
-      ["captureRoot",     "捕获层根目录", "Capture root"],
-      ["inbox",           "收集箱", "Inbox"],
-      ["dailyNotes",      "每日笔记", "Daily notes"],
-      ["highlights",      "划线笔记", "Highlights"],
-      ["weeklyReviews",   "周记 / 周回顾", "Weekly review"],
-      ["monthlyReviews",  "月记 / 月报", "Monthly review"],
-      ["yearlyReviews",   "年记 / 年报", "Yearly review"],
-      ["cultivateRoot",   "培养层根目录", "Cultivate root"],
-      ["permanentNotes",  "永久笔记", "Permanent notes"],
-      ["topicNotes",      "主题笔记（📍）", "Topic notes (📍)"],
-      ["literatureNotes", "文献笔记（《》）", "Literature notes (《》)"],
-      ["domainPages",     "领域页所在层（🌱）", "Domain pages layer (🌱)"],
-      ["createRoot",      "创造层根目录", "Create root"],
-      ["activeProjects",  "进行中项目", "Active projects"],
-      ["archive",         "归档", "Archive"],
-    ];
-    const metaPreviewKeys = [
-      "templates",
-      "indexes",
-      "indexPages",
-      "systemDocs",
-      "homeViews",
-      "memory",
-      "legacyMemory",
+      ["dailyNotes", "每日笔记"],
+      ["weeklyReviews", "周记 / 周回顾"],
+      ["monthlyReviews", "月记 / 月报"],
+      ["yearlyReviews", "年记 / 年报"],
+      ["permanentNotes", "永久笔记"],
+      ["topicNotes", "主题笔记（📍）"],
+      ["literatureNotes", "文献笔记（《》）"],
+      ["domainPages", "领域页所在层（🌱）"],
+      ["activeProjects", "进行中项目"],
+      ["archive", "归档"],
     ];
 
-    for (const [key, zhLabel, enLabel] of fields) {
-      const label = locale === "en" ? enLabel : zhLabel;
-      const defaultValue = localeDefaults[key];
+    for (const [key, fallbackLabel] of fields) {
+      const defaultValue = DEFAULT_NOTE_PATHS[key];
       new Setting(containerEl)
-        .setName(label)
+        .setName(t(`settings.notePaths.${key}`, fallbackLabel))
         .setDesc(t(
           "settings.notePaths.fieldDesc",
           "默认：{default}",

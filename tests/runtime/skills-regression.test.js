@@ -15,6 +15,22 @@ const path = require("path");
 const { parseFrontmatter } = require("../../runtime/agent/skill-registry");
 
 const BUNDLED_DIR = path.join(__dirname, "..", "..", "bundled-skills");
+const ALLOWED_ENGLISH_SKILL_PLACEHOLDERS = new Set([
+  "YYYY-MM-DD",
+  "HH:mm",
+  "original text",
+  "task",
+  "notePaths.dailyNotes",
+  "notePaths.weeklyReviews",
+  "notePaths.monthlyReviews",
+  "notePaths.yearlyReviews",
+  "notePaths.permanentNotes",
+  "notePaths.topicNotes",
+  "notePaths.literatureNotes",
+  "notePaths.domainPages",
+  "notePaths.activeProjects",
+  "notePaths.archive",
+]);
 
 // All tools that buildDefaultToolRegistry currently registers. Keep in
 // sync with runtime/chat/direct-agent-runner.js. This is intentionally
@@ -60,17 +76,12 @@ function loadSkill(slug, dir) {
   return { slug, dir, raw, frontmatter: parsed.frontmatter, body: parsed.body };
 }
 
-function walkMarkdownFiles(dir, out = []) {
-  if (!fs.existsSync(dir)) return out;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const filePath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkMarkdownFiles(filePath, out);
-    } else if (/\.md$/i.test(entry.name)) {
-      out.push(filePath);
-    }
-  }
-  return out;
+function loadSkillVariant(dir, fileName) {
+  const filePath = path.join(dir, fileName);
+  if (!fs.existsSync(filePath)) return null;
+  const raw = fs.readFileSync(filePath, "utf8");
+  const parsed = parseFrontmatter(raw);
+  return { filePath, raw, frontmatter: parsed.frontmatter, body: parsed.body };
 }
 
 const skills = listSkillDirs()
@@ -96,24 +107,37 @@ test("bundled skills includes the helper trio: obsidian-cli / obsidian-markdown 
   }
 });
 
-test("all FLOWnote ah-* bundled skills include an English SKILL.en.md", () => {
-  const missing = skills
-    .filter((s) => s.slug === "ah" || s.slug.startsWith("ah-"))
-    .filter((s) => !fs.existsSync(path.join(s.dir, "SKILL.en.md")))
-    .map((s) => s.slug);
-  assert.deepEqual(missing, []);
-});
-
-test("FLOWnote bundled skill markdown uses path variables instead of default folders", () => {
-  const files = walkMarkdownFiles(BUNDLED_DIR)
-    .filter((file) => path.relative(BUNDLED_DIR, file).split(path.sep)[0].startsWith("ah"));
-  const hardcodedPath = /(01-捕获层|02-培养层|03-连接层|04-创造层|01-Capture|02-Cultivate|03-Connect|04-Create|Meta\/模板|Meta\/索引|Meta\/索引页|Meta\/系统文档|Meta\/Home视图|Meta\/Templates|Meta\/Indexes|Meta\/Index Pages|Meta\/System Docs|Meta\/Home Views|Meta\/ai-memory|Meta\/\.ai-memory|Read skills\/|`skills\/)/;
-  const offenders = [];
-  for (const file of files) {
-    const text = fs.readFileSync(file, "utf8");
-    if (hardcodedPath.test(text)) offenders.push(path.relative(BUNDLED_DIR, file));
+test("every bundled ah skill has an English SKILL.en.md variant", () => {
+  const ahSkills = skills.filter((s) => s.slug === "ah" || s.slug.startsWith("ah-"));
+  assert.ok(ahSkills.length >= 14, "expected ah skill inventory to be present");
+  for (const skill of ahSkills) {
+    const english = loadSkillVariant(skill.dir, "SKILL.en.md");
+    assert.ok(english, `${skill.slug}: missing SKILL.en.md`);
+    assert.equal(english.frontmatter.name, skill.frontmatter.name, `${skill.slug}: English name must match base name`);
+    assert.ok(
+      typeof english.frontmatter.description === "string" && english.frontmatter.description.trim().length > 0,
+      `${skill.slug}: English description is missing`,
+    );
+    assert.ok(String(english.body || "").trim().length > 50, `${skill.slug}: English body too short`);
+    assert.doesNotMatch(
+      String(english.frontmatter.description || ""),
+      /[\u4e00-\u9fff]/,
+      `${skill.slug}: English description still contains Chinese text`,
+    );
+    assert.doesNotMatch(
+      String(english.body || ""),
+      /[\u4e00-\u9fff]/,
+      `${skill.slug}: English body still contains Chinese text`,
+    );
+    const placeholders = [...String(english.body || "").matchAll(/\{\{([^}]+)\}\}/g)]
+      .map((match) => String(match[1] || "").trim());
+    for (const placeholder of placeholders) {
+      assert.ok(
+        ALLOWED_ENGLISH_SKILL_PLACEHOLDERS.has(placeholder),
+        `${skill.slug}: unsupported English placeholder {{${placeholder}}}`,
+      );
+    }
   }
-  assert.deepEqual(offenders, []);
 });
 
 // ---------------------------------------------------------------------------

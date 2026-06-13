@@ -17,26 +17,41 @@ function tr(ctx, key, fallback, params = {}) {
   return tFromContext(ctx, key, fallback, params);
 }
 
-const TEMPLATE_DISPLAY_LABELS = {
-  "daily-note":     ["每日笔记模板",     "Daily note"],
-  "weekly-note":    ["周报模板",         "Weekly review"],
-  "monthly-note":   ["月报模板",         "Monthly review"],
-  "yearly-note":    ["年报模板",         "Yearly review"],
-  "literature-note":["文献笔记模板",     "Literature note"],
-  "evergreen-note": ["永久笔记模板",     "Evergreen note"],
-  "project-note":   ["项目模板",         "Project"],
-  "progress-note":  ["进度模板",         "Progress"],
-  "home-note":      ["HOME 模板",        "HOME"],
-  "topic-note":     ["主题笔记模板",     "Topic note"],
-  "domain-note":    ["领域页模板",       "Domain page"],
+const TEMPLATE_DISPLAY_KEYS = {
+  "daily-note": "settings.templates.labelDaily",
+  "weekly-note": "settings.templates.labelWeekly",
+  "monthly-note": "settings.templates.labelMonthly",
+  "yearly-note": "settings.templates.labelYearly",
+  "literature-note": "settings.templates.labelLiterature",
+  "evergreen-note": "settings.templates.labelEvergreen",
+  "project-note": "settings.templates.labelProject",
+  "progress-note": "settings.templates.labelProgress",
+  "home-note": "settings.templates.labelHome",
+  "topic-note": "settings.templates.labelTopic",
+  "domain-note": "settings.templates.labelDomain",
+};
+
+const TEMPLATE_DISPLAY_FALLBACKS = {
+  "daily-note":     { "zh-CN": "每日笔记模板",     en: "Daily note",      ru: "Ежедневная заметка" },
+  "weekly-note":    { "zh-CN": "周报模板",         en: "Weekly review",   ru: "Еженедельный обзор" },
+  "monthly-note":   { "zh-CN": "月报模板",         en: "Monthly review",  ru: "Ежемесячный обзор" },
+  "yearly-note":    { "zh-CN": "年报模板",         en: "Yearly review",   ru: "Годовой обзор" },
+  "literature-note":{ "zh-CN": "文献笔记模板",     en: "Literature note", ru: "Литературная заметка" },
+  "evergreen-note": { "zh-CN": "永久笔记模板",     en: "Evergreen note",  ru: "Evergreen заметка" },
+  "project-note":   { "zh-CN": "项目模板",         en: "Project",         ru: "Проект" },
+  "progress-note":  { "zh-CN": "进度模板",         en: "Progress",        ru: "Прогресс" },
+  "home-note":      { "zh-CN": "HOME 模板",        en: "HOME",            ru: "HOME" },
+  "topic-note":     { "zh-CN": "主题笔记模板",     en: "Topic note",      ru: "Тематическая заметка" },
+  "domain-note":    { "zh-CN": "领域页模板",       en: "Domain page",     ru: "Страница области" },
 };
 
 function templateDisplayName(ctx, id, metaSource) {
-  const pair = TEMPLATE_DISPLAY_LABELS[id];
+  const key = TEMPLATE_DISPLAY_KEYS[id];
   const locale = typeof ctx.plugin.getEffectiveLocale === "function"
     ? ctx.plugin.getEffectiveLocale()
     : "zh-CN";
-  if (pair) return locale === "en" ? pair[1] : pair[0];
+  const fallback = TEMPLATE_DISPLAY_FALLBACKS[id] || {};
+  if (key) return tr(ctx, key, fallback[locale] || fallback.en || fallback["zh-CN"] || metaSource.replace(/\.md$/, ""));
   return metaSource.replace(/\.md$/, "");
 }
 

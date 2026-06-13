@@ -4,6 +4,7 @@ const {
   resolveLocaleFromNavigator,
   DEFAULT_UI_LOCALE,
 } = require("../i18n-locale-utils");
+const { getDefaultDailyNotePath } = require("../localized-defaults");
 
 const LINK_RESOLVER_PROVIDER_IDS = ["tianapi", "showapi", "gugudata"];
 
@@ -58,7 +59,7 @@ const MOBILE_CAPTURE_DEFAULTS = {
   apiKey: "",
   baseUrl: "",
   model: "",
-  dailyNotePath: "01-捕获层/每日笔记",
+  dailyNotePath: getDefaultDailyNotePath("zh-CN"),
   ideaSectionHeader: "## 📝 记录",
   enableAiCleanup: true,
   enableUrlSummary: true,
@@ -128,12 +129,14 @@ function normalizeLinkResolver(raw) {
 
 function defaultDailyNotePathByLocale(locale) {
   const normalized = normalizeSupportedLocale(locale, DEFAULT_UI_LOCALE);
-  return normalized === "zh-CN" ? "01-捕获层/每日笔记" : "01-Capture/Daily Notes";
+  return getDefaultDailyNotePath(normalized);
 }
 
 function defaultIdeaSectionHeaderByLocale(locale) {
   const normalized = normalizeSupportedLocale(locale, DEFAULT_UI_LOCALE);
-  return normalized === "zh-CN" ? "## 📝 记录" : "## 📝 Records";
+  if (normalized === "zh-CN") return "## 📝 记录";
+  if (normalized === "ru") return "## 📝 Записи";
+  return "## 📝 Records";
 }
 
 function normalizeMobileSettings(raw) {
