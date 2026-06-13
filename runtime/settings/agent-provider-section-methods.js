@@ -24,6 +24,7 @@ const { buildProviderFromSpec } = require("../agent/agent-provider-resolver");
 const {
   getProviderSpec,
   listProviderSpecs,
+  isOllamaCloudModelId,
   resolveBaseUrl,
 } = require("../providers/registry");
 
@@ -76,14 +77,6 @@ function buildModelRefreshUserConfig(agent, spec) {
     versionHeaderOverride: agent.direct.versionHeaderOverride || "",
     stream: false,
   };
-}
-
-// Ollama "cloud" models (e.g. "gpt-oss:120b-cloud", "deepseek-v3.1:671b-cloud")
-// are hosted on ollama.com and require sign-in / a subscription. They appear in
-// the local daemon's /v1/models response with no distinguishing flag — only the
-// "-cloud" id suffix marks them.
-function isOllamaCloudModelId(id) {
-  return /-cloud\b/i.test(String(id || "")) || /:cloud\b/i.test(String(id || ""));
 }
 
 // When the saved Ollama model is not in the daemon's current list, adopt a

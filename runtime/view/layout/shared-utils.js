@@ -251,18 +251,33 @@ function buildDirectModelOptions(view) {
     scheduleDirectProviderModelAutofetch(view, spec, direct);
   }
 
+  // Label Ollama cloud models the same way the Settings dropdown does, so the
+  // inline picker also flags "(云端·需登录)" instead of showing a bare
+  // "gpt-oss:120b-cloud" the user might pick and then hit a sign-in error.
+  // Reuses the shared detector + the settings.agent.modelCloudSuffix i18n key.
+  const isCloud = typeof registry.isOllamaCloudModelId === "function"
+    ? registry.isOllamaCloudModelId
+    : () => false;
+  const labelFor = (id, rawLabel) => {
+    const base = rawLabel || id;
+    if (spec.id === "ollama" && isCloud(id)) {
+      return tr(view, "settings.agent.modelCloudSuffix", "{model}（云端·需登录 ollama.com）", { model: base });
+    }
+    return base;
+  };
+
   // Merge the fetched catalog with registry entries (registry preserves curated
   // labels for ids the API didn't return), dedup by id, and always keep the
   // currently-selected model selectable even if it is in neither list.
   const byId = new Map();
   for (const m of fetched) {
-    if (m && m.id && !byId.has(m.id)) byId.set(m.id, { id: m.id, label: m.label || m.id });
+    if (m && m.id && !byId.has(m.id)) byId.set(m.id, { id: m.id, label: labelFor(m.id, m.label) });
   }
   for (const m of spec.models) {
-    if (m && m.id && !byId.has(m.id)) byId.set(m.id, { id: m.id, label: m.label || m.id });
+    if (m && m.id && !byId.has(m.id)) byId.set(m.id, { id: m.id, label: labelFor(m.id, m.label) });
   }
   const current = String(direct.model || "").trim();
-  if (current && !byId.has(current)) byId.set(current, { id: current, label: current });
+  if (current && !byId.has(current)) byId.set(current, { id: current, label: labelFor(current, current) });
   return Array.from(byId.values());
 }
 

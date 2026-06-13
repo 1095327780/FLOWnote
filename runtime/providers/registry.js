@@ -382,9 +382,23 @@ function resolveBaseUrl(spec, userConfig) {
   return mode.baseUrl;
 }
 
+/**
+ * Ollama "cloud" models (e.g. "gpt-oss:120b-cloud", "deepseek-v3.1:671b-cloud")
+ * run on ollama.com and require `ollama signin`. The local daemon's /v1/models
+ * response marks them only by the "-cloud" id suffix (no distinguishing field),
+ * so detection is a pure string check. Shared by Settings and the inline model
+ * picker so both label cloud models identically.
+ * @param {string} id
+ * @returns {boolean}
+ */
+function isOllamaCloudModelId(id) {
+  return /-cloud\b/i.test(String(id || "")) || /:cloud\b/i.test(String(id || ""));
+}
+
 module.exports = {
   PROVIDERS,
   DEFAULT_PROVIDER_ID,
+  isOllamaCloudModelId,
   getProviderSpec,
   listProviderSpecs,
   getDefaultProviderId,
