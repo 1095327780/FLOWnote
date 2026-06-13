@@ -701,6 +701,7 @@ function renderHomeDashboard(container) {
     ? this.plugin.getEffectiveLocale()
     : "zh-CN";
   this.homeRenderRun = currentRun;
+  const homeSettings = { ...(this.plugin.settings || {}), uiLanguage: locale };
   const heatmapState = currentHeatmapState(this);
   const heatmapRange = heatmapRangeFromState(heatmapState);
   container.empty();

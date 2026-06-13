@@ -394,6 +394,7 @@ module.exports = {
   getDefaultNotePaths,
   getDefaultNotePathsByLocale,
   getDefaultMetaPathsByLocale,
+  deriveMetaPathsFromRoot,
   migrateSettingsLocaleDefaults,
   migrateLegacySettings,
   normalizeLinkResolver,

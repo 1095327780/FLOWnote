@@ -6,6 +6,8 @@ const {
   LINK_RESOLVER_DEFAULTS,
   getDefaultDailyNotePath,
   getDefaultNotePaths,
+  getDefaultMetaPathsByLocale,
+  deriveMetaPathsFromRoot,
   migrateSettingsLocaleDefaults,
   normalizeLinkResolver,
   normalizeResolverProviderId,
@@ -944,8 +946,18 @@ class BasicSettingsSectionMethods {
       "zh-CN",
     );
     const DEFAULT_NOTE_PATHS = getDefaultNotePaths(locale);
+    const metaLocaleDefaults = getDefaultMetaPathsByLocale(locale);
+    const metaPreviewKeys = [
+      "templates",
+      "indexes",
+      "indexPages",
+      "systemDocs",
+      "homeViews",
+      "memory",
+      "legacyMemory",
+    ];
     if (!this.plugin.settings.notePaths) {
-      this.plugin.settings.notePaths = { ...localeDefaults };
+      this.plugin.settings.notePaths = { ...DEFAULT_NOTE_PATHS };
     }
     if (!this.plugin.settings.metaPaths) {
       this.plugin.settings.metaPaths = { ...metaLocaleDefaults };
@@ -988,7 +1000,7 @@ class BasicSettingsSectionMethods {
                 const mc = this.plugin.settings.mobileCapture && typeof this.plugin.settings.mobileCapture === "object"
                   ? this.plugin.settings.mobileCapture
                   : (this.plugin.settings.mobileCapture = {});
-                const oldDefault = localeDefaults.dailyNotes;
+                const oldDefault = DEFAULT_NOTE_PATHS.dailyNotes;
                 const currentMobilePath = String(mc.dailyNotePath || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
                 if (!currentMobilePath || currentMobilePath === previousPath || currentMobilePath === oldDefault) {
                   mc.dailyNotePath = nextPath;
