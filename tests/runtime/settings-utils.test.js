@@ -86,6 +86,15 @@ test("normalizeSettings should use localized note path defaults", () => {
   assert.equal(out.mobileCapture.dailyNotePath, "01-Захват/Ежедневные заметки");
 });
 
+test("normalizeSettings should use Russian defaults for fresh mobile capture", () => {
+  const out = normalizeSettings({
+    uiLanguage: "ru",
+  }, { locale: "ru" });
+  assert.equal(out.mobileCapture.dailyNotePath, "01-Захват/Ежедневные заметки");
+  assert.equal(out.mobileCapture.ideaSectionHeader, "## Записи");
+  assert.equal(out.metaPaths.templates, "Meta/Шаблоны");
+});
+
 test("migrateSettingsLocaleDefaults should migrate only known defaults", () => {
   const settings = {
     notePaths: {
@@ -146,6 +155,71 @@ test("normalizeSettings should keep old persisted installs on OpenCode bridge", 
 
   assert.equal(out.agentProvider.mode, "opencode-legacy");
   assert.equal(out.agentProviderModePreference, "opencode-legacy");
+});
+
+test("normalizeSettings should preserve user custom paths and AI settings on existing installs", () => {
+  const out = normalizeSettings({
+    uiLanguage: "ru",
+    skillsDir: "User/Skills",
+    toolPermissionMode: "auto",
+    notePaths: {
+      dailyNotes: "My Notes/Daily",
+      weeklyReviews: "My Notes/Weekly",
+      monthlyReviews: "My Notes/Monthly",
+      yearlyReviews: "My Notes/Yearly",
+      permanentNotes: "Knowledge/Permanent",
+      topicNotes: "Knowledge/Topics",
+      literatureNotes: "Knowledge/Literature",
+      domainPages: "Knowledge/Domains",
+      activeProjects: "Work/Projects",
+      archive: "Work/Archive",
+    },
+    metaPaths: {
+      metaRoot: "System",
+      templates: "System/My Templates",
+      indexes: "System/My Indexes",
+      indexPages: "System/My Pages",
+      systemDocs: "System/Docs",
+      homeViews: "System/Home",
+      memory: "System/Memory",
+      legacyMemory: "System/Legacy Memory",
+    },
+    mobileCapture: {
+      dailyNotePath: "Mobile/Inbox",
+      provider: "deepseek",
+      apiKey: "mobile-key",
+      baseUrl: "https://mobile.example/v1",
+      model: "mobile-model",
+    },
+    agentProvider: {
+      enabled: true,
+      mode: "direct",
+      direct: {
+        providerId: "deepseek",
+        providerMode: "api",
+        apiKeys: { deepseek: "sk-user" },
+        model: "deepseek-v4-flash",
+        baseUrlOverride: "https://proxy.example/v1",
+        stream: false,
+      },
+    },
+  }, { existingInstall: true, locale: "ru" });
+
+  assert.equal(out.skillsDir, "User/Skills");
+  assert.equal(out.toolPermissionMode, "auto");
+  assert.equal(out.notePaths.dailyNotes, "My Notes/Daily");
+  assert.equal(out.notePaths.activeProjects, "Work/Projects");
+  assert.equal(out.metaPaths.templates, "System/My Templates");
+  assert.equal(out.metaPaths.memory, "System/Memory");
+  assert.equal(out.mobileCapture.dailyNotePath, "Mobile/Inbox");
+  assert.equal(out.mobileCapture.apiKey, "mobile-key");
+  assert.equal(out.mobileCapture.baseUrl, "https://mobile.example/v1");
+  assert.equal(out.mobileCapture.model, "mobile-model");
+  assert.equal(out.agentProvider.mode, "direct");
+  assert.equal(out.agentProvider.direct.providerId, "deepseek");
+  assert.equal(out.agentProvider.direct.apiKeys.deepseek, "sk-user");
+  assert.equal(out.agentProvider.direct.baseUrlOverride, "https://proxy.example/v1");
+  assert.equal(out.agentProvider.direct.stream, false);
 });
 
 test("normalizeSettingsInPlace should preserve common nested setting references", () => {

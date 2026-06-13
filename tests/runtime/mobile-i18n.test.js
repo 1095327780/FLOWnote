@@ -195,7 +195,7 @@ test("OpenRouter mobile preset uses the OpenAI-compatible free router endpoint",
     assert.equal(result, "Cleaned text");
     assert.equal(capturedRequest.url, "https://openrouter.ai/api/v1/chat/completions");
     const body = JSON.parse(capturedRequest.body);
-    assert.equal(body.model, "openrouter/free");
+    assert.equal(body.model, "openrouter/auto");
   } finally {
     fixture.restore();
   }

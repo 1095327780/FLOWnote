@@ -6,6 +6,8 @@ const {
   LINK_RESOLVER_DEFAULTS,
   getDefaultDailyNotePath,
   getDefaultNotePaths,
+  getDefaultMetaPathsByLocale,
+  deriveMetaPathsFromRoot,
   migrateSettingsLocaleDefaults,
   normalizeLinkResolver,
   normalizeResolverProviderId,
@@ -173,7 +175,7 @@ class BasicSettingsSectionMethods {
                   "界面语言已更新。命令名和 Ribbon 提示将在重载插件后生效。",
                 ));
                 if (previousLocale === nextLocale) return;
-                const explicitLocale = selectedLanguage === "zh-CN" || selectedLanguage === "en";
+                const explicitLocale = selectedLanguage === "zh-CN" || selectedLanguage === "en" || selectedLanguage === "ru";
                 if (!explicitLocale) return;
                 const languageLabel = nextLocale === "zh-CN"
                   ? t("settings.language.optionZhCN", "简体中文")
@@ -194,8 +196,8 @@ class BasicSettingsSectionMethods {
                 if (!shouldReinstall) return;
                 await this.reinstallBundledContentWithPrompt(null, {
                   locale: nextLocale,
-                  replaceAll: true,
-                  skipConflictPrompt: true,
+                  replaceAll: false,
+                  skipConflictPrompt: false,
                 });
                 if (typeof this.promptAndRunNotePathLocaleMigration === "function") {
                   await this.promptAndRunNotePathLocaleMigration(previousLocale, nextLocale, t);
@@ -415,7 +417,8 @@ class BasicSettingsSectionMethods {
             .addButton((b) => {
               b.setButtonText(t("settings.basic.reinstallSkillsNow", "立即重装")).onClick(async () => {
                 await this.reinstallBundledContentWithPrompt(b, {
-                  replaceAll: true, skipConflictPrompt: true,
+                  replaceAll: false,
+                  skipConflictPrompt: false,
                 });
               });
             });
@@ -943,8 +946,18 @@ class BasicSettingsSectionMethods {
       "zh-CN",
     );
     const DEFAULT_NOTE_PATHS = getDefaultNotePaths(locale);
+    const metaLocaleDefaults = getDefaultMetaPathsByLocale(locale);
+    const metaPreviewKeys = [
+      "templates",
+      "indexes",
+      "indexPages",
+      "systemDocs",
+      "homeViews",
+      "memory",
+      "legacyMemory",
+    ];
     if (!this.plugin.settings.notePaths) {
-      this.plugin.settings.notePaths = { ...localeDefaults };
+      this.plugin.settings.notePaths = { ...DEFAULT_NOTE_PATHS };
     }
     if (!this.plugin.settings.metaPaths) {
       this.plugin.settings.metaPaths = { ...metaLocaleDefaults };
@@ -987,7 +1000,7 @@ class BasicSettingsSectionMethods {
                 const mc = this.plugin.settings.mobileCapture && typeof this.plugin.settings.mobileCapture === "object"
                   ? this.plugin.settings.mobileCapture
                   : (this.plugin.settings.mobileCapture = {});
-                const oldDefault = localeDefaults.dailyNotes;
+                const oldDefault = DEFAULT_NOTE_PATHS.dailyNotes;
                 const currentMobilePath = String(mc.dailyNotePath || "").replace(/\\/g, "/").replace(/\/+$/, "").trim();
                 if (!currentMobilePath || currentMobilePath === previousPath || currentMobilePath === oldDefault) {
                   mc.dailyNotePath = nextPath;

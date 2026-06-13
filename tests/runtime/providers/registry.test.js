@@ -129,17 +129,17 @@ test("custom OpenAI-compat is the open slot for user-supplied endpoints", () => 
   assert.equal(spec.userMustProvideModels, true);
 });
 
-test("OpenRouter preset exposes the free router through OpenAI-compatible API", () => {
+test("OpenRouter preset exposes the auto router through OpenAI-compatible API", () => {
   const spec = PROVIDERS["openrouter"];
   assert.equal(spec.protocol, "openai-chat");
   assert.equal(spec.defaultMode, "api");
-  assert.equal(spec.defaultModel, "openrouter/free");
-  assert.ok(spec.models.some((model) => model.id === "openrouter/free" && model.isDefault));
+  assert.equal(spec.defaultModel, "openrouter/auto");
+  assert.ok(spec.models.some((model) => model.id === "openrouter/auto" && model.isDefault));
   const url = resolveBaseUrl(spec, {
     providerId: "openrouter",
     mode: "api",
     apiKey: "sk-or-test",
-    model: "openrouter/free",
+    model: "openrouter/auto",
   });
   assert.equal(url, "https://openrouter.ai/api/v1");
 });

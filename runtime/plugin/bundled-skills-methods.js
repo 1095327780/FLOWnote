@@ -260,7 +260,7 @@ function createBundledSkillsMethods(options = {}) {
       const order = normalizedLocale === "zh-CN"
         ? ["zh-CN", "base", "en", "ru"]
         : normalizedLocale === "ru"
-          ? ["en", "base", "zh-CN"]
+          ? ["ru", "en", "base", "zh-CN"]
           : ["en", "base", "zh-CN", "ru"];
       return this.resolveLocalizedMarkdownSource(path.join(skillDir, "SKILL.md"), normalizedLocale, { order });
     },
@@ -525,9 +525,10 @@ function createBundledSkillsMethods(options = {}) {
     resolveTemplateSource(vaultPath, bundledRoot, templateMap, entry, locale = "en") {
       const normalizedLocale = this.resolveBundledSkillLocale(locale);
       const localizedEntry = this.resolveTemplateEntryByLocale(entry, normalizedLocale);
-      const localizedMetaTemplatesDir = templateMap.metaTemplatesDirs && templateMap.metaTemplatesDirs[normalizedLocale]
-        ? templateMap.metaTemplatesDirs[normalizedLocale]
-        : getMetaTemplatesDir(normalizedLocale) || templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR;
+      // Honor a user-configured Meta root (settings.metaPaths.templates) so
+      // templates resolve under a custom location instead of only the bundled
+      // default. resolveMetaTemplatesDir falls back to the localized default.
+      const localizedMetaTemplatesDir = this.resolveMetaTemplatesDir(templateMap, normalizedLocale);
       const metaRoot = path.join(vaultPath, localizedMetaTemplatesDir);
       const metaBase = path.join(metaRoot, localizedEntry.metaSource);
       const fallbackBase = path.join(bundledRoot, localizedEntry.fallback);
@@ -646,16 +647,12 @@ function createBundledSkillsMethods(options = {}) {
 
     async syncBundledTemplates(vaultPath, options = {}) {
       const skillLocale = this.resolveBundledSkillLocale(options.locale);
+      const cleanStale = Boolean(options.cleanStale);
       const bundledRoot = this.getBundledSkillsRoot();
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
       const targetRoot = String(options.targetRoot || "")
         || path.join(vaultPath, this.settings.skillsDir);
-      const metaRoot = path.join(
-        vaultPath,
-        templateMap.metaTemplatesDirs && templateMap.metaTemplatesDirs[skillLocale]
-          ? templateMap.metaTemplatesDirs[skillLocale]
-          : getMetaTemplatesDir(skillLocale) || templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR,
-      );
+      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, skillLocale));
       const entries = Array.isArray(templateMap.entries) ? templateMap.entries : [];
 
       const errors = Array.isArray(templateMap.errors) ? [...templateMap.errors] : [];
@@ -748,17 +745,19 @@ function createBundledSkillsMethods(options = {}) {
             }
           }
 
-          for (const staleRelativePath of source.entry.staleTargets) {
-            const staleFile = path.join(targetRoot, staleRelativePath);
-            if (!fs.existsSync(staleFile)) continue;
-            try {
-              if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
-              const backed = this.backupPathIfNeeded(staleFile, backupRoot, path.join("templates", staleRelativePath));
-              if (backed) backupCount += 1;
-              fs.rmSync(staleFile, { force: true });
-              cleanedStaleCount += 1;
-            } catch (e) {
-              errors.push(`${entry.id}: 清理旧模板失败 ${staleRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+          if (cleanStale) {
+            for (const staleRelativePath of source.entry.staleTargets) {
+              const staleFile = path.join(targetRoot, staleRelativePath);
+              if (!fs.existsSync(staleFile)) continue;
+              try {
+                if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
+                const backed = this.backupPathIfNeeded(staleFile, backupRoot, path.join("templates", staleRelativePath));
+                if (backed) backupCount += 1;
+                fs.rmSync(staleFile, { force: true });
+                cleanedStaleCount += 1;
+              } catch (e) {
+                errors.push(`${entry.id}: 清理旧模板失败 ${staleRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+              }
             }
           }
         }
@@ -815,14 +814,10 @@ function createBundledSkillsMethods(options = {}) {
 
     async resetMetaTemplateBaseline(vaultPath, options = {}) {
       const skillLocale = this.resolveBundledSkillLocale(options.locale);
+      const cleanStale = Boolean(options.cleanStale);
       const bundledRoot = this.getBundledSkillsRoot();
       const templateMap = this.loadBundledTemplateMap(bundledRoot);
-      const metaRoot = path.join(
-        vaultPath,
-        templateMap.metaTemplatesDirs && templateMap.metaTemplatesDirs[skillLocale]
-          ? templateMap.metaTemplatesDirs[skillLocale]
-          : getMetaTemplatesDir(skillLocale) || templateMap.metaTemplatesDir || DEFAULT_META_TEMPLATES_DIR,
-      );
+      const metaRoot = path.join(vaultPath, this.resolveMetaTemplatesDir(templateMap, skillLocale));
       const entries = Array.isArray(templateMap.entries) ? templateMap.entries : [];
 
       const errors = Array.isArray(templateMap.errors) ? [...templateMap.errors] : [];
@@ -911,21 +906,23 @@ function createBundledSkillsMethods(options = {}) {
             }
           }
 
-          for (const staleMetaRelativePath of localizedEntry.staleMetaSources) {
-            const staleFile = path.join(metaRoot, staleMetaRelativePath);
-            if (!fs.existsSync(staleFile)) continue;
-            try {
-              if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
-              const backed = this.backupPathIfNeeded(
-                staleFile,
-                backupRoot,
-                path.join("meta-templates", staleMetaRelativePath),
-              );
-              if (backed) backupCount += 1;
-              fs.rmSync(staleFile, { force: true });
-              cleanedStaleCount += 1;
-            } catch (e) {
-              errors.push(`${entry.id}: 清理旧模板失败 ${staleMetaRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+          if (cleanStale) {
+            for (const staleMetaRelativePath of localizedEntry.staleMetaSources) {
+              const staleFile = path.join(metaRoot, staleMetaRelativePath);
+              if (!fs.existsSync(staleFile)) continue;
+              try {
+                if (!backupRoot) backupRoot = this.getBundledContentBackupRoot(vaultPath, options);
+                const backed = this.backupPathIfNeeded(
+                  staleFile,
+                  backupRoot,
+                  path.join("meta-templates", staleMetaRelativePath),
+                );
+                if (backed) backupCount += 1;
+                fs.rmSync(staleFile, { force: true });
+                cleanedStaleCount += 1;
+              } catch (e) {
+                errors.push(`${entry.id}: 清理旧模板失败 ${staleMetaRelativePath} -> ${e instanceof Error ? e.message : String(e)}`);
+              }
             }
           }
         }

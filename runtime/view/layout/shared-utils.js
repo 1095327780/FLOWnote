@@ -177,7 +177,7 @@ function getProviderFetchedModels(plugin, providerId) {
 }
 
 function scheduleDirectProviderModelAutofetch(view, spec, direct) {
-  if (!view || !view.plugin || !spec || spec.id !== "ollama") return;
+  if (!view || !view.plugin || !spec || !spec.id) return;
   if (getProviderFetchedModels(view.plugin, spec.id).length > 0) return;
   if (!view.plugin.__flownoteAutoFetchingModels) view.plugin.__flownoteAutoFetchingModels = {};
   if (view.plugin.__flownoteAutoFetchingModels[spec.id]) return;
@@ -208,14 +208,11 @@ function scheduleDirectProviderModelAutofetch(view, spec, direct) {
       const list = await provider.listModels();
       if (!view.plugin.__flownoteFetchedModels) view.plugin.__flownoteFetchedModels = {};
       view.plugin.__flownoteFetchedModels[spec.id] = { models: list, fetchedAt: Date.now() };
-      const selected = String(currentDirect.model || spec.defaultModel || "").trim();
-      if (list.length > 0 && !list.some((m) => m && m.id === selected)) {
-        currentDirect.model = list[0].id;
-        if (view.plugin.settings && view.plugin.settings.agentProvider && view.plugin.settings.agentProvider.direct) {
-          view.plugin.settings.agentProvider.direct.model = list[0].id;
-        }
-        if (typeof view.plugin.saveSettings === "function") await view.plugin.saveSettings();
-      }
+      // Do NOT silently switch the user's selected model here. Auto-jumping to
+      // list[0] is what made the inline picker land on an unusable model (an
+      // Ollama cloud model, or an arbitrary OpenRouter entry). We only cache the
+      // catalog and repopulate the picker — the user's choice is preserved and
+      // everything is listed for them to switch to.
       updateModelSelectOptions.call(view);
       if (typeof view.applyStatus === "function") view.applyStatus(view.latestDiagnosticsResult);
     } catch (_e) {
@@ -241,17 +238,47 @@ function buildDirectModelOptions(view) {
   if (!direct) return [];
   const spec = registry.getProviderSpec(direct.providerId || "");
   if (!spec || !Array.isArray(spec.models)) return [];
-  if (spec.id === "ollama") {
-    const fetched = getProviderFetchedModels(view.plugin, spec.id);
-    if (fetched.length > 0) {
-      return fetched.map((m) => ({ id: m.id, label: m.label || m.id }));
-    }
+
+  const fetched = getProviderFetchedModels(view.plugin, spec.id);
+  // Providers whose registry list is only a placeholder depend on the live API
+  // for their real catalog: Ollama (local /v1/models) and OpenRouter (hundreds
+  // of models, registry ships one). Without this the inline picker is stuck on a
+  // single entry and the user can only switch models from Settings. Providers
+  // that ship a curated multi-model list, or that require a user-supplied model
+  // id (doubao / custom), are left to their static list.
+  const needsApiCatalog = !spec.userMustProvideModels && spec.models.length <= 1;
+  if (fetched.length === 0 && needsApiCatalog) {
     scheduleDirectProviderModelAutofetch(view, spec, direct);
   }
-  return spec.models.map((m) => ({
-    id: m.id,
-    label: m.label || m.id,
-  }));
+
+  // Label Ollama cloud models the same way the Settings dropdown does, so the
+  // inline picker also flags "(云端·需登录)" instead of showing a bare
+  // "gpt-oss:120b-cloud" the user might pick and then hit a sign-in error.
+  // Reuses the shared detector + the settings.agent.modelCloudSuffix i18n key.
+  const isCloud = typeof registry.isOllamaCloudModelId === "function"
+    ? registry.isOllamaCloudModelId
+    : () => false;
+  const labelFor = (id, rawLabel) => {
+    const base = rawLabel || id;
+    if (spec.id === "ollama" && isCloud(id)) {
+      return tr(view, "settings.agent.modelCloudSuffix", "{model}（云端·需登录 ollama.com）", { model: base });
+    }
+    return base;
+  };
+
+  // Merge the fetched catalog with registry entries (registry preserves curated
+  // labels for ids the API didn't return), dedup by id, and always keep the
+  // currently-selected model selectable even if it is in neither list.
+  const byId = new Map();
+  for (const m of fetched) {
+    if (m && m.id && !byId.has(m.id)) byId.set(m.id, { id: m.id, label: labelFor(m.id, m.label) });
+  }
+  for (const m of spec.models) {
+    if (m && m.id && !byId.has(m.id)) byId.set(m.id, { id: m.id, label: labelFor(m.id, m.label) });
+  }
+  const current = String(direct.model || "").trim();
+  if (current && !byId.has(current)) byId.set(current, { id: current, label: labelFor(current, current) });
+  return Array.from(byId.values());
 }
 
 function updateModelSelectOptions() {
@@ -426,5 +453,6 @@ module.exports = {
   isLinkableContextFile,
   isLinkableContextFolder,
   createLinkableContextEntry,
+  buildDirectModelOptions,
   sharedLayoutMethods,
 };

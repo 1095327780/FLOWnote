@@ -39,10 +39,7 @@ const {
   substituteArguments,
   renderSkillTemplateVariables,
 } = require("../agent/skill-registry");
-const {
-  shouldBlockUnbackedFileMutationClaim,
-  unbackedFileMutationWarning,
-} = require("./file-mutation-claim-guard");
+const FILE_MUTATION_TOOLS = /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/;
 const { NOTE_PATH_DEFAULTS_BY_LOCALE, getDefaultNotePaths, getSkillDocLocale } = require("../localized-defaults");
 
 // Embedded bundled-skills index — used as a fallback when the user's
@@ -1081,15 +1078,19 @@ async function runDirectAgentTurn({
   } else {
     log("turn tool summary: <no tool calls this turn>");
   }
-  // Diagnostic only: flag turns where the assistant produced text but
-  // no destructive tool call fired. Keeps the file trace useful for
-  // post-mortem without forcing the model to read regex rules. Behavior
-  // is unchanged either way — this is logged, not enforced.
-  const hadDestructiveCall = state.toolUses.some((t) =>
-    /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/.test(t.name) && !t.isError,
-  );
-  if (state.text.length > 200 && !hadDestructiveCall && state.toolUses.length === 0) {
-    log(`turn note: long text response with no tool calls (textLen=${state.text.length}). Verify if model claimed actions.`);
+  // Diagnostic only — never enforced, never shown to the user. We honor file
+  // changes SYSTEMICALLY, not by inspecting this text: the system prompt's
+  // "Promise = tool call" contract prevents the claim, the agent loop feeds
+  // every tool_result (including is_error) back so the model self-corrects, and
+  // the UI renders a tool card for every call so a fabricated "renamed X"
+  // simply has no matching card. Tool execution is the only source of truth.
+  // The only structural anomaly worth a trace line is a file-mutation tool that
+  // ran but did NOT succeed; an answer-only turn (no mutation tool) is normal
+  // and stays quiet — the per-tool "turn tool summary" above already has status.
+  const succeededMutation = state.toolUses.some((t) => FILE_MUTATION_TOOLS.test(t.name) && !t.isError);
+  const attemptedMutation = state.toolUses.some((t) => FILE_MUTATION_TOOLS.test(t.name));
+  if (attemptedMutation && !succeededMutation) {
+    log(`turn note: file mutation attempted but all attempts errored (tools=${state.toolUses.length}).`);
   }
 
   // If the model ran out of output budget before producing anything
@@ -1113,11 +1114,6 @@ async function runDirectAgentTurn({
         "• Split the task into smaller steps, then write each part back separately.",
     );
   }
-  if (shouldBlockUnbackedFileMutationClaim({ text: finalText, toolUses: state.toolUses })) {
-    log("turn guard: blocked unbacked file mutation claim");
-    finalText = unbackedFileMutationWarning(locale);
-  }
-
   const finalBlocks = renderBlocks(state);
   // Replace the streaming text block (if any) with the final text so the
   // UI shows the friendly max_tokens warning when appropriate.

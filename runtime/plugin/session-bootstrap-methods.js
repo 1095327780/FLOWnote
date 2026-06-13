@@ -3,8 +3,11 @@ const {
 } = require("../assistant-payload-utils");
 const {
   getAgentModeNotice,
+  getRememberedPluginVersion,
   hasPersistedPluginData,
+  looksLikePre050LegacyInstall,
   markAgentModeNoticeSeen,
+  rememberPluginVersion,
 } = require("../release-notice");
 const { setRuntimeLocale } = require("../runtime-locale-state");
 
@@ -222,6 +225,13 @@ const sessionBootstrapMethods = {
     const runtime = this.ensureRuntimeModules();
     const raw = (await this.loadData()) || {};
     const existingInstall = hasPersistedPluginData(raw);
+    const previousPluginVersion = getRememberedPluginVersion(
+      raw && raw.runtimeState && typeof raw.runtimeState === "object" ? raw.runtimeState : null,
+    );
+    const legacyPre050Install = looksLikePre050LegacyInstall(raw, {
+      existingInstall,
+      previousVersion: previousPluginVersion,
+    });
     const rawSchemaVersion = Number(raw && raw.schemaVersion ? raw.schemaVersion : 0);
     this.schemaVersion = Number.isFinite(rawSchemaVersion) && rawSchemaVersion > 0
       ? Math.floor(rawSchemaVersion)
@@ -253,7 +263,13 @@ const sessionBootstrapMethods = {
       this.agentModeNotice = getAgentModeNotice(this.runtimeState, {
         existingInstall,
         version: this.manifest && this.manifest.version,
+        previousVersion: previousPluginVersion,
+        legacyPre050Install,
       });
+      this.runtimeStateMigrationDirty = rememberPluginVersion(
+        this.runtimeState,
+        this.manifest && this.manifest.version,
+      ) || this.runtimeStateMigrationDirty;
       return;
     }
 
@@ -268,7 +284,13 @@ const sessionBootstrapMethods = {
     this.agentModeNotice = getAgentModeNotice(this.runtimeState, {
       existingInstall,
       version: this.manifest && this.manifest.version,
+      previousVersion: previousPluginVersion,
+      legacyPre050Install,
     });
+    this.runtimeStateMigrationDirty = rememberPluginVersion(
+      this.runtimeState,
+      this.manifest && this.manifest.version,
+    ) || this.runtimeStateMigrationDirty;
   },
 
   async saveSettings() {
@@ -361,8 +383,9 @@ const sessionBootstrapMethods = {
         : true,
       locale,
       resolveConflict: typeof options.resolveConflict === "function" ? options.resolveConflict : null,
-      defaultConflictAction: String(options.defaultConflictAction || "replace"),
+      defaultConflictAction: String(options.defaultConflictAction || "skip"),
       backupDir: options.backupDir,
+      cleanStale: Boolean(options.cleanStale),
     });
 
     this.log(
@@ -571,7 +594,8 @@ const sessionBootstrapMethods = {
       force: Boolean(options.force),
       syncTemplates: true,
       locale,
-      defaultConflictAction: "replace",
+      defaultConflictAction: "skip",
+      cleanStale: false,
     });
     if (!syncResult.errors.length && !syncResult.skipped) {
       this.log(

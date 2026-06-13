@@ -179,7 +179,12 @@ function normalizeNotePaths(raw, localeOrDefaults = DEFAULT_NOTE_PATHS) {
 function normalizeMetaPaths(raw, defaults = DEFAULT_META_PATHS) {
   const data = raw && typeof raw === "object" ? raw : {};
   const base = defaults && typeof defaults === "object" ? defaults : DEFAULT_META_PATHS;
-  return deriveMetaPathsFromRoot(data.metaRoot || base.metaRoot, base);
+  const out = deriveMetaPathsFromRoot(data.metaRoot || base.metaRoot, base);
+  for (const key of Object.keys(DEFAULT_META_PATHS_ZH)) {
+    const value = normalizeVaultFolderPath(data[key]);
+    if (value) out[key] = value;
+  }
+  return out;
 }
 
 const DEFAULT_SETTINGS = {
@@ -265,6 +270,10 @@ function normalizeSettings(raw, options = {}) {
   merged.notePaths = merged.uiLanguage === "auto"
     ? normalizeNotePaths(merged.notePaths, defaultLocale)
     : migrateNotePathsForLocale(merged.notePaths, defaultLocale, defaultLocale);
+  merged.metaPaths = normalizeMetaPaths(
+    hasExplicitMetaPaths ? merged.metaPaths : {},
+    getDefaultMetaPathsByLocale(defaultLocale),
+  );
 
   merged.requestTimeoutMs = Math.max(10000, Number(merged.requestTimeoutMs) || DEFAULT_SETTINGS.requestTimeoutMs);
   merged.cliPath = String(merged.cliPath || "").trim();
@@ -284,8 +293,10 @@ function normalizeSettings(raw, options = {}) {
     : normalizeSupportedLocale(options && options.locale, "zh-CN");
   const localizedMcDefaults = {
     ...mcDefaults,
-    dailyNotePath: mobileLocale === "en" ? DEFAULT_NOTE_PATHS_EN.dailyNotes : mcDefaults.dailyNotePath,
-    ideaSectionHeader: mobileLocale === "en" ? "## Records" : mcDefaults.ideaSectionHeader,
+    dailyNotePath: getDefaultDailyNotePath(mobileLocale),
+    ideaSectionHeader: mobileLocale === "en"
+      ? "## Records"
+      : (mobileLocale === "ru" ? "## Записи" : mcDefaults.ideaSectionHeader),
   };
   if (!hasExplicitMobileCapture) {
     merged.mobileCapture = { ...localizedMcDefaults };
@@ -383,6 +394,7 @@ module.exports = {
   getDefaultNotePaths,
   getDefaultNotePathsByLocale,
   getDefaultMetaPathsByLocale,
+  deriveMetaPathsFromRoot,
   migrateSettingsLocaleDefaults,
   migrateLegacySettings,
   normalizeLinkResolver,

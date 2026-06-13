@@ -278,15 +278,20 @@ const PROVIDERS = {
         label: "OpenRouter API",
         baseUrl: "https://openrouter.ai/api/v1",
         planUrl: "https://openrouter.ai/keys",
-        recommendedModel: "openrouter/free",
+        recommendedModel: "openrouter/auto",
       },
     },
     defaultMode: "api",
     auth: { headerName: "Authorization", scheme: "bearer" },
+    // OpenRouter exposes hundreds of models; "openrouter/auto" is its real
+    // Auto Router slug that picks a model per prompt, so it works out of the
+    // box. Users can refresh the model list (GET {baseUrl}/models) to pick a
+    // specific model. (The old "openrouter/free" was not a valid slug and 400'd
+    // on first use.)
     models: [
-      { id: "openrouter/free", label: "OpenRouter Free Router", tier: "fast", isDefault: true },
+      { id: "openrouter/auto", label: "Auto Router（自动选择）", tier: "high", isDefault: true },
     ],
-    defaultModel: "openrouter/free",
+    defaultModel: "openrouter/auto",
   },
 
   "openai-compat-custom": {
@@ -377,9 +382,23 @@ function resolveBaseUrl(spec, userConfig) {
   return mode.baseUrl;
 }
 
+/**
+ * Ollama "cloud" models (e.g. "gpt-oss:120b-cloud", "deepseek-v3.1:671b-cloud")
+ * run on ollama.com and require `ollama signin`. The local daemon's /v1/models
+ * response marks them only by the "-cloud" id suffix (no distinguishing field),
+ * so detection is a pure string check. Shared by Settings and the inline model
+ * picker so both label cloud models identically.
+ * @param {string} id
+ * @returns {boolean}
+ */
+function isOllamaCloudModelId(id) {
+  return /-cloud\b/i.test(String(id || "")) || /:cloud\b/i.test(String(id || ""));
+}
+
 module.exports = {
   PROVIDERS,
   DEFAULT_PROVIDER_ID,
+  isOllamaCloudModelId,
   getProviderSpec,
   listProviderSpecs,
   getDefaultProviderId,

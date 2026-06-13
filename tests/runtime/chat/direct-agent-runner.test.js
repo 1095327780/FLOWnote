@@ -156,7 +156,13 @@ test("runDirectAgentTurn streams text through onToken and returns final response
   assert.equal(out.tokens[out.tokens.length - 1], "Hello world");
 });
 
-test("runDirectAgentTurn blocks a completed rename claim when no mutation tool ran", async () => {
+test("runDirectAgentTurn passes the model's answer through unchanged — no post-hoc prose guard", async () => {
+  // The runner never parses or rewrites the model's text to police file-change
+  // claims. Honesty is handled SYSTEMICALLY: the system prompt's "Promise =
+  // tool call" contract prevents the claim, the loop feeds tool_results back so
+  // the model self-corrects, and the UI shows a tool card for every call — so a
+  // fabricated "renamed X" simply has no matching card. Tool execution is the
+  // only source of truth, and the answer is delivered verbatim.
   const view = fakeView();
   setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
   view._messages.push({ id: "u1", role: "user", text: "把 old.md 改名为 new.md" });
@@ -182,10 +188,9 @@ test("runDirectAgentTurn blocks a completed rename claim when no mutation tool r
     runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
   });
 
-  assert.match(response.text, /no files were actually changed/i);
-  assert.doesNotMatch(response.text, /old\.md 重命名为 new\.md/);
+  assert.equal(response.text, "已经把 old.md 重命名为 new.md。");
   const streamBlock = response.blocks.find((b) => b.type === "stream-text");
-  assert.match(streamBlock.text, /no files were actually changed/i);
+  assert.equal(streamBlock.text, "已经把 old.md 重命名为 new.md。");
 });
 
 test("runDirectAgentTurn allows rename instructions that do not claim completion", async () => {
@@ -215,6 +220,39 @@ test("runDirectAgentTurn allows rename instructions that do not claim completion
   });
 
   assert.match(response.text, /current and target vault-relative paths/);
+  assert.doesNotMatch(response.text, /no files were actually changed/i);
+});
+
+test("runDirectAgentTurn preserves a read-only summary that mentions past-tense verbs", async () => {
+  // Regression: the guard used to fire on a bare past-tense verb in descriptive
+  // prose and wipe the model's real answer on ordinary summarize/Q&A turns.
+  const view = fakeView();
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  view._messages.push({ id: "u1", role: "user", text: "总结这篇笔记" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+
+  const summary = "This note explains how the API was created in 2019 and later updated to support OAuth.";
+  const provider = makeFakeProvider([[
+    ev.msgStart(),
+    ev.textBlock(0),
+    ev.textDelta(0, summary),
+    ev.blockStop(0),
+    ev.msgDelta("end_turn"),
+    ev.msgStop(),
+  ]]);
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+
+  const { handlers } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "总结这篇笔记",
+    handlers,
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+  });
+
+  assert.equal(response.text, summary);
   assert.doesNotMatch(response.text, /no files were actually changed/i);
 });
 

@@ -17,7 +17,7 @@ const PROVIDER_PRESETS = {
   moonshot: { name: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai", defaultModel: "kimi-k2.6", keyUrl: "https://platform.kimi.ai/console/api-keys", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
   zhipu: { name: "Zhipu (GLM)", baseUrl: "https://open.bigmodel.cn/api/paas", defaultModel: "glm-5.1", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", chatPath: "/v4/chat/completions", modelsPath: "/v4/models" },
   siliconflow: { name: "SiliconFlow", baseUrl: "https://api.siliconflow.cn", defaultModel: "deepseek-ai/DeepSeek-V3", keyUrl: "https://cloud.siliconflow.cn/account/ak", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
-  openrouter: { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", defaultModel: "openrouter/free", keyUrl: "https://openrouter.ai/keys", chatPath: "/chat/completions", modelsPath: "/models", models: ["openrouter/free"] },
+  openrouter: { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", defaultModel: "openrouter/auto", keyUrl: "https://openrouter.ai/keys", chatPath: "/chat/completions", modelsPath: "/models", models: ["openrouter/auto"] },
   custom: { name: "Custom", baseUrl: "", defaultModel: "", keyUrl: "", chatPath: "/v1/chat/completions", modelsPath: "/v1/models" },
 };
 

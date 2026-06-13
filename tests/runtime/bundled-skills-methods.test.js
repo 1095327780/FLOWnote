@@ -226,6 +226,37 @@ test("syncBundledContent should install locale-specific SKILL.md and switch on l
   }
 });
 
+test("syncBundledContent should preserve existing skills and templates with default skip behavior", async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: true,
+      defaultConflictAction: "replace",
+    });
+
+    const skillFile = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "SKILL.md");
+    const templateFile = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "assets", "templates", "示例模板.md");
+    writeFile(skillFile, "custom skill\n");
+    writeFile(templateFile, "custom template\n");
+
+    const result = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: true,
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.skills.skippedCount, 1);
+    assert.equal(result.templates.skippedCount, 1);
+    assert.equal(fs.readFileSync(skillFile, "utf8"), "custom skill\n");
+    assert.equal(fs.readFileSync(templateFile, "utf8"), "custom template\n");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("syncBundledContent should update existing bundled skill in place", async () => {
   const fixture = createFixture();
   try {
@@ -340,13 +371,13 @@ test("syncBundledTemplates should prefer en fallback before base meta and keep z
     assert.equal(zhResult.errors.length, 0);
     const templateFileZh = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "assets", "templates", "示例模板.md");
     assert.equal(fs.readFileSync(templateFileZh, "utf8"), "meta-template-base\n");
-    assert.equal(fs.existsSync(templateFileEn), false);
+    assert.equal(fs.existsSync(templateFileEn), true);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
-test("syncBundledTemplates should switch template filenames by locale and clean stale files", async () => {
+test("syncBundledTemplates should keep stale locale files by default and clean only when requested", async () => {
   const fixture = createFixture();
   try {
     const zhResult = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
@@ -368,9 +399,18 @@ test("syncBundledTemplates should switch template filenames by locale and clean 
     });
     assert.equal(enResult.errors.length, 0);
     assert.equal(fs.existsSync(templateFileEn), true);
-    assert.equal(fs.existsSync(templateFileZh), false);
+    assert.equal(fs.existsSync(templateFileZh), true);
     assert.equal(fs.readFileSync(templateFileEn, "utf8"), "fallback-template-en\n");
-    assert.equal(Number(enResult.cleanedStaleCount || 0) > 0, true);
+    assert.equal(Number(enResult.cleanedStaleCount || 0), 0);
+
+    const cleanResult = await fixture.plugin.syncBundledTemplates(fixture.vaultPath, {
+      locale: "en",
+      defaultConflictAction: "replace",
+      cleanStale: true,
+    });
+    assert.equal(cleanResult.errors.length, 0);
+    assert.equal(fs.existsSync(templateFileZh), false);
+    assert.equal(Number(cleanResult.cleanedStaleCount || 0) > 0, true);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

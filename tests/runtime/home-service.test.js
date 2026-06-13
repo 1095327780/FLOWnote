@@ -129,6 +129,29 @@ test("findOrCreateTodayDailyNote follows notePaths dailyNotes instead of stale m
   }
 });
 
+test("getTodayState falls back when Obsidian cachedRead never resolves", async () => {
+  const previousTimeout = process.env.FLOWNOTE_HOME_READ_TIMEOUT_MS;
+  process.env.FLOWNOTE_HOME_READ_TIMEOUT_MS = "20";
+  const service = loadHomeServiceWithMockObsidian();
+  try {
+    const file = makeFile("01-捕获层/每日笔记/2026-05-21.md", "");
+    const app = createApp([file]);
+    app.vault.cachedRead = () => new Promise(() => {});
+
+    const started = Date.now();
+    const state = await service.getTodayState(app, {}, { dateStr: "2026-05-21" });
+
+    assert.equal(state.exists, true);
+    assert.equal(state.path, "01-捕获层/每日笔记/2026-05-21.md");
+    assert.deepEqual(state.summary.tasks, { open: 0, done: 0, total: 0, completionRate: 0 });
+    assert.ok(Date.now() - started < 500);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.FLOWNOTE_HOME_READ_TIMEOUT_MS;
+    else process.env.FLOWNOTE_HOME_READ_TIMEOUT_MS = previousTimeout;
+    service.restore();
+  }
+});
+
 test("toggleTaskLineInContent should update the target markdown checkbox only", () => {
   const service = loadHomeServiceWithMockObsidian();
   try {

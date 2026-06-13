@@ -73,9 +73,21 @@ function formatProviderHttpError({ spec, status, text }) {
       message,
     ].join("\n");
   }
+  if (spec && spec.id === "ollama" && /sign[\s-]?in|signed in|unauthorized|forbidden|subscription|ollama\.com|api key|cloud model|requires? .*(?:account|cloud|sign)/i.test(message)) {
+    return [
+      "这是 Ollama 云端模型（带 -cloud 后缀，运行在 ollama.com）。云端模型可免费使用（有速率限制），但需先在终端执行 `ollama signin` 登录后才能调用。若不想登录，请点模型右侧「刷新」，改选本机已安装的模型。",
+      message,
+    ].join("\n");
+  }
   if (spec && spec.id === "ollama" && /model ['"].+['"] not found/i.test(message)) {
     return [
-      "当前 Ollama 未找到这个模型，请点击刷新并选择列表中的本机模型或 Cloud 模型。",
+      "当前 Ollama 未找到这个模型，请点击刷新并选择列表中本机已安装的模型（不带 -cloud 后缀）。",
+      message,
+    ].join("\n");
+  }
+  if (spec && spec.id === "openrouter" && /insufficient|credits?|quota|payment required|not authorized|no auth|invalid api key|unauthorized|requires more/i.test(message)) {
+    return [
+      "OpenRouter 报告额度或授权问题。请到 openrouter.ai 检查 API Key 与账户额度；想免费试用可改选带 :free 后缀的模型（点模型右侧「刷新」拉取完整列表后选择）。",
       message,
     ].join("\n");
   }
@@ -140,6 +152,19 @@ function mergeJsonishMetadata(current, incoming) {
 function resolveToolCallStateKey(tcDelta, state, positionInDelta) {
   if (tcDelta && typeof tcDelta.index === "number") return `index:${tcDelta.index}`;
   if (tcDelta && tcDelta.id) return `id:${tcDelta.id}`;
+
+  // Continuation fragment carrying neither index nor id. OpenAI-shaped streams
+  // emit tool_calls in stable array order, so associate this fragment with the
+  // tool call already opened at the same position. This prevents a stray
+  // argument fragment — e.g. from a provider that sends `id` only on the first
+  // delta and then index-less continuations — from spawning a phantom,
+  // empty-named tool call whose arguments are split off from the real one.
+  // (Reference: Claude Code keys streamed tool-call deltas strictly by block
+  // position/index and never fabricates a block from an orphan delta.)
+  const order = Array.isArray(state.toolCallOrder) ? state.toolCallOrder : [];
+  if (order.length > 0) {
+    return positionInDelta < order.length ? order[positionInDelta] : order[order.length - 1];
+  }
 
   if (!state.syntheticToolCallKeys) state.syntheticToolCallKeys = {};
   const syntheticKey = `position:${positionInDelta}`;
@@ -351,6 +376,8 @@ function* translateOpenAIChunk(chunk, state) {
             extra_content: incomingExtraContent,
           };
           state.toolCalls[oi] = tc;
+          if (!Array.isArray(state.toolCallOrder)) state.toolCallOrder = [];
+          state.toolCallOrder.push(oi);
           state.nextIndex += 1;
           const contentBlock = { type: "tool_use", id: tc.id, name: tc.name, input: {} };
           if (tc.extra_content !== undefined) contentBlock.extra_content = cloneJsonish(tc.extra_content);
