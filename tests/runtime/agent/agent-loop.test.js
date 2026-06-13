@@ -139,6 +139,49 @@ test("consumeStream parses input_json_delta into tool_use.input", async () => {
   assert.deepEqual(r.toolUses[0].input, { path: "x.md" });
 });
 
+test("consumeStream preserves provider metadata on tool_use blocks", async () => {
+  async function* gen() {
+    yield ev.messageStart();
+    yield {
+      type: "content_block_start",
+      index: 0,
+      content_block: {
+        type: "tool_use",
+        id: "tu-1",
+        name: "vault_read",
+        input: {},
+        extra_content: { google: { thought_signature: "sig-1" } },
+      },
+    };
+    yield ev.toolUseJson(0, "{\"path\":\"x.md\"}");
+    yield ev.blockStop(0);
+    yield ev.messageDelta("tool_use");
+    yield ev.messageStop();
+  }
+  const r = await consumeStream(gen());
+  assert.deepEqual(r.toolUses[0].input, { path: "x.md" });
+  assert.deepEqual(r.toolUses[0].extra_content, { google: { thought_signature: "sig-1" } });
+});
+
+test("consumeStream applies late tool metadata deltas", async () => {
+  async function* gen() {
+    yield ev.messageStart();
+    yield ev.toolUseStart(0, "tu-1", "vault_read");
+    yield {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "tool_metadata_delta", extra_content: { google: { thought_signature: "sig-1" } } },
+    };
+    yield ev.toolUseJson(0, "{\"path\":\"x.md\"}");
+    yield ev.blockStop(0);
+    yield ev.messageDelta("tool_use");
+    yield ev.messageStop();
+  }
+  const r = await consumeStream(gen());
+  assert.deepEqual(r.toolUses[0].input, { path: "x.md" });
+  assert.deepEqual(r.toolUses[0].extra_content, { google: { thought_signature: "sig-1" } });
+});
+
 test("consumeStream surfaces error events as fatalError", async () => {
   async function* gen() {
     yield { type: "error", error: { type: "http_500", message: "boom" } };
@@ -221,6 +264,82 @@ test("runAgentLoop dispatches a single tool_use and feeds the result back", asyn
   assert.equal(lastMsg.content[0].type, "tool_result");
   assert.equal(lastMsg.content[0].tool_use_id, "tu-1");
   assert.equal(lastMsg.content[0].content, "read x.md");
+});
+
+test("runAgentLoop dispatches tool_use even when stop_reason is not tool_use", async () => {
+  const provider = mockProvider({
+    turns: [
+      [
+        ev.messageStart(),
+        ev.toolUseStart(0, "tu-1", "vault_read"),
+        ev.toolUseJson(0, "{\"path\":\"x.md\"}"),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+      [
+        ev.messageStart(),
+        ev.textBlockStart(0),
+        ev.textDelta(0, "OK summary."),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+    ],
+  });
+  const registry = registryWith(
+    makeReadOnlyTool("vault_read", async (input) => `read ${input.path}`),
+  );
+  const events = await collect(runAgentLoop({
+    provider,
+    registry,
+    messages: [{ role: "user", content: [{ type: "text", text: "Read x.md" }] }],
+  }));
+  const finish = events.find((e) => e.type === "tool_finish");
+  assert.ok(finish);
+  assert.equal(finish.content, "read x.md");
+  assert.equal(provider._calls(), 2);
+});
+
+test("runAgentLoop keeps long tool chains going when stop_reason is missing", async () => {
+  const toolTurn = (id, path) => ([
+    ev.messageStart(),
+    ev.toolUseStart(0, id, "vault_read"),
+    ev.toolUseJson(0, `{"path":"${path}"}`),
+    ev.blockStop(0),
+    ev.messageStop(),
+  ]);
+  const provider = mockProvider({
+    turns: [
+      toolTurn("tu-1", "a.md"),
+      toolTurn("tu-2", "b.md"),
+      toolTurn("tu-3", "c.md"),
+      [
+        ev.messageStart(),
+        ev.textBlockStart(0),
+        ev.textDelta(0, "done"),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+    ],
+  });
+  const seenPaths = [];
+  const registry = registryWith(
+    makeReadOnlyTool("vault_read", async (input) => {
+      seenPaths.push(input.path);
+      return `read ${input.path}`;
+    }),
+  );
+  const events = await collect(runAgentLoop({
+    provider,
+    registry,
+    messages: [{ role: "user", content: [{ type: "text", text: "Read files" }] }],
+    maxTurns: 5,
+  }));
+  assert.deepEqual(seenPaths, ["a.md", "b.md", "c.md"]);
+  assert.equal(events.filter((e) => e.type === "tool_finish").length, 3);
+  assert.equal(provider._calls(), 4);
 });
 
 // ---------------------------------------------------------------------------
@@ -574,6 +693,54 @@ test("runAgentLoop runs read-only tool_uses concurrently and reports both finish
   assert.equal(finishes.length, 2);
   assert.deepEqual(finishes.map((f) => f.content).sort(), ["read a.md", "read b.md"]);
   assert.ok(maxConcurrent >= 2, "expected at least 2 concurrent read-only runs");
+});
+
+test("runAgentLoop preserves write-before-read order within one tool batch", async () => {
+  const provider = mockProvider({
+    turns: [
+      [
+        ev.messageStart(),
+        ev.toolUseStart(0, "w", "vault_write"),
+        ev.toolUseJson(0, "{\"path\":\"a.md\",\"content\":\"new\"}"),
+        ev.blockStop(0),
+        ev.toolUseStart(1, "r", "vault_read"),
+        ev.toolUseJson(1, "{\"path\":\"a.md\"}"),
+        ev.blockStop(1),
+        ev.messageDelta("tool_use"),
+        ev.messageStop(),
+      ],
+      [
+        ev.messageStart(),
+        ev.textBlockStart(0),
+        ev.textDelta(0, "done"),
+        ev.blockStop(0),
+        ev.messageDelta("end_turn"),
+        ev.messageStop(),
+      ],
+    ],
+  });
+  let fileText = "old";
+  const executionOrder = [];
+  const registry = registryWith(
+    makeWritingTool("vault_write", async (input) => {
+      executionOrder.push("write");
+      fileText = input.content;
+      return "written";
+    }),
+    makeReadOnlyTool("vault_read", async () => {
+      executionOrder.push("read");
+      return fileText;
+    }),
+  );
+
+  const events = await collect(runAgentLoop({
+    provider,
+    registry,
+    messages: [{ role: "user", content: [{ type: "text", text: "write then read" }] }],
+  }));
+  assert.deepEqual(executionOrder, ["write", "read"]);
+  const readFinish = events.find((e) => e.type === "tool_finish" && e.tool === "vault_read");
+  assert.equal(readFinish.content, "new");
 });
 
 // ---------------------------------------------------------------------------

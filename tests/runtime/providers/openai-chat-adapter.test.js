@@ -143,6 +143,30 @@ test("buildRequestBody converts an assistant tool_use into tool_calls", () => {
   assert.equal(JSON.parse(assistant.tool_calls[0].function.arguments).path, "x.md");
 });
 
+test("buildRequestBody preserves OpenAI-compatible tool metadata", () => {
+  const body = buildRequestBody({
+    model: "gemini-3-pro-preview",
+    messages: [
+      { role: "user", content: [{ type: "text", text: "read x.md" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu-1",
+            name: "vault_read",
+            input: { path: "x.md" },
+            extra_content: { google: { thought_signature: "sig-1" } },
+          },
+        ],
+      },
+    ],
+    maxTokens: 16,
+  }, PROVIDERS["openai-compat-custom"]);
+  const assistant = body.messages.find((m) => m.role === "assistant");
+  assert.deepEqual(assistant.tool_calls[0].extra_content, { google: { thought_signature: "sig-1" } });
+});
+
 test("buildRequestBody splits user tool_result blocks into separate role=tool messages", () => {
   const body = buildRequestBody({
     model: "gpt-5.5",
@@ -237,6 +261,74 @@ test("translateOpenAIChunk handles tool_calls with streamed argument JSON", () =
 
   const msgDelta = events.find((e) => e.type === "message_delta");
   assert.equal(msgDelta.delta.stop_reason, "tool_use");
+});
+
+test("translateOpenAIChunk preserves Gemini extra_content on streamed tool calls", () => {
+  const state = newState();
+  const events = [
+    ...translateOpenAIChunk({
+      choices: [{
+        delta: {
+          tool_calls: [{
+            id: "call-1",
+            function: { name: "vault_read", arguments: "{}" },
+            extra_content: { google: { thought_signature: "sig-1" } },
+          }],
+        },
+      }],
+    }, state),
+    ...translateOpenAIChunk({ choices: [{ finish_reason: "tool_calls" }] }, state),
+  ];
+
+  const start = events.find((e) => e.type === "content_block_start");
+  assert.equal(start.content_block.id, "call-1");
+  assert.deepEqual(start.content_block.extra_content, { google: { thought_signature: "sig-1" } });
+});
+
+test("translateOpenAIChunk merges late Gemini extra_content metadata deltas", () => {
+  const state = newState();
+  const events = [
+    ...translateOpenAIChunk({
+      choices: [{
+        delta: { tool_calls: [{ id: "call-1", function: { name: "vault_read", arguments: "{\"path\"" } }] },
+      }],
+    }, state),
+    ...translateOpenAIChunk({
+      choices: [{
+        delta: {
+          tool_calls: [{
+            id: "call-1",
+            function: { arguments: ":\"x.md\"}" },
+            extra_content: { google: { thought_signature: "sig-1" } },
+          }],
+        },
+      }],
+    }, state),
+  ];
+
+  const metadataDelta = events.find((e) => e.type === "content_block_delta" && e.delta.type === "tool_metadata_delta");
+  assert.deepEqual(metadataDelta.delta.extra_content, { google: { thought_signature: "sig-1" } });
+});
+
+test("translateOpenAIChunk separates missing-index tool calls by id", () => {
+  const state = newState();
+  const events = [
+    ...translateOpenAIChunk({
+      choices: [{
+        delta: {
+          tool_calls: [
+            { id: "call-a", function: { name: "vault_read", arguments: "{}" } },
+            { id: "call-b", function: { name: "vault_write", arguments: "{}" } },
+          ],
+        },
+      }],
+    }, state),
+  ];
+
+  const starts = events.filter((e) => e.type === "content_block_start");
+  assert.equal(starts.length, 2);
+  assert.deepEqual(starts.map((e) => e.content_block.id), ["call-a", "call-b"]);
+  assert.deepEqual(starts.map((e) => e.content_block.name), ["vault_read", "vault_write"]);
 });
 
 test("translateOpenAIChunk closes text block before message_stop", () => {
@@ -369,6 +461,22 @@ test("formatProviderHttpError explains missing Ollama models", () => {
   });
   assert.match(message, /当前 Ollama 未找到这个模型/);
   assert.match(message, /qwen2.5-coder:7b/);
+});
+
+test("formatProviderHttpError explains Gemini thought_signature errors", () => {
+  const message = formatProviderHttpError({
+    spec: PROVIDERS["openai-compat-custom"],
+    status: 400,
+    text: JSON.stringify({
+      error: {
+        message: "Function call is missing a thought_signature in functionCall parts",
+        type: "invalid_request_error",
+      },
+    }),
+  });
+  assert.match(message, /Gemini 的 OpenAI 兼容层/);
+  assert.match(message, /thought_signature/);
+  assert.match(message, /tools\/function calling/);
 });
 
 test("createMessage carries the Qwen base URL when the user picks Qwen", async () => {

@@ -79,6 +79,12 @@ function formatProviderHttpError({ spec, status, text }) {
       message,
     ].join("\n");
   }
+  if (/thought_signature|extra_content/i.test(message)) {
+    return [
+      "Gemini 的 OpenAI 兼容层要求在工具调用下一轮回传 thought_signature；请升级 FLOWnote 到包含 Gemini 兼容修复的版本。若仍失败，请确认中转模型支持 tools/function calling。",
+      message,
+    ].join("\n");
+  }
   return raw;
 }
 
@@ -104,6 +110,45 @@ function sortAndDedupeModels(models) {
   }
   out.sort((a, b) => a.id.localeCompare(b.id));
   return out;
+}
+
+function cloneJsonish(value) {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object") return value;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_e) {
+    return value;
+  }
+}
+
+function mergeJsonishMetadata(current, incoming) {
+  if (incoming === undefined) return current;
+  if (current === undefined) return cloneJsonish(incoming);
+  if (
+    current && incoming &&
+    typeof current === "object" &&
+    typeof incoming === "object" &&
+    !Array.isArray(current) &&
+    !Array.isArray(incoming)
+  ) {
+    return { ...cloneJsonish(current), ...cloneJsonish(incoming) };
+  }
+  return cloneJsonish(incoming);
+}
+
+function resolveToolCallStateKey(tcDelta, state, positionInDelta) {
+  if (tcDelta && typeof tcDelta.index === "number") return `index:${tcDelta.index}`;
+  if (tcDelta && tcDelta.id) return `id:${tcDelta.id}`;
+
+  if (!state.syntheticToolCallKeys) state.syntheticToolCallKeys = {};
+  const syntheticKey = `position:${positionInDelta}`;
+  if (!state.syntheticToolCallKeys[syntheticKey]) {
+    const next = state.nextSyntheticToolIndex || 0;
+    state.syntheticToolCallKeys[syntheticKey] = `synthetic:${next}`;
+    state.nextSyntheticToolIndex = next + 1;
+  }
+  return state.syntheticToolCallKeys[syntheticKey];
 }
 
 async function readJsonResponse(res) {
@@ -155,14 +200,20 @@ function buildRequestBody(input, spec) {
       const out = { role: "assistant" };
       if (text) out.content = text;
       if (toolUses.length > 0) {
-        out.tool_calls = toolUses.map((tu) => ({
-          id: tu.id,
-          type: "function",
-          function: {
-            name: tu.name,
-            arguments: JSON.stringify(tu.input || {}),
-          },
-        }));
+        out.tool_calls = toolUses.map((tu) => {
+          const call = {
+            id: tu.id,
+            type: "function",
+            function: {
+              name: tu.name,
+              arguments: JSON.stringify(tu.input || {}),
+            },
+          };
+          if (tu.extra_content !== undefined) {
+            call.extra_content = cloneJsonish(tu.extra_content);
+          }
+          return call;
+        });
       }
       // OpenAI requires either content or tool_calls; if neither, skip.
       if (out.content !== undefined || out.tool_calls) {
@@ -286,22 +337,34 @@ function* translateOpenAIChunk(chunk, state) {
     }
     // Tool calls
     if (Array.isArray(delta.tool_calls)) {
-      for (const tcDelta of delta.tool_calls) {
-        const oi = typeof tcDelta.index === "number" ? tcDelta.index : 0;
+      for (let i = 0; i < delta.tool_calls.length; i += 1) {
+        const tcDelta = delta.tool_calls[i];
+        const oi = resolveToolCallStateKey(tcDelta, state, i);
         let tc = state.toolCalls[oi];
+        const incomingExtraContent = cloneJsonish(tcDelta.extra_content);
         if (!tc) {
           tc = {
             id: tcDelta.id || `call-${oi}`,
             name: (tcDelta.function && tcDelta.function.name) || "",
             argsBuffer: "",
             anthropicIndex: state.nextIndex,
+            extra_content: incomingExtraContent,
           };
           state.toolCalls[oi] = tc;
           state.nextIndex += 1;
+          const contentBlock = { type: "tool_use", id: tc.id, name: tc.name, input: {} };
+          if (tc.extra_content !== undefined) contentBlock.extra_content = cloneJsonish(tc.extra_content);
           yield {
             type: "content_block_start",
             index: tc.anthropicIndex,
-            content_block: { type: "tool_use", id: tc.id, name: tc.name, input: {} },
+            content_block: contentBlock,
+          };
+        } else if (incomingExtraContent !== undefined) {
+          tc.extra_content = mergeJsonishMetadata(tc.extra_content, incomingExtraContent);
+          yield {
+            type: "content_block_delta",
+            index: tc.anthropicIndex,
+            delta: { type: "tool_metadata_delta", extra_content: cloneJsonish(tc.extra_content) },
           };
         }
         // Subsequent partial-name updates (rare but possible)
@@ -438,15 +501,19 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
       }
       if (Array.isArray(message.tool_calls)) {
         for (const tc of message.tool_calls) {
+          const contentBlock = {
+            type: "tool_use",
+            id: tc.id,
+            name: tc.function && tc.function.name,
+            input: safeJsonParse(tc.function && tc.function.arguments),
+          };
+          if (tc.extra_content !== undefined) {
+            contentBlock.extra_content = cloneJsonish(tc.extra_content);
+          }
           yield {
             type: "content_block_start",
             index: idx,
-            content_block: {
-              type: "tool_use",
-              id: tc.id,
-              name: tc.function && tc.function.name,
-              input: safeJsonParse(tc.function && tc.function.arguments),
-            },
+            content_block: contentBlock,
           };
           yield { type: "content_block_stop", index: idx };
           idx += 1;
