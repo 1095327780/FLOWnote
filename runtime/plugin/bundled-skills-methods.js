@@ -219,8 +219,8 @@ function createBundledSkillsMethods(options = {}) {
         const normalizedRel = String(relPath || "").replace(/\\/g, "/");
         if (!normalizedRel.endsWith(".md")) continue;
         const isReference = normalizedRel.startsWith("references/");
-        const isTemplate = normalizedRel.startsWith("assets/templates/");
-        if (!isReference && !isTemplate) continue;
+        const isAsset = normalizedRel.startsWith("assets/");
+        if (!isReference && !isAsset) continue;
         canonicalTargets.add(this.toCanonicalLocalizedMdPath(normalizedRel));
       }
 

@@ -319,6 +319,57 @@ test("syncBundledContent should localize references to canonical path by locale"
   }
 });
 
+test("syncBundledContent should localize assets/ templates to canonical path by locale", async () => {
+  // Regression for issue #10: localized templates live directly under a skill's
+  // assets/ (e.g. ah-note/assets/每日笔记模板.{md,en,ru}.md), NOT under assets/templates/.
+  // applyBundledSkillLocaleResources must localize them onto the canonical base
+  // before removeLocalizedMarkdownVariants deletes the locale-suffixed copies, or
+  // the daily-note consumer falls through to the Chinese base regardless of locale.
+  const fixture = createFixture();
+  try {
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "assets", "每日笔记模板.md"), "# 中文模板\n");
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "assets", "每日笔记模板.en.md"), "# English Template\n");
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "assets", "每日笔记模板.ru.md"), "# Russian Template\n");
+
+    const canonicalTemplate = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "assets", "每日笔记模板.md");
+    const enVariant = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "assets", "每日笔记模板.en.md");
+    const ruVariant = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test", "assets", "每日笔记模板.ru.md");
+
+    const enResult = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "skip",
+    });
+    assert.equal(enResult.errors.length, 0);
+    assert.equal(fs.readFileSync(canonicalTemplate, "utf8"), "# English Template\n");
+    assert.equal(fs.existsSync(enVariant), false);
+    assert.equal(fs.existsSync(ruVariant), false);
+
+    const ruResult = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "ru",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(ruResult.errors.length, 0);
+    assert.equal(fs.readFileSync(canonicalTemplate, "utf8"), "# Russian Template\n");
+    assert.equal(fs.existsSync(enVariant), false);
+    assert.equal(fs.existsSync(ruVariant), false);
+
+    const zhResult = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(zhResult.errors.length, 0);
+    assert.equal(fs.readFileSync(canonicalTemplate, "utf8"), "# 中文模板\n");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("syncBundledContent should use Russian resources and templates without requiring Russian SKILL.md", async () => {
   const fixture = createFixture();
   try {
