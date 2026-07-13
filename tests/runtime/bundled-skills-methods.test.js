@@ -6,6 +6,7 @@ const path = require("node:path");
 
 const { createBundledSkillsMethods } = require("../../runtime/plugin/bundled-skills-methods");
 const { copyDirectoryRecursive } = require("../../runtime/skill-service");
+const { walkFilesRecursive } = require("../../runtime/plugin/bundled-skills-utils");
 
 const CORE_TEMPLATE_STEMS = [
   "ah-note/assets/每日笔记模板",
@@ -98,6 +99,58 @@ test("core bundled templates should include zh base, English, and Russian varian
     assert.equal(fs.existsSync(path.join(bundledRoot, `${stem}.md`)), true, `${stem}.md`);
     assert.equal(fs.existsSync(path.join(bundledRoot, `${stem}.en.md`)), true, `${stem}.en.md`);
     assert.equal(fs.existsSync(path.join(bundledRoot, `${stem}.ru.md`)), true, `${stem}.ru.md`);
+  }
+});
+
+test("real bundled skills install a complete localized resource graph", async () => {
+  const bundledRoot = path.join(__dirname, "../../bundled-skills");
+  for (const [locale, dailyMarker] of [
+    ["en", "Today's Most Important Thing"],
+    ["ru", "Главное сегодня"],
+  ]) {
+    const fixture = createFixture();
+    try {
+      fixture.plugin.getBundledSkillsRoot = () => bundledRoot;
+      const bundledIds = fixture.plugin.listBundledSkillIds(bundledRoot);
+      const result = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+        force: true,
+        locale,
+        syncTemplates: true,
+        defaultConflictAction: "replace",
+      });
+
+      assert.deepEqual(result.errors, [], `${locale} install errors`);
+      assert.equal(result.synced, bundledIds.length, `${locale} installed skill count`);
+      assert.equal(result.stampUpdated, true, `${locale} install stamp`);
+
+      const targetRoot = path.join(fixture.vaultPath, ".opencode", "skills");
+      const localeVariants = bundledIds.flatMap((skillId) =>
+        walkFilesRecursive(path.join(targetRoot, skillId))
+          .filter((relPath) => /\.(?:zh-CN|en|ru)\.md$/.test(relPath))
+          .map((relPath) => `${skillId}/${relPath}`));
+      assert.deepEqual(localeVariants, [], `${locale} must not expose locale sidecars`);
+
+      const templateMap = fixture.plugin.loadBundledTemplateMap(bundledRoot);
+      for (const entry of templateMap.entries) {
+        const localized = fixture.plugin.resolveTemplateEntryByLocale(entry, locale);
+        const targetContents = localized.targets.map((relPath) =>
+          fs.readFileSync(path.join(targetRoot, relPath), "utf8"));
+        assert.equal(targetContents.length >= 1, true, `${entry.id} (${locale}) target count`);
+        assert.equal(
+          targetContents.every((content) => content === targetContents[0]),
+          true,
+          `${entry.id} (${locale}) canonical target and aliases must match`,
+        );
+      }
+
+      const dailyTemplate = fs.readFileSync(
+        path.join(targetRoot, "ah-note", "assets", "每日笔记模板.md"),
+        "utf8",
+      );
+      assert.match(dailyTemplate, new RegExp(dailyMarker), `${locale} daily template`);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -257,6 +310,41 @@ test("syncBundledContent should preserve existing skills and templates with defa
   }
 });
 
+test("syncBundledContent should not stamp a locale that was skipped", async () => {
+  const fixture = createFixture();
+  try {
+    const installed = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(installed.stampUpdated, true);
+    const zhStamp = fixture.plugin.runtimeState.bundledSkillsStamp;
+
+    const skipped = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: false,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "skip",
+    });
+    assert.equal(skipped.skills.skippedCount, 1);
+    assert.equal(skipped.stampUpdated, false);
+    assert.equal(fixture.plugin.runtimeState.bundledSkillsStamp, zhStamp);
+
+    const retried = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: false,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "skip",
+    });
+    assert.equal(retried.skills.skipped, false, "an unapplied locale must be attempted again");
+    assert.equal(retried.skills.skippedCount, 1);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("syncBundledContent should update existing bundled skill in place", async () => {
   const fixture = createFixture();
   try {
@@ -367,6 +455,167 @@ test("syncBundledContent should localize assets/ templates to canonical path by 
     assert.equal(fs.readFileSync(canonicalTemplate, "utf8"), "# 中文模板\n");
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("syncBundledContent should localize bundled markdown in any resource directory", async () => {
+  const fixture = createFixture();
+  try {
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "playbooks", "guide.md"), "# 中文指南\n");
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "playbooks", "guide.en.md"), "# English Guide\n");
+    writeFile(path.join(fixture.bundledRoot, "ah-test", "playbooks", "guide.ru.md"), "# Russian Guide\n");
+
+    const result = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+
+    assert.equal(result.errors.length, 0);
+    const installedGuide = path.join(
+      fixture.vaultPath,
+      ".opencode",
+      "skills",
+      "ah-test",
+      "playbooks",
+      "guide.md",
+    );
+    assert.equal(fs.readFileSync(installedGuide, "utf8"), "# English Guide\n");
+    assert.equal(fs.existsSync(installedGuide.replace(/\.md$/, ".en.md")), false);
+    assert.equal(fs.existsSync(installedGuide.replace(/\.md$/, ".ru.md")), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("syncBundledContent should only remove locale variants managed by the bundle", async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+
+    const userSidecar = path.join(
+      fixture.vaultPath,
+      ".opencode",
+      "skills",
+      "ah-test",
+      "notes",
+      "user-sidecar.en.md",
+    );
+    writeFile(userSidecar, "user-owned locale note\n");
+
+    const result = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "ru",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(fs.readFileSync(userSidecar, "utf8"), "user-owned locale note\n");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("syncBundledContent should publish from staging and preserve the last good install on failure", async () => {
+  const fixture = createFixture();
+  try {
+    const first = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "zh-CN",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(first.errors.length, 0);
+    const installedSkill = path.join(
+      fixture.vaultPath,
+      ".opencode",
+      "skills",
+      "ah-test",
+      "SKILL.md",
+    );
+    const lastGoodContent = fs.readFileSync(installedSkill, "utf8");
+    const lastGoodStamp = fixture.plugin.runtimeState.bundledSkillsStamp;
+
+    fixture.plugin.ensureRuntimeModules = () => ({
+      copyDirectoryRecursive(_srcDir, stageDir) {
+        writeFile(path.join(stageDir, "SKILL.md"), "partial install\n");
+        throw new Error("injected copy failure");
+      },
+    });
+    const failed = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+
+    assert.match(failed.errors.join("\n"), /injected copy failure/);
+    assert.equal(failed.stampUpdated, false);
+    assert.equal(fixture.plugin.runtimeState.bundledSkillsStamp, lastGoodStamp);
+    assert.equal(fs.readFileSync(installedSkill, "utf8"), lastGoodContent);
+    const targetRoot = path.dirname(path.dirname(installedSkill));
+    assert.deepEqual(
+      fs.readdirSync(targetRoot).filter((name) => name.startsWith(".flownote-stage-")),
+      [],
+    );
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("syncBundledContent should remove stale bundle-owned files but preserve user sidecars", async () => {
+  const fixture = createFixture();
+  try {
+    const oldBundledFile = path.join(fixture.bundledRoot, "ah-test", "references", "old-guide.md");
+    writeFile(oldBundledFile, "old bundled guide\n");
+    await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+
+    const skillDir = path.join(fixture.vaultPath, ".opencode", "skills", "ah-test");
+    const installedOldFile = path.join(skillDir, "references", "old-guide.md");
+    const userSidecar = path.join(skillDir, "references", "my-notes.md");
+    assert.equal(fs.existsSync(installedOldFile), true);
+    writeFile(userSidecar, "keep me\n");
+    fs.rmSync(oldBundledFile);
+
+    const updated = await fixture.plugin.syncBundledContent(fixture.vaultPath, {
+      force: true,
+      locale: "en",
+      syncTemplates: false,
+      defaultConflictAction: "replace",
+    });
+    assert.equal(updated.errors.length, 0);
+    assert.equal(fs.existsSync(installedOldFile), false);
+    assert.equal(fs.readFileSync(userSidecar, "utf8"), "keep me\n");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("bundled template registry should keep runtime targets stable across locales", () => {
+  const templateMap = require("../../bundled-skills/template-map.json");
+  for (const entry of templateMap.entries) {
+    for (const [locale, variant] of Object.entries(entry.locales || {})) {
+      const targets = Array.isArray(variant.targets) && variant.targets.length
+        ? variant.targets
+        : entry.targets;
+      assert.deepEqual(
+        targets.slice(0, entry.targets.length),
+        entry.targets,
+        `${entry.id} (${locale}) must write canonical targets before compatibility aliases`,
+      );
+    }
   }
 });
 

@@ -13,8 +13,92 @@ const {
   DEFAULT_META_TEMPLATES_DIR,
   createCancelledError,
   isCancelledError,
+  walkFilesRecursive,
+  normalizeSafeRelativePath,
 } = require("./bundled-skills-utils");
 const { getMetaTemplatesDir } = require("../localized-defaults");
+const {
+  isLocalizedMarkdownVariantPath,
+  toCanonicalLocalizedMarkdownPath,
+} = require("../i18n-locale-utils");
+
+const MANAGED_SKILL_MANIFEST = ".flownote-managed.json";
+
+function createSiblingTempPath(targetRoot, skillId, kind) {
+  const safeId = String(skillId || "skill").replace(/[^a-zA-Z0-9_-]/g, "-");
+  const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return path.join(targetRoot, `.flownote-${kind}-${safeId}-${nonce}`);
+}
+
+function readManagedSkillPaths(skillDir) {
+  const manifestPath = path.join(skillDir, MANAGED_SKILL_MANIFEST);
+  if (!fs.existsSync(manifestPath)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    return [...new Set(
+      (Array.isArray(parsed && parsed.paths) ? parsed.paths : [])
+        .map(normalizeSafeRelativePath)
+        .filter(Boolean),
+    )];
+  } catch {
+    return [];
+  }
+}
+
+function collectManagedSkillPaths(srcDir) {
+  return [...new Set(
+    walkFilesRecursive(srcDir)
+      .map((relPath) => String(relPath || "").replace(/\\/g, "/"))
+      .map((relPath) => isLocalizedMarkdownVariantPath(relPath)
+        ? toCanonicalLocalizedMarkdownPath(relPath)
+        : relPath)
+      .map(normalizeSafeRelativePath)
+      .filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function removePreviouslyManagedFiles(stageDir) {
+  for (const relPath of readManagedSkillPaths(stageDir)) {
+    fs.rmSync(path.join(stageDir, relPath), { recursive: true, force: true });
+  }
+}
+
+function writeManagedSkillManifest(stageDir, skillId, locale, managedPaths) {
+  fs.writeFileSync(path.join(stageDir, MANAGED_SKILL_MANIFEST), `${JSON.stringify({
+    version: 1,
+    skillId,
+    locale,
+    paths: managedPaths,
+  }, null, 2)}\n`, "utf8");
+}
+
+function assertStagedSkillComplete(stageDir, managedPaths) {
+  if (!fs.existsSync(path.join(stageDir, "SKILL.md"))) {
+    throw new Error("staged bundled skill is missing SKILL.md");
+  }
+  for (const relPath of managedPaths) {
+    if (!fs.existsSync(path.join(stageDir, relPath))) {
+      throw new Error(`staged bundled skill is missing managed file: ${relPath}`);
+    }
+  }
+}
+
+function publishStagedSkill(stageDir, destDir, targetRoot, skillId) {
+  const rollbackDir = createSiblingTempPath(targetRoot, skillId, "rollback");
+  const hadExisting = fs.existsSync(destDir);
+  if (hadExisting) fs.renameSync(destDir, rollbackDir);
+  try {
+    fs.renameSync(stageDir, destDir);
+  } catch (error) {
+    if (hadExisting && fs.existsSync(rollbackDir) && !fs.existsSync(destDir)) {
+      fs.renameSync(rollbackDir, destDir);
+    }
+    throw error;
+  }
+  if (hadExisting) {
+    try { fs.rmSync(rollbackDir, { recursive: true, force: true }); } catch { /* published; stale rollback is harmless */ }
+  }
+}
 
 async function resolveBundledSyncAction(conflict, options = {}, state = {}) {
   if (state.globalAction === "replace") return "replace";
@@ -143,14 +227,24 @@ async function syncBundledSkills(vaultPath, options = {}) {
           if (backed) backupCount += 1;
           replacedCount += 1;
         }
-        runtime.copyDirectoryRecursive(srcDir, destDir);
-        const localizedDoc = this.applyBundledSkillLocaleDoc(srcDir, destDir, skillLocale);
-        if (!localizedDoc.ok) {
-          errors.push(`${skillId}: ${localizedDoc.error}`);
-          continue;
+        const stageDir = createSiblingTempPath(targetRoot, skillId, "stage");
+        try {
+          if (fs.existsSync(destDir)) fs.cpSync(destDir, stageDir, { recursive: true });
+          else fs.mkdirSync(stageDir, { recursive: true });
+          removePreviouslyManagedFiles(stageDir);
+          runtime.copyDirectoryRecursive(srcDir, stageDir);
+          const localizedDoc = this.applyBundledSkillLocaleDoc(srcDir, stageDir, skillLocale);
+          if (!localizedDoc.ok) throw new Error(localizedDoc.error);
+          const localizedResources = this.applyBundledSkillLocaleResources(srcDir, stageDir, skillLocale);
+          this.removeLocalizedMarkdownVariants(stageDir, localizedResources.variantPaths);
+          const managedPaths = collectManagedSkillPaths(srcDir);
+          assertStagedSkillComplete(stageDir, managedPaths);
+          writeManagedSkillManifest(stageDir, skillId, skillLocale, managedPaths);
+          publishStagedSkill(stageDir, destDir, targetRoot, skillId);
+        } catch (error) {
+          try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch { /* best effort */ }
+          throw error;
         }
-        this.applyBundledSkillLocaleResources(srcDir, destDir, skillLocale);
-        this.removeLocalizedMarkdownVariants(destDir);
         synced += 1;
       } catch (e) {
         errors.push(`${skillId}: ${e instanceof Error ? e.message : String(e)}`);
@@ -183,7 +277,8 @@ async function syncBundledSkills(vaultPath, options = {}) {
 
   const hasRuntimeState = this.runtimeState && typeof this.runtimeState === "object";
   let stampUpdated = false;
-  if (!errors.length && hasRuntimeState) {
+  const fullySynced = !errors.length && skippedCount === 0 && synced === bundledIds.length;
+  if (fullySynced && hasRuntimeState) {
     this.runtimeState.bundledSkillsStamp = stamp;
     stampUpdated = true;
   }

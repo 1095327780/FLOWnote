@@ -17,11 +17,11 @@
       "locales": {
         "en": {
           "metaSource": "Daily Note Template.md",
-          "targets": ["ah-note/assets/Daily Note Template.md"]
+          "targets": ["ah-note/assets/每日笔记模板.md", "ah-note/assets/Daily Note Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон ежедневной заметки.md",
-          "targets": ["ah-note/assets/Daily Note Template.md"]
+          "targets": ["ah-note/assets/每日笔记模板.md", "ah-note/assets/Daily Note Template.md"]
         }
       }
     },
@@ -35,11 +35,11 @@
       "locales": {
         "en": {
           "metaSource": "Weekly Review Template.md",
-          "targets": ["ah-week/references/Weekly Review Template.md"]
+          "targets": ["ah-week/references/周报模板.md", "ah-week/references/Weekly Review Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон еженедельного обзора.md",
-          "targets": ["ah-week/references/Weekly Review Template.md"]
+          "targets": ["ah-week/references/周报模板.md", "ah-week/references/Weekly Review Template.md"]
         }
       }
     },
@@ -53,11 +53,11 @@
       "locales": {
         "en": {
           "metaSource": "Monthly Review Template.md",
-          "targets": ["ah-month/references/Monthly Review Template.md"]
+          "targets": ["ah-month/references/月报模板.md", "ah-month/references/Monthly Review Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон ежемесячного обзора.md",
-          "targets": ["ah-month/references/Monthly Review Template.md"]
+          "targets": ["ah-month/references/月报模板.md", "ah-month/references/Monthly Review Template.md"]
         }
       }
     },
@@ -71,11 +71,11 @@
       "locales": {
         "en": {
           "metaSource": "Yearly Review Template.md",
-          "targets": ["ah-year/references/Yearly Review Template.md"]
+          "targets": ["ah-year/references/年报模板.md", "ah-year/references/Yearly Review Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон годового обзора.md",
-          "targets": ["ah-year/references/Yearly Review Template.md"]
+          "targets": ["ah-year/references/年报模板.md", "ah-year/references/Yearly Review Template.md"]
         }
       }
     },
@@ -89,11 +89,11 @@
       "locales": {
         "en": {
           "metaSource": "Literature Note Template.md",
-          "targets": ["ah-read/references/Literature Note Template.md"]
+          "targets": ["ah-read/references/文献笔记模板.md", "ah-read/references/Literature Note Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон литературной заметки.md",
-          "targets": ["ah-read/references/Literature Note Template.md"]
+          "targets": ["ah-read/references/文献笔记模板.md", "ah-read/references/Literature Note Template.md"]
         }
       }
     },
@@ -107,11 +107,11 @@
       "locales": {
         "en": {
           "metaSource": "Evergreen Note Template.md",
-          "targets": ["ah-inbox/assets/Evergreen Note Template.md"]
+          "targets": ["ah-inbox/assets/永久笔记模板.md", "ah-inbox/assets/Evergreen Note Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон постоянной заметки.md",
-          "targets": ["ah-inbox/assets/Evergreen Note Template.md"]
+          "targets": ["ah-inbox/assets/永久笔记模板.md", "ah-inbox/assets/Evergreen Note Template.md"]
         }
       }
     },
@@ -125,11 +125,11 @@
       "locales": {
         "en": {
           "metaSource": "Project Template.md",
-          "targets": ["ah-project/assets/Project Template.md"]
+          "targets": ["ah-project/assets/项目模板.md", "ah-project/assets/Project Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон проекта.md",
-          "targets": ["ah-project/assets/Project Template.md"]
+          "targets": ["ah-project/assets/项目模板.md", "ah-project/assets/Project Template.md"]
         }
       }
     },
@@ -143,11 +143,11 @@
       "locales": {
         "en": {
           "metaSource": "Progress Template.md",
-          "targets": ["ah-read/assets/Progress Template.md"]
+          "targets": ["ah-read/assets/进度模板.md", "ah-read/assets/Progress Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон прогресса.md",
-          "targets": ["ah-read/assets/Progress Template.md"]
+          "targets": ["ah-read/assets/进度模板.md", "ah-read/assets/Progress Template.md"]
         }
       }
     },
@@ -161,11 +161,11 @@
       "locales": {
         "en": {
           "metaSource": "HOME Template.md",
-          "targets": ["ah-init/references/HOME Template.md"]
+          "targets": ["ah-init/references/HOME模板.md", "ah-init/references/HOME Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон HOME.md",
-          "targets": ["ah-init/references/HOME Template.md"]
+          "targets": ["ah-init/references/HOME模板.md", "ah-init/references/HOME Template.md"]
         }
       }
     },
@@ -179,11 +179,11 @@
       "locales": {
         "en": {
           "metaSource": "Topic Note Template.md",
-          "targets": ["ah-init/references/Topic Note Template.md"]
+          "targets": ["ah-init/references/主题笔记模板.md", "ah-init/references/Topic Note Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон тематической заметки.md",
-          "targets": ["ah-init/references/Topic Note Template.md"]
+          "targets": ["ah-init/references/主题笔记模板.md", "ah-init/references/Topic Note Template.md"]
         }
       }
     },
@@ -197,11 +197,11 @@
       "locales": {
         "en": {
           "metaSource": "Area Page Template.md",
-          "targets": ["ah-init/references/Area Page Template.md"]
+          "targets": ["ah-init/references/领域页模板.md", "ah-init/references/Area Page Template.md"]
         },
         "ru": {
           "metaSource": "Шаблон страницы области.md",
-          "targets": ["ah-init/references/Area Page Template.md"]
+          "targets": ["ah-init/references/领域页模板.md", "ah-init/references/Area Page Template.md"]
         }
       }
     }

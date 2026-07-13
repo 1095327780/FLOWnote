@@ -312,13 +312,21 @@ async function readVaultTextByPath(vault, path) {
 async function resolveSkillDailyNoteTemplate(vault, options = {}) {
   const locale = normalizeSupportedLocale(options.locale || "en");
   const skillsDir = normalizePath(String(options.skillsDir || DEFAULT_SKILLS_DIR).trim() || DEFAULT_SKILLS_DIR);
-  const candidates = [
-    ...localizedTemplateCandidates(`${skillsDir}/ah-note/assets/每日笔记模板.md`, locale),
-    ...localizedTemplateCandidates(`${skillsDir}/ah-note/assets/Daily-Note-Template.md`, locale),
+  const canonicalPaths = [
+    `${skillsDir}/ah-note/assets/每日笔记模板.md`,
     // Compatibility fallback for template-map targets that may use assets/templates/.
-    ...localizedTemplateCandidates(`${skillsDir}/ah-note/assets/templates/每日笔记模板.md`, locale),
-    ...localizedTemplateCandidates(`${skillsDir}/ah-note/assets/templates/Daily-Note-Template.md`, locale),
+    `${skillsDir}/ah-note/assets/templates/每日笔记模板.md`,
   ];
+  const legacyLocalePaths = [
+    `${skillsDir}/ah-note/assets/Daily Note Template.md`,
+    `${skillsDir}/ah-note/assets/Daily-Note-Template.md`,
+    `${skillsDir}/ah-note/assets/templates/Daily Note Template.md`,
+    `${skillsDir}/ah-note/assets/templates/Daily-Note-Template.md`,
+  ];
+  const orderedPaths = locale === "zh-CN"
+    ? [...canonicalPaths, ...legacyLocalePaths]
+    : [...legacyLocalePaths, ...canonicalPaths];
+  const candidates = orderedPaths.flatMap((basePath) => localizedTemplateCandidates(basePath, locale));
 
   for (const candidate of [...new Set(candidates)]) {
     const text = await readVaultTextByPath(vault, candidate);

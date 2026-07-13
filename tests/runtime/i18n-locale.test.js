@@ -7,6 +7,11 @@ const {
   resolveLocaleFromNavigator,
   getIntlLocale,
   getLocalizedMarkdownTokenOrder,
+  toCanonicalLocalizedMarkdownPath,
+  localizedMarkdownPathByToken,
+  isLocalizedMarkdownVariantPath,
+  resolveLocalizedMarkdownPath,
+  materializeLocalizedMarkdownFiles,
   createTranslator,
 } = require("../../runtime/i18n-locale-utils");
 
@@ -67,4 +72,24 @@ test("locale helpers should expose intl locale and markdown fallback order", () 
   assert.deepEqual(getLocalizedMarkdownTokenOrder("zh-CN"), ["zh-CN", "base", "en"]);
   assert.deepEqual(getLocalizedMarkdownTokenOrder("en"), ["en", "base", "zh-CN"]);
   assert.deepEqual(getLocalizedMarkdownTokenOrder("ru"), ["ru", "en", "base", "zh-CN"]);
+});
+
+test("localized markdown helpers should materialize one canonical resource", () => {
+  const files = {
+    "assets/模板.md": "zh",
+    "assets/模板.en.md": "en",
+    "assets/模板.ru.md": "ru",
+    "assets/helper.py": "print('ok')",
+  };
+  assert.equal(toCanonicalLocalizedMarkdownPath("assets/模板.en.md"), "assets/模板.md");
+  assert.equal(localizedMarkdownPathByToken("assets/模板.md", "ru"), "assets/模板.ru.md");
+  assert.equal(isLocalizedMarkdownVariantPath("assets/模板.en.md"), true);
+  assert.equal(
+    resolveLocalizedMarkdownPath("assets/模板.md", "ru", new Set(Object.keys(files))),
+    "assets/模板.ru.md",
+  );
+  assert.deepEqual(materializeLocalizedMarkdownFiles(files, "en"), {
+    "assets/模板.md": "en",
+    "assets/helper.py": "print('ok')",
+  });
 });

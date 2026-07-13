@@ -15,6 +15,22 @@ const FIXTURE_TEMPLATE_MAP = JSON.stringify({
       metaSource: "每日笔记模板.md",
       fallback: "ah-note/assets/每日笔记模板.md",
       targets: ["ah-note/assets/每日笔记模板.md"],
+      locales: {
+        en: {
+          metaSource: "Daily Note Template.md",
+          targets: [
+            "ah-note/assets/每日笔记模板.md",
+            "ah-note/assets/Daily Note Template.md",
+          ],
+        },
+        ru: {
+          metaSource: "Шаблон ежедневной заметки.md",
+          targets: [
+            "ah-note/assets/每日笔记模板.md",
+            "ah-note/assets/Daily Note Template.md",
+          ],
+        },
+      },
     },
     {
       id: "project-note",
@@ -205,6 +221,22 @@ test("saveTemplate propagates content to every target path so the AI reads fresh
   assert.equal(
     adapter._files.get(".flownote/skills/ah-note/assets/每日笔记模板.md"),
     "USER CONTENT\n",
+  );
+});
+
+test("saveTemplate writes the canonical target before the locale compatibility alias", async () => {
+  const adapter = makeAdapter({});
+  const plugin = makePlugin(adapter, "en");
+  plugin.settings.skillsDir = ".flownote/skills";
+  const r = await saveTemplate(plugin, "daily-note", "USER ENGLISH CONTENT\n");
+  assert.equal(r.targetsWritten, 2);
+  assert.equal(
+    adapter._files.get(".flownote/skills/ah-note/assets/每日笔记模板.md"),
+    "USER ENGLISH CONTENT\n",
+  );
+  assert.equal(
+    adapter._files.get(".flownote/skills/ah-note/assets/Daily Note Template.md"),
+    "USER ENGLISH CONTENT\n",
   );
 });
 

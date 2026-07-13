@@ -18,7 +18,13 @@ try {
   const real = require("crypto");
   if (real && typeof real.createHash === "function") crypto = real;
 } catch { /* mobile */ }
-const { normalizeSupportedLocale } = require("../i18n-locale-utils");
+const {
+  normalizeSupportedLocale,
+  toCanonicalLocalizedMarkdownPath,
+  localizedMarkdownPathByToken,
+  isLocalizedMarkdownVariantPath,
+  resolveLocalizedMarkdownPath,
+} = require("../i18n-locale-utils");
 const { getMetaTemplatesDir } = require("../localized-defaults");
 const {
   TEMPLATE_MAP_FILE,
@@ -173,34 +179,29 @@ function createBundledSkillsMethods(options = {}) {
     },
 
     toCanonicalLocalizedMdPath(filePath) {
-      const value = String(filePath || "");
-      if (!value.endsWith(".md")) return value;
-      if (value.endsWith(".zh-CN.md")) return `${value.slice(0, -".zh-CN.md".length)}.md`;
-      if (value.endsWith(".en.md")) return `${value.slice(0, -".en.md".length)}.md`;
-      if (value.endsWith(".ru.md")) return `${value.slice(0, -".ru.md".length)}.md`;
-      return value;
+      return toCanonicalLocalizedMarkdownPath(filePath);
     },
 
     localizedMdPathByToken(basePath, token) {
-      const canonical = this.toCanonicalLocalizedMdPath(basePath);
-      if (!canonical.endsWith(".md")) return canonical;
-      if (token === "base") return canonical;
-      if (token === "zh-CN" || token === "en" || token === "ru") return `${canonical.slice(0, -".md".length)}.${token}.md`;
-      return canonical;
+      return localizedMarkdownPathByToken(basePath, token);
     },
 
     resolveLocalizedMarkdownSource(basePath, locale, options = {}) {
-      const normalizedLocale = normalizeSupportedLocale(locale, "en");
-      const defaultOrder = normalizedLocale === "zh-CN"
-        ? ["zh-CN", "base", "en", "ru"]
-        : normalizedLocale === "ru"
-          ? ["ru", "en", "base", "zh-CN"]
-          : ["en", "base", "zh-CN", "ru"];
-      const order = Array.isArray(options.order) && options.order.length
-        ? options.order
-        : defaultOrder;
-      for (const token of order) {
-        const candidate = this.localizedMdPathByToken(basePath, token);
+      const order = Array.isArray(options.order) && options.order.length ? options.order : null;
+      const candidates = order
+        ? order.map((token) => this.localizedMdPathByToken(basePath, token))
+        : [resolveLocalizedMarkdownPath(
+          basePath,
+          locale,
+          new Set([
+            this.localizedMdPathByToken(basePath, "zh-CN"),
+            this.localizedMdPathByToken(basePath, "en"),
+            this.localizedMdPathByToken(basePath, "ru"),
+            this.localizedMdPathByToken(basePath, "base"),
+          ].filter((candidate) => candidate && fs.existsSync(candidate))),
+          "en",
+        )];
+      for (const candidate of candidates) {
         if (!candidate || !fs.existsSync(candidate)) continue;
         try {
           if (fs.statSync(candidate).isFile()) return candidate;
@@ -212,17 +213,16 @@ function createBundledSkillsMethods(options = {}) {
     },
 
     applyBundledSkillLocaleResources(srcDir, destDir, locale) {
-      if (!srcDir || !destDir) return { applied: 0 };
+      if (!srcDir || !destDir) return { applied: 0, variantPaths: [] };
       const relFiles = walkFilesRecursive(srcDir);
-      const canonicalTargets = new Set();
-      for (const relPath of relFiles) {
-        const normalizedRel = String(relPath || "").replace(/\\/g, "/");
-        if (!normalizedRel.endsWith(".md")) continue;
-        const isReference = normalizedRel.startsWith("references/");
-        const isAsset = normalizedRel.startsWith("assets/");
-        if (!isReference && !isAsset) continue;
-        canonicalTargets.add(this.toCanonicalLocalizedMdPath(normalizedRel));
-      }
+      const variantPaths = relFiles
+        .map((relPath) => String(relPath || "").replace(/\\/g, "/"))
+        .filter(isLocalizedMarkdownVariantPath);
+      const canonicalTargets = new Set(
+        variantPaths
+          .map((relPath) => this.toCanonicalLocalizedMdPath(relPath))
+          .filter((relPath) => relPath !== "SKILL.md"),
+      );
 
       let applied = 0;
       for (const canonicalRel of canonicalTargets) {
@@ -231,16 +231,15 @@ function createBundledSkillsMethods(options = {}) {
         copyFileWithParent(sourcePath, path.join(destDir, canonicalRel));
         applied += 1;
       }
-      return { applied };
+      return { applied, variantPaths };
     },
 
-    removeLocalizedMarkdownVariants(rootDir) {
+    removeLocalizedMarkdownVariants(rootDir, managedVariantPaths = []) {
       if (!rootDir || !fs.existsSync(rootDir)) return { removed: 0 };
-      const relFiles = walkFilesRecursive(rootDir);
       let removed = 0;
-      for (const relPath of relFiles) {
+      for (const relPath of [...new Set(Array.isArray(managedVariantPaths) ? managedVariantPaths : [])]) {
         const normalizedRel = String(relPath || "").replace(/\\/g, "/");
-        if (!normalizedRel.endsWith(".en.md") && !normalizedRel.endsWith(".zh-CN.md") && !normalizedRel.endsWith(".ru.md")) continue;
+        if (!isLocalizedMarkdownVariantPath(normalizedRel)) continue;
         const absPath = path.join(rootDir, normalizedRel);
         try {
           if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {

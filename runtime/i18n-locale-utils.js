@@ -89,6 +89,58 @@ function getLocalizedMarkdownTokenOrder(locale, fallback = DEFAULT_UI_LOCALE) {
   return [normalized, "en", "base", "zh-CN"];
 }
 
+function toCanonicalLocalizedMarkdownPath(filePath) {
+  const value = String(filePath || "");
+  if (!value.endsWith(".md")) return value;
+  for (const locale of SUPPORTED_UI_LOCALES) {
+    const suffix = `.${locale}.md`;
+    if (value.endsWith(suffix)) return `${value.slice(0, -suffix.length)}.md`;
+  }
+  return value;
+}
+
+function localizedMarkdownPathByToken(basePath, token) {
+  const canonical = toCanonicalLocalizedMarkdownPath(basePath);
+  if (!canonical.endsWith(".md") || token === "base") return canonical;
+  if (!SUPPORTED_UI_LOCALES.includes(token)) return canonical;
+  return `${canonical.slice(0, -".md".length)}.${token}.md`;
+}
+
+function isLocalizedMarkdownVariantPath(filePath) {
+  const value = String(filePath || "");
+  return SUPPORTED_UI_LOCALES.some((locale) => value.endsWith(`.${locale}.md`));
+}
+
+function resolveLocalizedMarkdownPath(basePath, locale, availablePaths, fallback = DEFAULT_UI_LOCALE) {
+  const available = availablePaths instanceof Set
+    ? availablePaths
+    : new Set(Array.isArray(availablePaths) ? availablePaths.map(String) : []);
+  for (const token of getLocalizedMarkdownTokenOrder(locale, fallback)) {
+    const candidate = localizedMarkdownPathByToken(basePath, token);
+    if (available.has(candidate)) return candidate;
+  }
+  return "";
+}
+
+function materializeLocalizedMarkdownFiles(files, locale, fallback = DEFAULT_UI_LOCALE) {
+  const source = files && typeof files === "object" ? files : {};
+  const available = new Set(Object.keys(source));
+  const canonicalPaths = new Set(
+    [...available]
+      .filter((filePath) => String(filePath || "").endsWith(".md"))
+      .map(toCanonicalLocalizedMarkdownPath),
+  );
+  const output = { ...source };
+  for (const canonicalPath of canonicalPaths) {
+    const selected = resolveLocalizedMarkdownPath(canonicalPath, locale, available, fallback);
+    if (selected) output[canonicalPath] = source[selected];
+  }
+  for (const filePath of Object.keys(output)) {
+    if (isLocalizedMarkdownVariantPath(filePath)) delete output[filePath];
+  }
+  return output;
+}
+
 function createTranslator(options = {}) {
   const messages = options.messages && typeof options.messages === "object" ? options.messages : {};
   const getLocale = typeof options.getLocale === "function"
@@ -120,5 +172,10 @@ module.exports = {
   interpolateTemplate,
   getIntlLocale,
   getLocalizedMarkdownTokenOrder,
+  toCanonicalLocalizedMarkdownPath,
+  localizedMarkdownPathByToken,
+  isLocalizedMarkdownVariantPath,
+  resolveLocalizedMarkdownPath,
+  materializeLocalizedMarkdownFiles,
   createTranslator,
 };
