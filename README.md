@@ -20,6 +20,10 @@
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
 
+## v0.5.12 发布说明
+
+本次更新提升了 FLOWnote 的整体稳定性，并修复了若干已知问题。
+
 ## v0.5.11 发布说明
 
 本次升级重点对大家反馈的一些问题进行了修复。
@@ -318,6 +322,10 @@ Language: [简体中文](#flownote) | **English** | [Русский](README.ru.m
 <p align="center">
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
 </p>
+
+## v0.5.12 Release Notes
+
+This update improves FLOWnote's overall stability and fixes several known issues.
 
 ## v0.5.11 Release Notes
 
