@@ -100,14 +100,27 @@ function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariab
 
       const maxBytes = Math.min(input.maxBytes || DEFAULT_MAX_BYTES, HARD_MAX_BYTES);
       let content;
-      if (skill.embeddedResourceFiles && Object.prototype.hasOwnProperty.call(skill.embeddedResourceFiles, rel)) {
-        content = String(skill.embeddedResourceFiles[rel] || "");
-      } else if (skill.dirPath && !String(skill.dirPath).startsWith("<embedded>/")) {
-        const fullPath = joinVaultPath(skill.dirPath, rel);
+      const overridePath = skill.vaultResourceOverrides
+        && Object.prototype.hasOwnProperty.call(skill.vaultResourceOverrides, rel)
+        ? skill.vaultResourceOverrides[rel]
+        : "";
+      if (overridePath) {
         try {
-          content = await readFile(vault, fullPath);
+          content = await readFile(vault, overridePath);
         } catch {
           content = undefined;
+        }
+      }
+      if (typeof content !== "string") {
+        if (skill.embeddedResourceFiles && Object.prototype.hasOwnProperty.call(skill.embeddedResourceFiles, rel)) {
+          content = String(skill.embeddedResourceFiles[rel] || "");
+        } else if (skill.dirPath && !String(skill.dirPath).startsWith("<embedded>/")) {
+          const fullPath = joinVaultPath(skill.dirPath, rel);
+          try {
+            content = await readFile(vault, fullPath);
+          } catch {
+            content = undefined;
+          }
         }
       }
 

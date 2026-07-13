@@ -10,6 +10,8 @@ const {
 } = require("../../../runtime/chat/direct-agent-runner");
 const { ToolRegistry, buildTool } = require("../../../runtime/agent/tool-registry");
 const { SkillRegistry } = require("../../../runtime/agent/skill-registry");
+const { createSkillResourceReadTool } = require("../../../runtime/agent/tools/skill-resource-read");
+const { saveTemplate } = require("../../../runtime/settings/template-management");
 const { blockUtilsMethods } = require("../../../runtime/view/message/block-utils");
 const {
   defaultAgentSettings,
@@ -73,6 +75,12 @@ function collectHandlerCalls() {
       onPermissionRequest: async (p) => { out.permissionRequests.push(p); return "once"; },
     },
   };
+}
+
+async function collectToolEvents(tool, input) {
+  const events = [];
+  for await (const event of tool.execute(input, {})) events.push(event);
+  return events;
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +625,114 @@ test("ensureSkillRegistry prefers embedded bundled skills over vault copies", as
   assert.match(registry.get("ah").filePath, /^<embedded>\/ah\/SKILL\.md$/);
   assert.equal(registry.get("custom-one").description, "Custom");
   assert.equal(logs.some((line) => /ignored 1 vault copy/.test(line)), true);
+});
+
+test("ensureSkillRegistry materializes embedded resources for the active locale", async () => {
+  const plugin = {
+    settings: { skillsDir: ".flownote/skills", uiLanguage: "en" },
+    getEffectiveLocale: () => "en",
+    app: { vault: { listSkillDirs: () => [] } },
+  };
+
+  const registry = await ensureSkillRegistry(plugin);
+  const dailySkill = registry.get("ah-note");
+  assert.ok(dailySkill);
+  assert.match(
+    dailySkill.embeddedResourceFiles["assets/每日笔记模板.md"],
+    /Today's Most Important Thing/,
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      dailySkill.embeddedResourceFiles,
+      "assets/每日笔记模板.en.md",
+    ),
+    false,
+  );
+  const initSkill = registry.get("ah-init");
+  assert.match(
+    initSkill.embeddedResourceFiles["references/HOME Template.md"],
+    /Knowledge Base Home/,
+  );
+});
+
+test("ensureSkillRegistry keeps Russian embedded resources when the SKILL document falls back to English", async () => {
+  let locale = "en";
+  const plugin = {
+    settings: { skillsDir: ".flownote/skills", uiLanguage: "en" },
+    getEffectiveLocale: () => locale,
+    app: { vault: { listSkillDirs: () => [] } },
+  };
+
+  const englishRegistry = await ensureSkillRegistry(plugin);
+  assert.match(
+    englishRegistry.get("ah-note").embeddedResourceFiles["assets/每日笔记模板.md"],
+    /Today's Most Important Thing/,
+  );
+  locale = "ru";
+  const registry = await ensureSkillRegistry(plugin);
+  const dailySkill = registry.get("ah-note");
+  assert.ok(dailySkill);
+  assert.match(dailySkill.filePath, /^<embedded>\/ah-note\/SKILL\.md$/);
+  assert.match(
+    dailySkill.embeddedResourceFiles["assets/每日笔记模板.md"],
+    /Главное сегодня/,
+  );
+  assert.doesNotMatch(
+    dailySkill.embeddedResourceFiles["assets/每日笔记模板.md"],
+    /Today's Most Important Thing/,
+  );
+});
+
+test("Direct skill_resource_read prefers the user-edited template over the embedded default", async () => {
+  const customPath = "Custom Meta/Templates/HOME Template.md";
+  const files = new Map();
+  const adapter = {
+    exists: async (filePath) => files.has(filePath),
+    read: async (filePath) => {
+      if (!files.has(filePath)) throw new Error("missing");
+      return files.get(filePath);
+    },
+    write: async (filePath, content) => { files.set(filePath, String(content)); },
+    mkdir: async () => {},
+  };
+  const plugin = {
+    settings: {
+      skillsDir: ".flownote/skills",
+      uiLanguage: "en",
+      metaPaths: { templates: "Custom Meta/Templates" },
+    },
+    getEffectiveLocale: () => "en",
+    app: {
+      vault: {
+        listSkillDirs: () => [],
+        adapter,
+      },
+    },
+  };
+
+  await saveTemplate(plugin, "home-note", "# USER CUSTOM HOME TEMPLATE\n");
+  assert.equal(files.get(customPath), "# USER CUSTOM HOME TEMPLATE\n");
+  const registry = await ensureSkillRegistry(plugin);
+  const tool = createSkillResourceReadTool({ skillRegistry: registry, vault: plugin.app.vault });
+  const events = await collectToolEvents(tool, {
+    skill: "ah-init",
+    path: "references/HOME Template.md",
+  });
+  const result = events.at(-1);
+  assert.equal(result.isError, undefined);
+  assert.match(result.content, /USER CUSTOM HOME TEMPLATE/);
+  assert.doesNotMatch(result.content, /Knowledge Base Home/);
+
+  plugin.settings.metaPaths.templates = "Other Meta/Templates";
+  await saveTemplate(plugin, "home-note", "# SECOND CUSTOM HOME TEMPLATE\n");
+  const movedRegistry = await ensureSkillRegistry(plugin);
+  const movedTool = createSkillResourceReadTool({ skillRegistry: movedRegistry, vault: plugin.app.vault });
+  const movedResult = (await collectToolEvents(movedTool, {
+    skill: "ah-init",
+    path: "references/HOME Template.md",
+  })).at(-1);
+  assert.match(movedResult.content, /SECOND CUSTOM HOME TEMPLATE/);
+  assert.doesNotMatch(movedResult.content, /USER CUSTOM HOME TEMPLATE/);
 });
 
 // ---------------------------------------------------------------------------

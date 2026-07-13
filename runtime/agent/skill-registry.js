@@ -31,6 +31,7 @@
  * @property {string[]} [allowedTools]  declared tool permissions from the skill frontmatter
  * @property {string[]} [resourcePaths] skill-relative files available via skill_resource_read
  * @property {Object<string,string>} [embeddedResourceFiles] skill-relative files compiled into the plugin
+ * @property {Object<string,string>} [vaultResourceOverrides] skill-relative resource paths mapped to user-editable vault files
  * @property {string} [version]
  * @property {string} [model]
  * @property {string} [context]

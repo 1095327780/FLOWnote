@@ -58,7 +58,11 @@ const { FileStateCache } = require("../agent/file-state-cache");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
-const { getIntlLocale, normalizeSupportedLocale } = require("../i18n-locale-utils");
+const {
+  getIntlLocale,
+  normalizeSupportedLocale,
+  materializeLocalizedMarkdownFiles,
+} = require("../i18n-locale-utils");
 const {
   DEFAULT_NOTE_PATHS_ZH,
   DEFAULT_NOTE_PATHS_EN,
@@ -72,6 +76,10 @@ const {
   normalizeMetaPaths,
 } = require("../settings-utils");
 const { BASE_SYSTEM_PROMPT } = require("./direct-agent-system-prompt");
+const {
+  addEmbeddedTemplateAliases,
+  addEmbeddedTemplateVaultOverrides,
+} = require("./embedded-skill-templates");
 
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
@@ -484,10 +492,15 @@ async function ensureSkillRegistry(plugin) {
     return new SkillRegistry([]);
   }
   const skillRoots = resolveSkillRoots(plugin);
-  const locale = getSkillDocLocale(
+  const locale = normalizeSupportedLocale(
     typeof plugin.getEffectiveLocale === "function" ? plugin.getEffectiveLocale() : plugin.settings && plugin.settings.uiLanguage,
+    "en",
   );
-  const cacheKey = `${locale}\n${skillRoots.join("\n")}`;
+  const templateRoot = normalizeMetaPaths(
+    plugin.settings && plugin.settings.metaPaths,
+    getDefaultMetaPathsByLocale(locale),
+  ).templates;
+  const cacheKey = `${locale}\n${templateRoot}\n${skillRoots.join("\n")}`;
 
   // Cache key: ordered skill roots. Re-load if the user points elsewhere.
   if (plugin.__flownoteSkillCache && plugin.__flownoteSkillCache.root === cacheKey) {
@@ -497,6 +510,7 @@ async function ensureSkillRegistry(plugin) {
   let manifests = [];
   const seenSkillKeys = new Set();
   const embeddedManifests = buildEmbeddedSkillManifests(locale);
+  addEmbeddedTemplateVaultOverrides(embeddedManifests, plugin, locale, EMBEDDED_BUNDLED_SKILLS_FILES);
   const bundledSkillKeys = new Set();
   let skippedVaultBundled = 0;
 
@@ -580,6 +594,10 @@ function buildEmbeddedSkillManifests(locale = "zh-CN") {
     if (!resourcesBySlug[slug]) resourcesBySlug[slug] = {};
     resourcesBySlug[slug][rel] = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
   }
+  for (const slug of Object.keys(resourcesBySlug)) {
+    resourcesBySlug[slug] = materializeLocalizedMarkdownFiles(resourcesBySlug[slug], locale, "en");
+  }
+  addEmbeddedTemplateAliases(resourcesBySlug, locale, EMBEDDED_BUNDLED_SKILLS_FILES);
   const out = [];
   const slugs = [...new Set(Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)
     .map((filePath) => String(filePath || "").split("/")[0])

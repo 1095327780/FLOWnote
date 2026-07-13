@@ -159,6 +159,29 @@ test("findOrCreateDailyNote should prefer ah-note skill template when available"
   }
 });
 
+test("findOrCreateDailyNote should honor the legacy English template target during migration", async () => {
+  const fixture = loadDailyNoteServiceWithMockObsidian();
+  try {
+    const vault = createTemplateAwareVault({
+      existingFiles: {
+        ".flownote/skills/ah-note/assets/每日笔记模板.md": "# 中文旧缓存\n",
+        ".flownote/skills/ah-note/assets/Daily Note Template.md": "# USER ENGLISH TEMPLATE\n",
+      },
+    });
+
+    await fixture.findOrCreateDailyNote(vault, "01-Capture/Daily Notes", "2026-06-23", {
+      locale: "en",
+      skillsDir: ".flownote/skills",
+    });
+
+    const content = vault.getCreatedContent("01-Capture/Daily Notes/2026-06-23.md");
+    assert.match(content, /USER ENGLISH TEMPLATE/);
+    assert.doesNotMatch(content, /中文旧缓存/);
+  } finally {
+    fixture.restore();
+  }
+});
+
 test("findOrCreateDailyNote should fallback to built-in template when skill template is missing", async () => {
   const fixture = loadDailyNoteServiceWithMockObsidian();
   try {
