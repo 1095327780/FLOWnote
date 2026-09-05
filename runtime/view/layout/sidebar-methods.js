@@ -23,9 +23,10 @@ function renderSidebar(side) {
 
   sessions.forEach((s) => {
     const displayTitle = this.sessionDisplayTitle(s);
+    const isActiveSession = s.id === active;
     const item = list.createDiv({ cls: "oc-session-item", attr: { title: displayTitle } });
     if (s.id === active) item.addClass("is-active");
-    item.addEventListener("click", async () => {
+    const activateSession = async () => {
       if (item.hasClass("is-renaming")) return;
       this.closeHistoryMenu();
       this.plugin.sessionStore.setActiveSession(s.id);
@@ -41,12 +42,18 @@ function renderSidebar(side) {
       }
       await this.plugin.persistState();
       this.render();
+    };
+    const switchAttrs = { type: "button", title: displayTitle, "aria-label": displayTitle };
+    if (isActiveSession) switchAttrs["aria-current"] = "true";
+    const switchButton = item.createEl("button", { cls: "oc-session-item-switch", attr: switchAttrs });
+    switchButton.addEventListener("click", () => {
+      void activateSession();
     });
 
-    const iconEl = item.createDiv({ cls: "oc-session-item-icon" });
+    const iconEl = switchButton.createDiv({ cls: "oc-session-item-icon" });
     setIcon(iconEl, s.id === active ? "message-square-dot" : "message-square");
 
-    const content = item.createDiv({ cls: "oc-session-item-content" });
+    const content = switchButton.createDiv({ cls: "oc-session-item-content" });
     const titleEl = content.createDiv({ cls: "oc-session-title", text: displayTitle });
     titleEl.setAttr("title", displayTitle);
 
@@ -78,7 +85,10 @@ function renderSidebar(side) {
       input.type = "text";
       input.className = "oc-session-rename-input";
       input.value = displayTitle;
-      titleEl.replaceWith(input);
+      input.setAttribute("aria-label", tr(this, "view.session.rename", "Rename session"));
+      input.setAttribute("enterkeyhint", "done");
+      switchButton.setAttr("hidden", "true");
+      item.insertBefore(input, actions);
       input.focus();
       input.select();
       const stop = (ev) => ev.stopPropagation();

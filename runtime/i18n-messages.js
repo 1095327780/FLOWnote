@@ -1118,7 +1118,7 @@ I18N_MESSAGES.ru = {
       providerModeDesc: "Coding Plan использует лимит подписки. Pay-per-token оплачивается по токенам. Оба варианта вызывают один и тот же backend провайдера и списываются по вашему ключу.",
       planLinkPrefix: "Купить/управлять тарифом: ",
       regionName: "Регион",
-      regionDesc: "Китай использует внутренний API endpoint. International использует .ai endpoint. Обычно выбирайте регион регистрации аккаунта.",
+      regionDesc: "Для Китая используется внутренний API-адрес, для остальных регионов — международный адрес .ai. Обычно выбирайте регион регистрации аккаунта.",
       regionCN: "Материковый Китай",
       regionIntl: "International",
       customBaseUrlName: "API URL",

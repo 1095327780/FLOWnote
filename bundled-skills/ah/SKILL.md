@@ -1,6 +1,10 @@
 ---
 name: ah
 description: 阿浩知识库统一入口与技能路由中枢。用于用户不确定该用哪个技能、想查看功能菜单、或希望根据意图自动分发到对应技能时。
+metadata:
+  flownote:
+    completion:
+      mode: answer
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

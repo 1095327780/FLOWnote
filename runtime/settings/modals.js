@@ -1,4 +1,5 @@
 const { Modal } = require("obsidian");
+const { applyResponsiveModalSurface } = require("../ui/responsive-modal");
 
 class InputPromptModal extends Modal {
   constructor(app, options, onResolve) {
@@ -18,6 +19,7 @@ class InputPromptModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.createEl("h2", { text: String(this.options.title || "Input") });
     if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
 
@@ -30,7 +32,7 @@ class InputPromptModal extends Modal {
     input.style.width = "100%";
     input.value = String(this.options.value || "");
 
-    const actions = contentEl.createDiv();
+    const actions = contentEl.createDiv({ cls: "oc-responsive-modal-actions" });
     actions.style.display = "flex";
     actions.style.justifyContent = "flex-end";
     actions.style.gap = "8px";
@@ -75,10 +77,11 @@ class ConfirmModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.createEl("h2", { text: String(this.options.title || "Confirm Action") });
     if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
 
-    const actions = contentEl.createDiv();
+    const actions = contentEl.createDiv({ cls: "oc-responsive-modal-actions" });
     actions.style.display = "flex";
     actions.style.justifyContent = "flex-end";
     actions.style.gap = "8px";
@@ -116,6 +119,7 @@ class SelectPromptModal extends Modal {
     const options = Array.isArray(this.options.options) ? this.options.options : [];
 
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.createEl("h2", { text: String(this.options.title || "Select") });
     if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
 
@@ -132,7 +136,7 @@ class SelectPromptModal extends Modal {
       select.value = String(this.options.defaultValue);
     }
 
-    const actions = contentEl.createDiv();
+    const actions = contentEl.createDiv({ cls: "oc-responsive-modal-actions" });
     actions.style.display = "flex";
     actions.style.justifyContent = "flex-end";
     actions.style.gap = "8px";
@@ -174,6 +178,7 @@ class ConflictResolutionModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.createEl("h2", { text: String(this.options.title || "Resolve Conflict") });
     if (this.options.description) contentEl.createEl("p", { text: String(this.options.description) });
     if (this.options.context) {
@@ -184,7 +189,7 @@ class ConflictResolutionModal extends Modal {
       pre.style.overflow = "auto";
     }
 
-    const actions = contentEl.createDiv();
+    const actions = contentEl.createDiv({ cls: "oc-responsive-modal-actions" });
     actions.style.display = "flex";
     actions.style.flexWrap = "wrap";
     actions.style.justifyContent = "flex-end";

@@ -1,6 +1,10 @@
 ---
 name: ah-project
 description: Use to create a new project folder and project overview note with goals, status, tasks, milestones, and linked knowledge context.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Project Creation
@@ -31,4 +35,3 @@ Include:
 - Do not create fake tasks. Ask or infer only from user-provided context.
 - If a related domain page exists, link it.
 - If the project is already present, update it instead of duplicating.
-

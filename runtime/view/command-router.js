@@ -135,6 +135,12 @@ function parseSkillSelectorSlashCommand(text) {
   return { command: "skills" };
 }
 
+function getSkillCommandId(skill) {
+  return String((skill && (skill.id || skill.slug || skill.name)) || "")
+    .replace(/^\/+/, "")
+    .trim();
+}
+
 function isMobileRuntime() {
   try {
     const { Platform = {} } = require("obsidian");
@@ -200,6 +206,7 @@ function resolveSkillFromPrompt(userText) {
     skills = this.plugin.__flownoteMobileSkillList;
   }
   const findSkillByToken = (token) => skills.find((item) => {
+    if (item && item.userInvocable === false) return false;
     const needle = String(token || "").toLowerCase();
     if (!needle) return false;
     const id = String((item && (item.id || item.slug)) || "").toLowerCase();
@@ -225,10 +232,11 @@ function resolveSkillFromPrompt(userText) {
     const nestedPromptRaw = (nestedSpace >= 0 ? nestedRaw.slice(nestedSpace + 1) : "").trim();
     const nestedSkill = findSkillByToken(nestedCmd);
     if (!nestedSkill) return { skill: null, promptText: input };
+    const commandId = getSkillCommandId(nestedSkill);
     return {
       skill: nestedSkill,
       promptText: buildPromptText(nestedSkill, nestedPromptRaw),
-      command: `/${nestedSkill.id}`,
+      command: commandId ? `/${commandId}` : "",
     };
   }
 
@@ -237,10 +245,11 @@ function resolveSkillFromPrompt(userText) {
   if (!skill) return { skill: null, promptText: input };
 
   const rest = (firstSpace >= 0 ? raw.slice(firstSpace + 1) : "").trim();
+  const commandId = getSkillCommandId(skill);
   return {
     skill,
     promptText: buildPromptText(skill, rest),
-    command: `/${skill.id}`,
+    command: commandId ? `/${commandId}` : "",
   };
 }
 

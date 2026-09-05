@@ -1,6 +1,10 @@
 ---
 name: ah-init
 description: Use to initialize or repair the FLOWnote vault structure, templates, home document, topic/domain pages, and memory files.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Vault Initialization

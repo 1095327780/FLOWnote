@@ -7,6 +7,7 @@
 // pre-check.
 
 const { buildTool } = require("../tool-registry");
+const { verifyPathExists, throwIfToolAborted } = require("../vault-effect-verifiers");
 const { resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
@@ -55,6 +56,15 @@ function createVaultCreateDirTool({ app, normalizePath } = {}) {
     name: "vault_create_dir",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "vault_mutation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "edit",
+      targets: input && typeof input.path === "string"
+        ? [resolveWritablePath(normalize(input.path))]
+        : [],
+    }),
     isReadOnly: () => false,
     isDestructive: () => false,
     isConcurrencySafe: () => true, // idempotent
@@ -70,7 +80,11 @@ function createVaultCreateDirTool({ app, normalizePath } = {}) {
       return input && typeof input.path === "string" ? input.path : "";
     },
 
-    async *execute(input, _ctx) {
+    async verifyEffect(input) {
+      return verifyPathExists(app.vault, resolveWritablePath(normalize(input.path)));
+    },
+
+    async *execute(input, ctx) {
       const path = resolveWritablePath(normalize(input.path));
       if (!path) {
         yield {
@@ -86,6 +100,7 @@ function createVaultCreateDirTool({ app, normalizePath } = {}) {
       }
       yield { type: "progress", message: `mkdir -p ${path}` };
       try {
+        throwIfToolAborted(ctx);
         await app.vault.createFolder(path);
       } catch (e) {
         yield {

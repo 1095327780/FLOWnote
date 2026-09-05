@@ -1,6 +1,10 @@
 ---
 name: ah-legacy
 description: Use to process legacy notes and older FLOWnote structures into the current folder and memory conventions.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Legacy Note Processing
@@ -20,4 +24,3 @@ Goal: migrate old structures carefully without losing data.
 - Never delete original content silently.
 - Prefer copy/update before move when the risk is unclear.
 - Report every changed path.
-

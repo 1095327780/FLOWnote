@@ -99,11 +99,35 @@ test("ask_user.execute surfaces multi-select answers", async () => {
   assert.match(r.content, /daily\.md \| review\.md/);
 });
 
-test("ask_user.execute returns error when user dismisses", async () => {
+test("ask_user.execute rejects an empty answer instead of reporting a completed interaction", async () => {
+  const tool = createAskUserTool();
+  const askUserFn = async () => ({
+    answers: { "Which file should I update?": "   " },
+  });
+  const r = lastResult(await collect(tool, { questions: [GOOD_QUESTION] }, { askUserFn }));
+  assert.equal(r.isError, true);
+  assert.equal(r.code, "user_input_invalid");
+  assert.match(r.content, /no answer was provided/i);
+  assert.doesNotMatch(r.content, /\(no answer\)/);
+});
+
+test("ask_user.execute trims multi-select answers and keeps non-empty custom text", async () => {
+  const tool = createAskUserTool();
+  const askUserFn = async () => ({
+    answers: { "Which file should I update?": [" ", " custom note.md "] },
+  });
+  const r = lastResult(await collect(tool, { questions: [GOOD_QUESTION] }, { askUserFn }));
+  assert.equal(Boolean(r.isError), false);
+  assert.match(r.content, /A: custom note\.md/);
+});
+
+test("ask_user.execute turns dismissal into a typed suspension request", async () => {
   const tool = createAskUserTool();
   const askUserFn = async () => ({ dismissed: true });
   const r = lastResult(await collect(tool, { questions: [GOOD_QUESTION] }, { askUserFn }));
-  assert.equal(r.isError, true);
+  assert.equal(r.isError, false);
+  assert.deepEqual(r.control, { type: "suspend", reason: "user_input_dismissed" });
+  assert.equal(r.code, "user_input_dismissed");
   assert.match(r.content, /dismissed/);
 });
 

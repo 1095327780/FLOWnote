@@ -1,6 +1,10 @@
 ---
 name: ah-archive
 description: Use when a project is finished, canceled, or inactive and should be summarized and moved to the archive.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Project Archive
@@ -21,4 +25,3 @@ Goal: preserve the learning from a finished project and keep the active project 
 - Keep the original project content intact.
 - Do not archive active work without explicit confirmation.
 - Use configured note paths over examples.
-

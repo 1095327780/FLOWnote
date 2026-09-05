@@ -1,7 +1,11 @@
 const { Notice, Platform = {} } = require("obsidian");
 const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils");
 const { domUtils } = require("./dom-utils");
+const { executionStatusLabel } = require("./execution-status");
 const { tFromContext } = require("../../i18n-runtime");
+const { resolveUserExecutionAction } = require("./user-execution-action");
+const { terminalUserMessage } = require("./terminal-user-message");
+const { blockUtilsMethods } = require("./block-utils");
 
 const {
   safeSetIcon,
@@ -112,6 +116,15 @@ function clampRenderText(value, maxLen = MAX_RENDER_MARKDOWN_CHARS) {
   return `${raw.slice(0, limit)}\n\n...(truncated ${raw.length - limit} chars)`;
 }
 
+function mergeTerminalWarning(text, terminalText, terminalMessageKey) {
+  const primary = String(text || "").trim();
+  const warning = String(terminalText || "").trim();
+  if (terminalMessageKey === "terminalInterruptedMutation" && primary && warning) {
+    return `${primary}\n\n${warning}`;
+  }
+  return primary || warning;
+}
+
 function syncPatchDiffCacheSession(view) {
   if (!view || !view.plugin || !view.plugin.sessionStore) return;
   const activeSessionId = String(view.plugin.sessionStore.state().activeSessionId || "").trim();
@@ -152,7 +165,7 @@ function renderMessages(options = {}) {
   }
 
   messages.forEach((m) => this.renderMessageItem(container, m));
-  this.syncRuntimeStatusToPendingTail();
+  this.syncRuntimeStatusToPendingMessage();
   this.renderInlineQuestionPanel(messages);
   if (shouldStickToBottom) {
     this.scheduleScrollMessagesToBottom(true);
@@ -160,6 +173,102 @@ function renderMessages(options = {}) {
     const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
     container.scrollTop = Math.max(0, Math.min(prevScrollTop, maxTop));
   }
+}
+
+function refreshMessageItem(messageId) {
+  const id = String(messageId || "").trim();
+  const container = this.elements && this.elements.messages;
+  if (!id || !container) return false;
+  const message = this.plugin.sessionStore.getActiveMessages()
+    .find((item) => item && String(item.id || "") === id);
+  const row = typeof this.findMessageRow === "function" ? this.findMessageRow(id) : null;
+  if (!message || !row || message.role !== "assistant") return false;
+
+  const shouldStickToBottom = this.shouldAutoScrollMessages();
+  const previousScrollTop = Number(container.scrollTop || 0);
+  row.dataset.messageId = id;
+  row.classList.toggle("is-pending", Boolean(message.pending));
+  ["running", "completed", "failed", "blocked", "cancelled", "suspended", "interrupted"]
+    .forEach((status) => row.classList.remove(`is-${status}`));
+  const executionStatus = String(message.status || "").trim().toLowerCase();
+  if (executionStatus) row.classList.add(`is-${executionStatus}`);
+
+  const head = row.querySelector(".oc-msg-head");
+  const previousStatus = head && head.querySelector(".oc-msg-status");
+  if (previousStatus) previousStatus.remove();
+  const statusLabel = executionStatusLabel(this, executionStatus);
+  row.classList.toggle("has-execution-status", Boolean(statusLabel));
+  if (head && statusLabel) head.createDiv({ cls: "oc-msg-status", text: statusLabel });
+
+  const body = row.querySelector(".oc-message-content");
+  if (!body) return false;
+  const runtimeStatus = row.querySelector(".oc-runtime-status");
+  if (!message.pending && runtimeStatus) runtimeStatus.remove();
+  body.removeClass("oc-runtime-tail", "is-info", "is-working", "is-error");
+  const textForRender = normalizeMarkdownForDisplay(
+    clampRenderText(message.text || "", MAX_RENDER_MARKDOWN_CHARS),
+  );
+  const hasReasoning = Boolean(message.reasoning && String(message.reasoning).trim());
+  const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
+  const hasBlocks = this.visibleAssistantBlocks(message.blocks).length > 0;
+  const terminalMessageKey = terminalUserMessage(message, {
+    hasStructuredContent: hasReasoning || hasBlocks,
+  });
+  const terminalText = terminalMessageKey
+    ? tFromContext(this, `view.message.${terminalMessageKey}`, "This response was not completed. Try again.")
+    : "";
+  const hasTimelineFinal = blockUtilsMethods.hasTimelineFinalBlock(message.blocks);
+  const finalText = hasTimelineFinal
+    ? ""
+    : mergeTerminalWarning(textForRender, terminalText, terminalMessageKey);
+
+  body.empty();
+  if (finalText) {
+    const textBlock = body.createDiv({ cls: "oc-text-block" });
+    this.renderMarkdownSafely(textBlock, finalText, () => {
+      this.enhanceCodeBlocks(textBlock);
+    });
+  }
+
+  if (hasReasoning && !hasReasoningBlocks) {
+    const reasoningBody = this.ensureReasoningContainer(row, !textForRender);
+    if (reasoningBody) {
+      const reasoningText = normalizeMarkdownForDisplay(
+        clampRenderText(message.reasoning || "", MAX_RENDER_REASONING_CHARS),
+      );
+      reasoningBody.empty();
+      this.renderMarkdownSafely(reasoningBody, reasoningText, () => {
+        this.enhanceCodeBlocks(reasoningBody);
+      });
+    }
+  } else if (hasReasoningBlocks) {
+    this.removeStandaloneReasoningContainer(row);
+  }
+
+  this.renderAssistantBlocks(row, message);
+  const previousMeta = row.querySelector(".oc-message-meta");
+  if (previousMeta) previousMeta.remove();
+  this.renderAssistantMeta(row, message);
+  if (typeof this.renderAssistantActions === "function") {
+    this.renderAssistantActions(row, message, finalText);
+  }
+  this.reorderAssistantMessageLayout(row);
+
+  const restoreViewport = () => {
+    container.scrollLeft = 0;
+    if (shouldStickToBottom) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    container.scrollTop = Math.max(0, Math.min(previousScrollTop, maxTop));
+  };
+  if (typeof this.withProgrammaticScroll === "function") {
+    this.withProgrammaticScroll(container, restoreViewport);
+  } else {
+    restoreViewport();
+  }
+  return true;
 }
 
 function renderUserActions(row, message) {
@@ -176,22 +285,75 @@ function renderUserActions(row, message) {
     new Notice(tFromContext(this, "view.message.copied", "Message copied"));
   });
 
+  const messages = this.plugin && this.plugin.sessionStore
+    && typeof this.plugin.sessionStore.getActiveMessages === "function"
+    ? this.plugin.sessionStore.getActiveMessages()
+    : [];
+  const sessionStore = this.plugin && this.plugin.sessionStore;
+  let sessionId = "";
+  if (sessionStore && typeof sessionStore.state === "function") {
+    try {
+      sessionId = String((sessionStore.state() || {}).activeSessionId || "").trim();
+    } catch (_error) {
+      sessionId = "";
+    }
+  }
+  const action = resolveUserExecutionAction(messages, message && message.id, {
+    sessionStore,
+    sessionId,
+  });
+  if (action.mode === "none") return;
   const retryBtn = actions.createEl("button", { cls: "oc-inline-action" });
   retryBtn.setAttr("type", "button");
-  safeSetIcon(retryBtn, "rotate-ccw");
-  if (!retryBtn.querySelector("svg")) retryBtn.setText("↺");
-  retryBtn.setAttr("aria-label", tFromContext(this, "view.message.retry", "Retry from this message"));
-  retryBtn.setAttr("title", tFromContext(this, "view.message.retry", "Retry from this message"));
-  retryBtn.addEventListener("click", async () => {
-    await this.sendPrompt(message.text || "");
-  });
+  if (action.mode === "continue") {
+    safeSetIcon(retryBtn, "play");
+    if (!retryBtn.querySelector("svg")) retryBtn.setText("▶");
+    retryBtn.setAttr("aria-label", tFromContext(this, "view.message.continue", "Continue suspended workflow"));
+    retryBtn.setAttr("title", tFromContext(this, "view.message.continue", "Continue suspended workflow"));
+    retryBtn.addEventListener("click", async () => {
+      await this.sendPrompt("继续", {
+        sessionId,
+        continuationMessageId: action.assistantId,
+        continuationRunId: action.runId,
+      });
+    });
+  } else if (action.mode === "continuing") {
+    safeSetIcon(retryBtn, "loader-circle");
+    if (!retryBtn.querySelector("svg")) retryBtn.setText("…");
+    retryBtn.disabled = true;
+    retryBtn.setAttr("aria-disabled", "true");
+    retryBtn.setAttr("aria-label", tFromContext(this, "view.message.continuing", "Continuing suspended workflow"));
+    retryBtn.setAttr("title", tFromContext(this, "view.message.continuing", "Continuing suspended workflow"));
+    if (typeof retryBtn.addClass === "function") retryBtn.addClass("is-disabled");
+  } else if (action.mode === "inspect") {
+    const uncertain = action.uncertain === true;
+    safeSetIcon(retryBtn, uncertain ? "file-question" : "file-check-2");
+    if (!retryBtn.querySelector("svg")) retryBtn.setText(uncertain ? "?" : "✓");
+    const inspectLabel = uncertain
+      ? tFromContext(this, "view.message.inspectUncertainChanges", "Check operation result before retrying")
+      : tFromContext(this, "view.message.inspectChanges", "Inspect preserved changes");
+    retryBtn.setAttr("aria-label", inspectLabel);
+    retryBtn.setAttr("title", inspectLabel);
+    retryBtn.addEventListener("click", () => {
+      const target = typeof this.findMessageRow === "function" ? this.findMessageRow(action.assistantId) : null;
+      if (target && typeof target.scrollIntoView === "function") target.scrollIntoView({ block: "center" });
+    });
+  } else {
+    safeSetIcon(retryBtn, "rotate-ccw");
+    if (!retryBtn.querySelector("svg")) retryBtn.setText("↺");
+    retryBtn.setAttr("aria-label", tFromContext(this, "view.message.retry", "Retry from this message"));
+    retryBtn.setAttr("title", tFromContext(this, "view.message.retry", "Retry from this message"));
+    retryBtn.addEventListener("click", async () => {
+      await this.sendPrompt(message.text || "");
+    });
+  }
 }
 
 function addTextCopyButton(textBlock, sourceText) {
   if (!textBlock || textBlock.querySelector(".oc-text-copy-btn")) return;
   const copyBtn = textBlock.createEl("button", { cls: "oc-text-copy-btn" });
   copyBtn.setAttr("type", "button");
-  copyBtn.setAttr("aria-label", tFromContext(this, "view.message.copyBlock", "Copy text block"));
+  copyBtn.setAttr("aria-label", tFromContext(this, "view.message.copy", "Copy response"));
   applyCopyGlyph(copyBtn);
 
   copyBtn.addEventListener("click", async (event) => {
@@ -206,6 +368,28 @@ function addTextCopyButton(textBlock, sourceText) {
       new Notice(tFromContext(this, "view.message.copyFailed", "Copy failed"));
     }
   });
+}
+
+function assistantCopyText(message, fallbackText = "") {
+  const blocks = Array.isArray(message && message.blocks) ? message.blocks : [];
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index];
+    if (String(block && block.type || "").trim().toLowerCase() !== "stream-text") continue;
+    if (String(block && block.phase || "").trim().toLowerCase() !== "final") continue;
+    const text = String((block && (block.detail || block.text)) || "");
+    if (text.trim()) return normalizeMarkdownForDisplay(text);
+  }
+  return normalizeMarkdownForDisplay(String(fallbackText || (message && message.text) || ""));
+}
+
+function renderAssistantActions(row, message, fallbackText = "") {
+  if (!row) return;
+  const sourceText = assistantCopyText(message, fallbackText);
+  const previous = row.querySelector(".oc-assistant-msg-actions");
+  if (previous) previous.remove();
+  if (!sourceText.trim()) return;
+  const actions = row.createDiv({ cls: "oc-assistant-msg-actions" });
+  this.addTextCopyButton(actions, sourceText);
 }
 
 function normalizeMessageLinkedContextFiles(message) {
@@ -279,10 +463,19 @@ function renderMessageItem(parent, message) {
   const row = parent.createDiv({ cls: ["oc-message", `oc-message-${message.role}`] });
   row.dataset.messageId = message.id || "";
   if (message.pending) row.addClass("is-pending");
+  const executionStatus = String(message.status || "").trim().toLowerCase();
+  if (executionStatus) row.addClass(`is-${executionStatus}`);
 
   const head = row.createDiv({ cls: "oc-msg-head" });
   head.createDiv({ cls: "oc-msg-role", text: message.role.toUpperCase() });
-  if (message.error) head.createDiv({ cls: "oc-msg-error", text: message.error });
+  const statusLabel = executionStatusLabel(this, executionStatus);
+  if (statusLabel) {
+    row.addClass("has-execution-status");
+    head.createDiv({ cls: "oc-msg-status", text: statusLabel });
+  }
+  // Errors recorded by transports and providers are diagnostics, not product
+  // copy. Terminal projection below gives users a localized next action while
+  // the detailed execution record remains available in the activity blocks.
 
   const body = row.createDiv({ cls: "oc-message-content", attr: { dir: "auto" } });
 
@@ -292,28 +485,11 @@ function renderMessageItem(parent, message) {
     const hasStreamTextBlocks = message.role === "assistant" && this
       .visibleAssistantBlocks(message.blocks)
       .some((block) => String((block && block.type) || "").trim().toLowerCase() === "stream-text");
-    const runtimeText = String((this.runtimeStatusState && this.runtimeStatusState.text) || "").trim();
-    const runtimeTone = String((this.runtimeStatusState && this.runtimeStatusState.tone) || "info");
-    const canShowRuntimeStatus = message.role === "assistant" && !hasPendingText && Boolean(runtimeText);
     body.removeClass("oc-runtime-tail", "is-info", "is-working", "is-error");
-    if (canShowRuntimeStatus) {
-      pendingText = runtimeText;
-      body.addClass("oc-runtime-tail");
-      if (runtimeTone === "error") body.addClass("is-error");
-      else if (runtimeTone === "working") body.addClass("is-working");
-      else body.addClass("is-info");
-    }
     if (message.role === "assistant" && hasPendingText && hasStreamTextBlocks) {
       body.empty();
-    } else if (message.role === "assistant" && pendingText.trim()) {
-      const pendingMarkdown = normalizeMarkdownForDisplay(
-        clampRenderText(pendingText, MAX_RENDER_MARKDOWN_CHARS),
-      );
-      this.renderMarkdownSafely(body, pendingMarkdown, () => {
-        this.enhanceCodeBlocks(body);
-      });
     } else {
-      body.setText(pendingText);
+      body.setText(clampRenderText(pendingText, MAX_RENDER_MARKDOWN_CHARS));
     }
 
     const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
@@ -336,19 +512,21 @@ function renderMessageItem(parent, message) {
   const hasReasoning = Boolean(message.reasoning && String(message.reasoning).trim());
   const hasReasoningBlocks = this.hasReasoningBlock(message.blocks);
   const hasBlocks = this.visibleAssistantBlocks(message.blocks).length > 0;
-  const fallbackText = hasReasoning || hasBlocks ? "(结构化输出已返回，可展开下方详情查看。)" : "";
-  const localizedFallback = hasReasoning || hasBlocks
-    ? tFromContext(this, "view.message.structuredFallback", "(Structured output returned. Expand details below.)")
+  const terminalMessageKey = terminalUserMessage(message, {
+    hasStructuredContent: hasReasoning || hasBlocks,
+  });
+  const terminalText = terminalMessageKey
+    ? tFromContext(this, `view.message.${terminalMessageKey}`, "This response was not completed. Try again.")
     : "";
-  const finalText = textForRender || localizedFallback;
+  const hasTimelineFinal = message.role === "assistant" && blockUtilsMethods.hasTimelineFinalBlock(message.blocks);
+  const finalText = hasTimelineFinal
+    ? ""
+    : mergeTerminalWarning(textForRender, terminalText, terminalMessageKey);
 
   if (finalText) {
     const textBlock = body.createDiv({ cls: "oc-text-block" });
     this.renderMarkdownSafely(textBlock, finalText, () => {
       this.enhanceCodeBlocks(textBlock);
-      if (message.role === "assistant") {
-        this.addTextCopyButton(textBlock, finalText);
-      }
     });
   }
 
@@ -369,6 +547,9 @@ function renderMessageItem(parent, message) {
   if (message.role === "assistant") {
     this.renderAssistantBlocks(row, message);
     this.renderAssistantMeta(row, message);
+    if (typeof this.renderAssistantActions === "function") {
+      this.renderAssistantActions(row, message, finalText);
+    }
     this.reorderAssistantMessageLayout(row);
   }
 
@@ -381,10 +562,12 @@ function renderMessageItem(parent, message) {
 
 const messageListMethods = {
   renderMessages,
+  refreshMessageItem,
   renderUserActions,
   addTextCopyButton,
+  renderAssistantActions,
   renderUserLinkedContextFiles,
   renderMessageItem,
 };
 
-module.exports = { messageListMethods };
+module.exports = { messageListMethods, executionStatusLabel };

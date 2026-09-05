@@ -242,6 +242,29 @@ test("vault_write create: writes a new file and confirms bytes", async () => {
   assert.equal(vault._files.get("new.md"), "hi");
 });
 
+test("vault_write treats an aborted signal as a commit barrier", async () => {
+  const vault = fakeVault();
+  const tool = createVaultWriteTool({ vault });
+  const controller = new AbortController();
+  controller.abort();
+
+  await assert.rejects(
+    () => collectExecute(tool, { path: "cancelled.md", content: "no", mode: "create" }, { signal: controller.signal }),
+    (error) => error && error.name === "AbortError",
+  );
+  assert.equal(vault._files.has("cancelled.md"), false);
+});
+
+test("vault_write verifies the declared postcondition independently of result prose", async () => {
+  const vault = fakeVault();
+  const tool = createVaultWriteTool({ vault });
+  const input = { path: "verified.md", content: "expected", mode: "create" };
+  await collectExecute(tool, input, {});
+  assert.equal((await tool.verifyEffect(input, null, {})).verified, true);
+  vault._files.set("verified.md", "tampered");
+  assert.equal((await tool.verifyEffect(input, null, {})).verified, false);
+});
+
 test("vault_write maps legacy hidden memory writes to the visible memory path", async () => {
   const vault = fakeVault();
   const tool = createVaultWriteTool({ vault });

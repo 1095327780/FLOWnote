@@ -1,7 +1,18 @@
 const { InlineAskUserQuestionPanel } = require("../../inline-ask-user-question-panel");
 const { tFromContext } = require("../../i18n-runtime");
 
-function clearInlineQuestionWidget(silent = true) {
+function focusComposerAfterInlineQuestion() {
+  if (typeof requestAnimationFrame !== "function") return;
+  requestAnimationFrame(() => {
+    const composer = this.elements && this.elements.composer;
+    const input = this.elements && this.elements.input;
+    if (!composer || !input || composer.hasClass("is-inline-hidden")) return;
+    if (typeof input.isConnected === "boolean" && !input.isConnected) return;
+    if (typeof input.focus === "function") input.focus();
+  });
+}
+
+function clearInlineQuestionWidget(silent = true, options = {}) {
   if (this.inlineQuestionWidget && typeof this.inlineQuestionWidget.destroy === "function") {
     this.inlineQuestionWidget.destroy(silent);
   }
@@ -13,6 +24,9 @@ function clearInlineQuestionWidget(silent = true) {
   }
   if (this.elements.composer) {
     this.elements.composer.removeClass("is-inline-hidden");
+  }
+  if (options && options.restoreFocus === true) {
+    this.focusComposerAfterInlineQuestion();
   }
 }
 
@@ -205,15 +219,27 @@ function renderInlineQuestionPanel(messages) {
     { questions: interaction.questions },
     (result) => {
       if (!result) {
-        this.clearInlineQuestionWidget(true);
+        this.clearInlineQuestionWidget(true, { restoreFocus: true });
         this.setRuntimeStatus(tFromContext(this, "view.question.canceled", "Question response canceled"), "info");
         return;
       }
+      this.clearInlineQuestionWidget(true, { restoreFocus: true });
       void this.submitInlineQuestionResult(interaction, result);
     },
     this.currentAbort ? this.currentAbort.signal : undefined,
     {
       title: tFromContext(this, "view.question.title", "FLOWnote has a question"),
+      copy: {
+        submit: tFromContext(this, "view.question.submit", "Submit"),
+        submitAnswers: tFromContext(this, "view.question.submitAnswers", "Submit answers"),
+        cancel: tFromContext(this, "view.question.cancel", "Cancel"),
+        customPlaceholder: tFromContext(this, "view.question.customPlaceholder", "Type your answer…"),
+        hint: tFromContext(this, "view.question.hint", "Choose an option, or use Tab and arrow keys to navigate."),
+        hintImmediate: tFromContext(this, "view.question.hintImmediate", "Choose an option, or press Esc to cancel."),
+        reviewTitle: tFromContext(this, "view.question.reviewTitle", "Review your answers"),
+        reviewPrompt: tFromContext(this, "view.question.reviewPrompt", "Ready to submit your answers?"),
+        notAnswered: tFromContext(this, "view.question.notAnswered", "Not answered"),
+      },
       showCustomInput: true,
       immediateSelect: interaction.questions.length === 1
         && Array.isArray(interaction.questions[0].options)
@@ -244,6 +270,7 @@ function hasVisibleQuestionToolCard() {
 
 
 const inlinePanelMethods = {
+  focusComposerAfterInlineQuestion,
   clearInlineQuestionWidget,
   formatInlineQuestionPayload,
   submitInlineQuestionResult,

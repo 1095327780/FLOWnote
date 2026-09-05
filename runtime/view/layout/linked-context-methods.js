@@ -12,6 +12,10 @@ const {
   createLinkableContextEntry,
 } = require("./shared-utils");
 const { linkedContextDropMethods } = require("./linked-context-drop-methods");
+const {
+  applyRovingSelection,
+  handleSelectableCollectionNavigation,
+} = require("../../ui/selectable-collection");
 
 function getLinkedContextFilePaths() {
   if (!Array.isArray(this.linkedContextFiles)) this.linkedContextFiles = [];
@@ -213,6 +217,7 @@ function listSlashCommandEntries() {
   }
   skills
     .slice()
+    .filter((skill) => !skill || skill.userInvocable !== false)
     .sort((a, b) => String(a && a.id ? a.id : "").localeCompare(String(b && b.id ? b.id : "")))
     .forEach((skill) => {
       const id = String(skill && skill.id ? skill.id : skill && skill.slug ? skill.slug : "").trim();
@@ -314,6 +319,24 @@ function moveSlashCommandPickerSelection(delta) {
   picker.selectedIndex = Math.max(0, Math.min(maxIndex, Number(picker.selectedIndex || 0) + Number(delta || 0)));
   renderSlashCommandPickerList.call(this);
 }
+function moveSlashCommandPickerSelectionForKey(event, options = {}) {
+  const picker = ensureSlashCommandPickerState.call(this);
+  return handleSelectableCollectionNavigation(event, {
+    index: picker.selectedIndex,
+    length: Array.isArray(picker.filtered) ? picker.filtered.length : 0,
+    onMove: (nextIndex) => {
+      picker.selectedIndex = nextIndex;
+      renderSlashCommandPickerList.call(this);
+      if (options.focus) focusPickerSelectedItem(picker);
+    },
+  });
+}
+function focusPickerSelectedItem(picker) {
+  const selected = picker && picker.listEl
+    ? picker.listEl.querySelector(".oc-context-file-picker-item.is-selected")
+    : null;
+  if (selected && typeof selected.focus === "function") selected.focus();
+}
 function selectSlashCommandPickerEntry(index, options = {}) {
   const picker = ensureSlashCommandPickerState.call(this);
   const item = Array.isArray(picker.filtered) ? picker.filtered[index] : null;
@@ -364,14 +387,20 @@ function renderSlashCommandPickerList() {
     return;
   }
   picker.filtered.forEach((entry, index) => {
-    const item = picker.listEl.createDiv({
+    const isSelected = index === picker.selectedIndex;
+    const item = picker.listEl.createEl("button", {
       cls: "oc-context-file-picker-item oc-slash-command-item",
-      attr: { title: [entry.command, entry.name, entry.description].filter(Boolean).join(" - ") },
+      attr: {
+        type: "button",
+        title: [entry.command, entry.name, entry.description].filter(Boolean).join(" - "),
+        "aria-current": isSelected ? "true" : "false",
+        tabindex: isSelected ? "0" : "-1",
+      },
     });
-    if (index === picker.selectedIndex) item.addClass("is-selected");
-    const textWrap = item.createDiv({ cls: "oc-context-file-picker-item-text" });
-    textWrap.createDiv({ cls: "oc-slash-command-item-command", text: entry.command });
-    const meta = textWrap.createDiv({ cls: "oc-slash-command-item-meta" });
+    if (isSelected) item.addClass("is-selected");
+    const textWrap = item.createSpan({ cls: "oc-context-file-picker-item-text" });
+    textWrap.createSpan({ cls: "oc-slash-command-item-command", text: entry.command });
+    const meta = textWrap.createSpan({ cls: "oc-slash-command-item-meta" });
     if (entry.name) {
       meta.createSpan({ cls: "oc-slash-command-item-name", text: entry.name });
     }
@@ -381,11 +410,7 @@ function renderSlashCommandPickerList() {
     item.addEventListener("mouseenter", () => {
       if (picker.selectedIndex === index) return;
       picker.selectedIndex = index;
-      const previousSelected = picker.listEl ? picker.listEl.querySelector(".oc-slash-command-item.is-selected") : null;
-      if (previousSelected && previousSelected !== item) {
-        previousSelected.classList.remove("is-selected");
-      }
-      item.classList.add("is-selected");
+      applyRovingSelection(picker.listEl.querySelectorAll(".oc-slash-command-item"), index);
     });
     item.addEventListener("mousedown", (event) => {
       event.stopPropagation();
@@ -393,6 +418,9 @@ function renderSlashCommandPickerList() {
     item.addEventListener("click", (event) => {
       event.stopPropagation();
       selectSlashCommandPickerEntry.call(this, index, { close: true, fromMention: true });
+    });
+    item.addEventListener("keydown", (event) => {
+      moveSlashCommandPickerSelectionForKey.call(this, event, { focus: true });
     });
   });
 }
@@ -412,7 +440,10 @@ function renderSlashCommandPicker() {
     picker.rootEl.addEventListener("click", (event) => {
       event.stopPropagation();
     });
-    picker.listEl = picker.rootEl.createDiv({ cls: "oc-context-file-picker-list" });
+    picker.listEl = picker.rootEl.createDiv({
+      cls: "oc-context-file-picker-list",
+      attr: { role: "group", "aria-label": tr(this, "view.command.picker.label", "Command suggestions") },
+    });
   }
   renderSlashCommandPickerList.call(this);
 }
@@ -459,16 +490,7 @@ function syncSlashCommandPickerFromInputMention() {
 function handleSlashCommandInputKeydown(event) {
   const picker = ensureSlashCommandPickerState.call(this);
   if (!picker.visible || picker.mode !== "mention") return false;
-  if (event.key === "ArrowDown") {
-    event.preventDefault();
-    moveSlashCommandPickerSelection.call(this, 1);
-    return true;
-  }
-  if (event.key === "ArrowUp") {
-    event.preventDefault();
-    moveSlashCommandPickerSelection.call(this, -1);
-    return true;
-  }
+  if (moveSlashCommandPickerSelectionForKey.call(this, event)) return true;
   if ((event.key === "Enter" || event.key === "Tab") && !event.isComposing) {
     event.preventDefault();
     if (Array.isArray(picker.filtered) && picker.filtered.length) {
@@ -591,16 +613,7 @@ function handleLinkedContextInputKeydown(event) {
   if (handleSlashCommandInputKeydown.call(this, event)) return true;
   const picker = this.ensureLinkedContextPickerState();
   if (!picker.visible || picker.mode !== "mention") return false;
-  if (event.key === "ArrowDown") {
-    event.preventDefault();
-    this.moveLinkedContextPickerSelection(1);
-    return true;
-  }
-  if (event.key === "ArrowUp") {
-    event.preventDefault();
-    this.moveLinkedContextPickerSelection(-1);
-    return true;
-  }
+  if (moveLinkedContextPickerSelectionForKey.call(this, event)) return true;
   if ((event.key === "Enter" || event.key === "Tab") && !event.isComposing) {
     event.preventDefault();
     if (Array.isArray(picker.filtered) && picker.filtered.length) {
@@ -659,6 +672,18 @@ function moveLinkedContextPickerSelection(delta) {
   picker.selectedIndex = Math.max(0, Math.min(maxIndex, Number(picker.selectedIndex || 0) + Number(delta || 0)));
   this.renderLinkedContextFilePickerList();
 }
+function moveLinkedContextPickerSelectionForKey(event, options = {}) {
+  const picker = this.ensureLinkedContextPickerState();
+  return handleSelectableCollectionNavigation(event, {
+    index: picker.selectedIndex,
+    length: Array.isArray(picker.filtered) ? picker.filtered.length : 0,
+    onMove: (nextIndex) => {
+      picker.selectedIndex = nextIndex;
+      this.renderLinkedContextFilePickerList();
+      if (options.focus) focusPickerSelectedItem(picker);
+    },
+  });
+}
 function selectLinkedContextPickerEntry(index, options = {}) {
   const picker = this.ensureLinkedContextPickerState();
   const item = Array.isArray(picker.filtered) ? picker.filtered[index] : null;
@@ -710,26 +735,30 @@ function renderLinkedContextFilePickerList() {
   }
   const linkedSet = new Set(this.getLinkedContextFilePaths());
   picker.filtered.forEach((entry, index) => {
-    const item = picker.listEl.createDiv({
+    const isSelected = index === picker.selectedIndex;
+    const isLinked = linkedSet.has(entry.path);
+    const item = picker.listEl.createEl("button", {
       cls: "oc-context-file-picker-item",
-      attr: { title: entry.path },
+      attr: {
+        type: "button",
+        title: entry.path,
+        "aria-pressed": isLinked ? "true" : "false",
+        "aria-current": isSelected ? "true" : "false",
+        tabindex: isSelected ? "0" : "-1",
+      },
     });
-    if (index === picker.selectedIndex) item.addClass("is-selected");
-    if (linkedSet.has(entry.path)) item.addClass("is-linked");
-    const textWrap = item.createDiv({ cls: "oc-context-file-picker-item-text" });
-    textWrap.createDiv({ cls: "oc-context-file-picker-item-name", text: entry.name || displayNameFromPath(entry.path) || entry.path });
-    textWrap.createDiv({ cls: "oc-context-file-picker-item-path", text: entry.path });
-    if (linkedSet.has(entry.path)) {
-      item.createDiv({ cls: "oc-context-file-picker-item-meta", text: tr(this, "view.context.picker.linked", "Linked") });
+    if (isSelected) item.addClass("is-selected");
+    if (isLinked) item.addClass("is-linked");
+    const textWrap = item.createSpan({ cls: "oc-context-file-picker-item-text" });
+    textWrap.createSpan({ cls: "oc-context-file-picker-item-name", text: entry.name || displayNameFromPath(entry.path) || entry.path });
+    textWrap.createSpan({ cls: "oc-context-file-picker-item-path", text: entry.path });
+    if (isLinked) {
+      item.createSpan({ cls: "oc-context-file-picker-item-meta", text: tr(this, "view.context.picker.linked", "Linked") });
     }
     item.addEventListener("mouseenter", () => {
       if (picker.selectedIndex === index) return;
       picker.selectedIndex = index;
-      const previousSelected = picker.listEl ? picker.listEl.querySelector(".oc-context-file-picker-item.is-selected") : null;
-      if (previousSelected && previousSelected !== item) {
-        previousSelected.classList.remove("is-selected");
-      }
-      item.classList.add("is-selected");
+      applyRovingSelection(picker.listEl.querySelectorAll(".oc-context-file-picker-item"), index);
     });
     item.addEventListener("mousedown", (event) => {
       event.stopPropagation();
@@ -737,6 +766,9 @@ function renderLinkedContextFilePickerList() {
     item.addEventListener("click", (event) => {
       event.stopPropagation();
       this.selectLinkedContextPickerEntry(index, { close: true, fromMention: picker.mode === "mention" });
+    });
+    item.addEventListener("keydown", (event) => {
+      moveLinkedContextPickerSelectionForKey.call(this, event, { focus: true });
     });
   });
 }
@@ -761,6 +793,7 @@ function renderLinkedContextFilePicker() {
       attr: {
         type: "text",
         placeholder: tr(this, "view.context.picker.search", "Search Obsidian files..."),
+        "aria-label": tr(this, "view.context.picker.search", "Search Obsidian files..."),
       },
     });
     picker.searchEl.addEventListener("input", () => {
@@ -769,16 +802,7 @@ function renderLinkedContextFilePicker() {
       this.renderLinkedContextFilePickerList();
     });
     picker.searchEl.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        this.moveLinkedContextPickerSelection(1);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        this.moveLinkedContextPickerSelection(-1);
-        return;
-      }
+      if (moveLinkedContextPickerSelectionForKey.call(this, event)) return;
       if ((event.key === "Enter" || event.key === "Tab") && !event.isComposing) {
         event.preventDefault();
         this.selectLinkedContextPickerEntry(picker.selectedIndex, { close: true, fromMention: picker.mode === "mention" });
@@ -789,7 +813,10 @@ function renderLinkedContextFilePicker() {
         this.closeLinkedContextFilePicker({ focusInput: true });
       }
     });
-    picker.listEl = picker.rootEl.createDiv({ cls: "oc-context-file-picker-list" });
+    picker.listEl = picker.rootEl.createDiv({
+      cls: "oc-context-file-picker-list",
+      attr: { role: "group", "aria-label": tr(this, "view.context.picker.label", "Vault files") },
+    });
   }
   const mentionMode = picker.mode === "mention";
   if (picker.rootEl) {

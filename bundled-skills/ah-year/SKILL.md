@@ -1,6 +1,10 @@
 ---
 name: ah-year
 description: Use when 需要在年末整合全年月记与年度计划执行，完成年度复盘并确认新一年的方向与计划时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

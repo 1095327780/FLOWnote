@@ -11,6 +11,8 @@
 //   <skillsDir>/<slug>/scripts/     ← optional
 
 const { parseFrontmatter, parseToolList } = require("../agent/skill-registry");
+const { parseFlowNoteCompletionMetadata } = require("../skill-frontmatter");
+const { getEmbeddedSkillDocument } = require("../embedded-skill-documents");
 const {
   EMBEDDED_BUNDLED_SKILLS_FILES,
   isBundledSkillSlug,
@@ -108,6 +110,18 @@ function parentPath(path) {
   return parts.join("/");
 }
 
+function frontmatterBoolean(frontmatter, keys, fallback) {
+  for (const key of keys) {
+    const value = frontmatter && frontmatter[key];
+    if (value === undefined || value === null || value === "") continue;
+    if (value === true || value === false) return value;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return fallback;
+}
+
 /**
  * Validate a candidate slug for a new skill folder. Allows lowercase
  * letters, digits, hyphens. Frontmatter `name` can be free-form; the
@@ -158,7 +172,7 @@ async function listSkillsUnderRoot(plugin, root) {
     if (!exists) continue;
     try {
       const raw = await adapter.read(filePath);
-      const { frontmatter, body } = parseFrontmatter(raw);
+      const { frontmatter, body, errorCode: frontmatterError } = parseFrontmatter(raw);
       const slug = folder.split("/").pop() || folder;
       if (isBundledSkillConflictCopySlug(slug)) continue;
       const name = String(frontmatter.name || slug).trim();
@@ -172,6 +186,16 @@ async function listSkillsUnderRoot(plugin, root) {
           ? String(frontmatter.when_to_use || frontmatter["when-to-use"] || frontmatter.whenToUse)
           : undefined,
         allowedTools: parseToolList(frontmatter["allowed-tools"] || frontmatter.allowed_tools || frontmatter.allowedTools),
+        userInvocable: frontmatterBoolean(frontmatter, ["user-invocable", "user_invocable", "userInvocable"], true),
+        disableModelInvocation: frontmatterBoolean(
+          frontmatter,
+          ["disable-model-invocation", "disable_model_invocation", "disableModelInvocation"],
+          false,
+        ),
+        metadata: frontmatter.metadata && typeof frontmatter.metadata === "object" && !Array.isArray(frontmatter.metadata)
+          ? frontmatter.metadata
+          : undefined,
+        completionPolicy: parseFlowNoteCompletionMetadata(frontmatter, { frontmatterError }),
         body: body || "",
         dirPath: folder,
         filePath,
@@ -238,8 +262,9 @@ function listEmbeddedSkillDocs() {
     if (!slug || seen.has(slug)) continue;
     seen.add(slug);
     try {
-      const raw = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
-      const { frontmatter, body } = parseFrontmatter(raw);
+      const document = getEmbeddedSkillDocument(filePath);
+      if (!document) continue;
+      const { frontmatter, body } = document;
       out.push({
         slug,
         name: String(frontmatter.name || slug).trim(),
@@ -248,6 +273,12 @@ function listEmbeddedSkillDocs() {
           ? String(frontmatter.when_to_use || frontmatter["when-to-use"] || frontmatter.whenToUse)
           : undefined,
         allowedTools: parseToolList(frontmatter["allowed-tools"] || frontmatter.allowed_tools || frontmatter.allowedTools),
+        userInvocable: frontmatterBoolean(frontmatter, ["user-invocable", "user_invocable", "userInvocable"], true),
+        disableModelInvocation: frontmatterBoolean(
+          frontmatter,
+          ["disable-model-invocation", "disable_model_invocation", "disableModelInvocation"],
+          false,
+        ),
         body: body || "",
         dirPath: `<embedded>/${slug}`,
         filePath: `<embedded>/${slug}/SKILL.md`,
@@ -845,7 +876,10 @@ async function refreshSkillCaches(plugin) {
     plugin.__flownoteSkillCache = null;
     // Re-warm the mobile slash-command list. Best-effort.
     if (plugin.app && plugin.app.vault && plugin.app.vault.adapter) {
-      try { plugin.__flownoteMobileSkillList = await listSkills(plugin); } catch { /* ignore */ }
+      try {
+        const { mergeAuthoritativeSkillCatalog } = require("../skill-catalog");
+        plugin.__flownoteMobileSkillList = mergeAuthoritativeSkillCatalog(await listSkills(plugin));
+      } catch { /* ignore */ }
     }
   }
   // Also reload the legacy SkillService (slash-command source).

@@ -164,6 +164,22 @@ test("vault_daily append onto existing note adds a newline if needed", async () 
   assert.equal(vault._files.get("2026-05-15.md"), "first line\nsecond line");
 });
 
+test("vault_daily append verifies the exact post-write text, not an old matching substring", async () => {
+  const vault = fakeVault({ "2026-05-15.md": "SENTINEL already existed" });
+  vault.modify = async () => {}; // Simulate an adapter that resolves without committing.
+  const tool = createVaultDailyTool({
+    app: fakeApp({ vault }),
+    now: () => new Date(2026, 4, 15, 12, 0, 0),
+  });
+  const input = { mode: "append", content: "SENTINEL" };
+
+  await collect(tool, input);
+  const verification = await tool.verifyEffect(input);
+
+  assert.equal(verification.verified, false);
+  assert.equal(verification.outcome, "postcondition_failed");
+});
+
 test("vault_daily create refuses when note exists", async () => {
   const vault = fakeVault({ "2026-05-15.md": "exists" });
   const tool = createVaultDailyTool({

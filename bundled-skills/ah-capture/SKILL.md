@@ -1,6 +1,10 @@
 ---
 name: ah-capture
 description: Use when 需要在白天快速补充今日日记内容（记录、任务新增、任务完成）并以最低交互成本完成写入时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

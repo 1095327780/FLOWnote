@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { parseFrontmatter } = require("../../runtime/agent/skill-registry");
+const { parseFlowNoteCompletionMetadata } = require("../../runtime/skill-frontmatter");
 
 const BUNDLED_DIR = path.join(__dirname, "..", "..", "bundled-skills");
 const ALLOWED_ENGLISH_SKILL_PLACEHOLDERS = new Set([
@@ -137,6 +138,30 @@ test("every bundled ah skill has an English SKILL.en.md variant", () => {
         `${skill.slug}: unsupported English placeholder {{${placeholder}}}`,
       );
     }
+  }
+});
+
+test("bundled ah completion policies are complete and locale-synchronized", () => {
+  const effectSkills = new Set([
+    "ah-archive", "ah-capture", "ah-card", "ah-inbox", "ah-init", "ah-legacy",
+    "ah-memory", "ah-month", "ah-note", "ah-project", "ah-read", "ah-review", "ah-week", "ah-year",
+  ]);
+  const answerSkills = new Set(["ah", "ah-think"]);
+  for (const skill of skills.filter((item) => effectSkills.has(item.slug) || answerSkills.has(item.slug))) {
+    const english = loadSkillVariant(skill.dir, "SKILL.en.md");
+    const sourcePolicy = parseFlowNoteCompletionMetadata(skill.frontmatter);
+    const englishPolicy = parseFlowNoteCompletionMetadata(english.frontmatter);
+    const expectedMode = effectSkills.has(skill.slug) ? "effect" : "answer";
+    assert.deepEqual(sourcePolicy, englishPolicy, `${skill.slug}: localized completion policy drifted`);
+    assert.equal(sourcePolicy.state, "declared", `${skill.slug}: missing completion declaration`);
+    assert.equal(sourcePolicy.mode, expectedMode, `${skill.slug}: wrong completion mode`);
+  }
+  for (const skill of skills.filter((item) => !effectSkills.has(item.slug) && !answerSkills.has(item.slug))) {
+    assert.equal(
+      parseFlowNoteCompletionMetadata(skill.frontmatter).state,
+      "legacy_unclassified",
+      `${skill.slug}: third-party compatibility skill must remain unclassified`,
+    );
   }
 });
 

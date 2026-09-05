@@ -61,6 +61,20 @@ function createActionButton(parent, icon, label, onClick, cls = "") {
   return button;
 }
 
+function bindKeyboardActivation(element, callback, label = "") {
+  if (!element || typeof callback !== "function") return;
+  element.setAttr("role", "button");
+  element.setAttr("tabindex", "0");
+  if (label) element.setAttr("aria-label", label);
+  element.addEventListener("click", callback);
+  element.addEventListener("keydown", (event) => {
+    if (event.target !== element || event.isComposing) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    callback(event);
+  });
+}
+
 function homeText(view, key, fallback, params = {}) {
   return tr(view, `view.home.${key}`, fallback, params);
 }
@@ -177,7 +191,7 @@ function resolveVaultFile(view, fileOrPath) {
 async function openVaultFile(view, fileOrPath) {
   const file = resolveVaultFile(view, fileOrPath);
   if (!file) {
-    new Notice(homeText(view, tr(view, "view.home.fileMissing", "文件不存在"), "File not found"));
+    new Notice(homeText(view, "fileMissing", "文件不存在"));
     return;
   }
   const workspace = view.app && view.app.workspace;
@@ -187,7 +201,7 @@ async function openVaultFile(view, fileOrPath) {
       ? workspace.getRightLeaf(false)
       : null;
   if (!leaf || typeof leaf.openFile !== "function") {
-    new Notice(homeText(view, tr(view, "view.home.openFileUnsupported", "当前设备暂不支持从首页打开文件"), "Opening files from Home is not supported on this device"));
+    new Notice(homeText(view, "openFileUnsupported", "当前设备暂不支持从首页打开文件"));
     return;
   }
   await leaf.openFile(file);
@@ -428,23 +442,18 @@ function renderTodayTasks(view, parent, today, taskItems) {
   }
 
   taskItems.forEach((task) => {
-    const row = list.createDiv({
+    const row = list.createEl("button", {
       cls: `oc-home-task-row ${task.done ? "is-done" : ""}`.trim(),
+      attr: { type: "button" },
     });
-    row.setAttr("tabindex", "0");
-    row.setAttr("role", "checkbox");
-    row.setAttr("aria-checked", task.done ? "true" : "false");
-    row.setAttr("title", task.done ? homeText(view, "taskMarkTodo", "标记为未完成") : homeText(view, "taskMarkDone", "标记为已完成"));
+    const taskAction = task.done ? homeText(view, "taskMarkTodo", "标记为未完成") : homeText(view, "taskMarkDone", "标记为已完成");
+    row.setAttr("aria-pressed", task.done ? "true" : "false");
+    row.setAttr("title", taskAction);
     const checkbox = row.createSpan({ cls: "oc-home-task-checkbox", attr: { "aria-hidden": "true" } });
     if (task.done) setButtonIcon(checkbox, "check");
     const text = row.createSpan({ cls: "oc-home-task-text" });
     renderInlineTaskText(text, task.text);
     row.addEventListener("click", () => {
-      void toggleTodayTask(view, today, task);
-    });
-    row.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
       void toggleTodayTask(view, today, task);
     });
   });
@@ -480,19 +489,26 @@ function renderTodayCard(view, parent, today) {
   const tasks = summary.tasks || { open: 0, done: 0, total: 0, completionRate: 0 };
   const taskItems = Array.isArray(summary.taskItems) ? summary.taskItems : [];
   const completionRate = Math.max(0, Math.min(100, Number(tasks.completionRate || 0)));
+  card.toggleClass("has-tasks", taskItems.length > 0);
 
   const focus = card.createDiv({ cls: "oc-home-focus" });
   focus.createDiv({ cls: "oc-home-kicker", text: homeText(view, "focusTitle", "今日聚焦") });
   focus.createDiv({ cls: "oc-home-focus-text", text: focusText });
 
-  const progress = card.createDiv({ cls: "oc-home-today-progress" });
-  progress.setAttr("aria-label", homeText(view, "todayProgressAria", "今日待办完成率 {rate}%", { rate: completionRate }));
-  const progressTrack = progress.createDiv({ cls: "oc-home-today-progress-track" });
-  const progressFill = progressTrack.createDiv({ cls: "oc-home-today-progress-fill" });
-  progressFill.style.width = `${completionRate}%`;
-  progress.createDiv({ cls: "oc-home-today-progress-value", text: `${completionRate}%` });
-
-  renderTodayTasks(view, card, today, taskItems);
+  if (taskItems.length > 0) {
+    const progress = card.createDiv({ cls: "oc-home-today-progress" });
+    progress.setAttr("aria-label", homeText(view, "todayProgressAria", "今日待办完成率 {rate}%", { rate: completionRate }));
+    const progressTrack = progress.createDiv({ cls: "oc-home-today-progress-track" });
+    const progressFill = progressTrack.createDiv({ cls: "oc-home-today-progress-fill" });
+    progressFill.style.width = `${completionRate}%`;
+    progress.createDiv({ cls: "oc-home-today-progress-value", text: `${completionRate}%` });
+    renderTodayTasks(view, card, today, taskItems);
+  } else {
+    card.createDiv({
+      cls: "oc-home-task-empty-inline",
+      text: homeText(view, "taskEmpty", "今天还没有待办。"),
+    });
+  }
 
   const actions = card.createDiv({ cls: "oc-home-card-actions" });
   createActionButton(actions, "file-text", homeText(view, "openDaily", "打开日记"), () => openVaultFile(view, today.file), "is-primary");
@@ -509,14 +525,15 @@ function renderProjectCard(view, parent, project) {
     cls: `oc-home-project ${/高|high/i.test(String(project.priority || "")) ? "is-high-priority" : ""}`.trim(),
   });
   item.style.setProperty("--home-project-accent", projectAccent(project));
-  const title = item.createDiv({ cls: "oc-home-project-title", text: project.title || homeText(view, "unnamedProject", "未命名项目") });
+  const projectMain = item.createDiv({ cls: "oc-home-project-main" });
+  const title = projectMain.createDiv({ cls: "oc-home-project-title", text: project.title || homeText(view, "unnamedProject", "未命名项目") });
   title.setAttr("title", project.title || "");
-  const tags = item.createDiv({ cls: "oc-home-project-tags" });
+  const tags = projectMain.createDiv({ cls: "oc-home-project-tags" });
   const tagValues = [project.domain, project.category].map((tag) => String(tag || "").trim()).filter(Boolean);
   [...new Set(tagValues)].slice(0, 2).forEach((tag) => tags.createSpan({ cls: "oc-home-project-tag", text: tag }));
   tags.createDiv({ cls: `oc-home-project-status ${project.isActive ? "is-active" : ""}`.trim(), text: project.status || homeText(view, "defaultProjectStatus", "进行中") });
   if (project.priority) tags.createDiv({ cls: `oc-home-pill ${/高|high/i.test(project.priority) ? "is-hot" : ""}`, text: project.priority });
-  const chatBtn = tags.createEl("button", { cls: "oc-home-project-chat" });
+  const chatBtn = item.createEl("button", { cls: "oc-home-project-chat" });
   chatBtn.setAttr("type", "button");
   chatBtn.setAttr("aria-label", homeText(view, "chatProject", "聊这个项目"));
   chatBtn.setAttr("title", homeText(view, "chatProject", "聊这个项目"));
@@ -532,18 +549,22 @@ function renderProjectCard(view, parent, project) {
       { linkedFiles: [project.file] },
     );
   });
-  const bar = item.createDiv({ cls: "oc-home-progress" });
+  const bar = projectMain.createDiv({ cls: "oc-home-progress" });
   const completionRate = Math.max(0, Math.min(100, project.tasks.completionRate || 0));
   const fill = bar.createDiv({ cls: "oc-home-progress-fill" });
   fill.style.width = `${completionRate}%`;
   bar.createSpan({ cls: "oc-home-progress-label", text: `${completionRate}%` });
-  const progressMeta = item.createDiv({ cls: "oc-home-project-progress-meta" });
+  const progressMeta = projectMain.createDiv({ cls: "oc-home-project-progress-meta" });
   progressMeta.createSpan({ text: homeText(view, "projectProgressMeta", "待办 {open} · 完成 {done}", {
     open: project.tasks.open,
     done: project.tasks.done,
   }) });
   if (project.dueDate) progressMeta.createSpan({ text: project.dueDate });
-  item.addEventListener("click", () => openVaultFile(view, project.file));
+  bindKeyboardActivation(
+    projectMain,
+    () => openVaultFile(view, project.file),
+    project.title || homeText(view, "unnamedProject", "未命名项目"),
+  );
 }
 
 function heatmapLevel(cell, maxCount) {
@@ -625,14 +646,24 @@ function renderActivityHeatmap(view, parent, heatmap) {
   const maxCount = Number(heatmap.maxCount || 0);
   (Array.isArray(heatmap.cells) ? heatmap.cells : []).forEach((cell) => {
     const level = heatmapLevel(cell, maxCount);
-    const square = grid.createDiv({ cls: `oc-home-heatmap-cell is-level-${level}` });
     const cellLabel = homeText(view, "heatmapCell", "{date} · {count} 条记录", { date: cell.date, count: cell.count || 0 });
-    square.setAttr("title", cellLabel);
-    square.setAttr("aria-label", cellLabel);
+    const cellClass = `oc-home-heatmap-cell is-level-${level}`;
     if (cell.file) {
-      square.addClass("is-clickable");
+      const square = grid.createEl("button", {
+        cls: `${cellClass} is-clickable`,
+        attr: {
+          type: "button",
+          title: cellLabel,
+          "aria-label": cellLabel,
+        },
+      });
       square.addEventListener("click", () => openVaultFile(view, cell.file));
+      return;
     }
+    grid.createSpan({
+      cls: cellClass,
+      attr: { title: cellLabel, "aria-hidden": "true" },
+    });
   });
   const footer = card.createDiv({ cls: "oc-home-heatmap-footer" });
   footer.createSpan({ text: homeText(view, "heatmapFooter", "{activeDays} 天有记录 · {startDate} 至 {endDate}", {
@@ -662,7 +693,7 @@ function renderRecentItem(view, parent, item) {
     type: localizeRecentType(view, item.type),
     time: formatRelativeTime(item.mtime, locale),
   }) });
-  row.addEventListener("click", () => openVaultFile(view, item.file));
+  bindKeyboardActivation(row, () => openVaultFile(view, item.file), item.title || item.path);
 }
 
 function renderQuickActions(view, parent, options = {}) {

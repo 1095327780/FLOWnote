@@ -34,13 +34,45 @@ test("web_request sends POST JSON with substituted secret headers", async () => 
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].headers.Authorization, "Bearer wrk-test-secret");
   assert.equal(calls[0].headers["Content-Type"], "application/json");
+  assert.match(calls[0].headers["Idempotency-Key"], /^flownote-[a-f0-9]{64}$/);
   assert.deepEqual(JSON.parse(calls[0].body), {
     api_name: "/book/search",
     skill_version: "1.0.3",
   });
   assert.equal(result[result.length - 1].isError, false);
+  assert.equal(result[result.length - 1].code, "accepted_unverified");
   assert.match(result[result.length - 1].content, /"ok":true/);
   assert.doesNotMatch(result[result.length - 1].content, /wrk-test-secret/);
+});
+
+test("web_request suppresses a replay after an ambiguous external mutation and reuses a durable attempt identity", async () => {
+  let calls = 0;
+  let firstIdempotencyKey = "";
+  const effectAttempts = [];
+  const tool = createWebRequestTool({
+    requestUrl: async (request) => {
+      calls += 1;
+      firstIdempotencyKey = request.headers["Idempotency-Key"];
+      // Simulate: the server accepted the write, then the connection died.
+      throw new Error("connection closed after commit");
+    },
+  });
+  const input = {
+    url: "https://api.example.com/cards",
+    method: "POST",
+    json: { title: "PRIVATE_SENTINEL" },
+  };
+
+  const first = await collect(tool.execute(input, { effectAttempts }));
+  const replay = await collect(tool.execute({ ...input }, { effectAttempts }));
+
+  assert.equal(calls, 1);
+  assert.match(firstIdempotencyKey, /^flownote-[a-f0-9]{64}$/);
+  assert.equal(first.at(-1).code, "unknown_after_send");
+  assert.equal(replay.at(-1).code, "duplicate_effect_suppressed");
+  assert.equal(effectAttempts.length, 1);
+  assert.equal(effectAttempts[0].state, "unknown_after_send");
+  assert.equal(JSON.stringify(effectAttempts).includes("PRIVATE_SENTINEL"), false);
 });
 
 test("web_request reports missing secret placeholders before sending", async () => {

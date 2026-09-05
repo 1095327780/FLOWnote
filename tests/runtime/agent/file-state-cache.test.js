@@ -51,3 +51,33 @@ test("FileStateCache: silently ignores invalid inputs", () => {
   c.recordWrite(undefined, "y");
   assert.equal(c.size(), 0);
 });
+
+test("FileStateCache: snapshot stores fingerprints without duplicating file contents", () => {
+  const c = new FileStateCache();
+  c.recordRead("a.md", "hello");
+  c.recordWrite("b.md", "world");
+  const snapshot = c.snapshot();
+
+  assert.equal(snapshot.version, 1);
+  assert.deepEqual(snapshot.entries.map((entry) => entry.path), ["a.md", "b.md"]);
+  assert.equal(snapshot.entries[0].content, undefined);
+  assert.equal(typeof snapshot.entries[0].fingerprint, "string");
+  assert.equal(snapshot.entries[1].writtenInTurn, true);
+});
+
+test("FileStateCache: restoreSnapshot hydrates only files that have not drifted", async () => {
+  const before = new FileStateCache();
+  before.recordRead("same.md", "stable");
+  before.recordWrite("changed.md", "old");
+  const snapshot = before.snapshot();
+  const after = new FileStateCache();
+
+  const result = await after.restoreSnapshot(snapshot, async (path) => (
+    path === "same.md" ? "stable" : "external edit"
+  ));
+
+  assert.deepEqual(result.restoredPaths, ["same.md"]);
+  assert.deepEqual(result.driftedPaths, ["changed.md"]);
+  assert.equal(after.has("same.md"), true);
+  assert.equal(after.has("changed.md"), false);
+});

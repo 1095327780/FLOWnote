@@ -1,6 +1,10 @@
 ---
 name: ah-review
-description: Use for evening daily review: compare today's execution with yesterday's plan, process records, route unfinished tasks, and update memory state.
+description: "Use for evening daily review: compare today's execution with yesterday's plan, process records, route unfinished tasks, and update memory state."
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Daily Review

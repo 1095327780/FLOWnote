@@ -1,6 +1,10 @@
 ---
 name: ah-think
 description: Use when 需要在阅读、学习、做卡片笔记或决策时做更深层思考，包括澄清概念、检验论证、追溯根因、比较方案和提炼可迁移洞见。
+metadata:
+  flownote:
+    completion:
+      mode: answer
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

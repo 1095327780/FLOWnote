@@ -13,6 +13,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { expectedCachedText, verifyTextEffect, throwIfToolAborted } = require("../vault-effect-verifiers");
 const { resolveReadablePath, resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
@@ -85,6 +86,15 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
     name: "vault_edit",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "vault_mutation",
+      risk: input && input.replace_all ? "high" : "medium",
+      concurrency: "serial",
+      presentation: "edit",
+      targets: input && typeof input.path === "string"
+        ? [resolveWritablePath(normalize(input.path))]
+        : [],
+    }),
     isReadOnly: () => false,
     isDestructive: () => false, // edits are reversible by re-editing; overwrite is what we call "destructive"
     isConcurrencySafe: () => false,
@@ -151,6 +161,12 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       return input && typeof input.path === "string" ? input.path : "";
     },
 
+    async verifyEffect(input, _outcome, ctx) {
+      const path = resolveWritablePath(normalize(input.path));
+      const expected = expectedCachedText(ctx, path);
+      return verifyTextEffect({ vault, path, expected: expected === null ? undefined : expected });
+    },
+
     async *execute(input, ctx) {
       const normalized = resolveReadablePath(vault, normalize(input.path));
       const file = vault.getFileByPath(normalized);
@@ -201,6 +217,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       }
 
       yield { type: "progress", message: `edit → ${normalized}` };
+      throwIfToolAborted(ctx);
       await vault.modify(file, updated);
       if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordWrite === "function") {
         ctx.fileStateCache.recordWrite(normalized, updated);

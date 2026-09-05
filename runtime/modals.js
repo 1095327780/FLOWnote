@@ -1,6 +1,15 @@
 const { Modal: ObsidianModal } = require("obsidian");
 const { interpolateTemplate } = require("./i18n-runtime");
 const { describePermissionAction } = require("./permission-action-description");
+const { handleSelectableCollectionNavigation } = require("./ui/selectable-collection");
+const { applyResponsiveModalSurface } = require("./ui/responsive-modal");
+
+let modalControlSequence = 0;
+
+function nextModalControlId(prefix) {
+  modalControlSequence += 1;
+  return `oc-${String(prefix || "control")}-${modalControlSequence}`;
+}
 
 const Modal = ObsidianModal || class {
   constructor(app) {
@@ -43,6 +52,7 @@ class DiagnosticsModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-diagnostics-modal");
     contentEl.createEl("h2", { text: tr(this.t, "modals.diagnostics.title", "FLOWnote Diagnostics") });
 
@@ -102,6 +112,7 @@ class PermissionRequestModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-perm-modal");
 
     // Header — short, plain-language framing. NO "FLOWnote Permission Request"
@@ -193,6 +204,7 @@ class SkillEditorModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-skill-editor-modal");
 
     const isEdit = !!this.initial;
@@ -221,7 +233,7 @@ class SkillEditorModal extends Modal {
     const descInput = this._field(contentEl, {
       label: tr(this.t, "modals.skillEditor.description", "技能描述"),
       hint: tr(this.t, "modals.skillEditor.descriptionHint",
-        "一两句话告诉 AI 这个技能干啥、什么时候用。AI 会在系统提示里看到这一段。"),
+        "用一两句话说明这个技能能做什么、何时应由 FLOWnote 使用。"),
       value: isEdit ? this.initial.description : "",
       multiline: true,
       rows: 3,
@@ -242,14 +254,21 @@ class SkillEditorModal extends Modal {
         ? this.initial.allowedTools.join(", ")
         : "",
     });
-    const bodyLabel = contentEl.createDiv({ cls: "oc-skill-editor-field-label" });
-    bodyLabel.setText(tr(this.t, "modals.skillEditor.body", "技能正文（Markdown）"));
+    const bodyId = nextModalControlId("skill-body");
+    contentEl.createEl("label", {
+      cls: "oc-skill-editor-field-label",
+      text: tr(this.t, "modals.skillEditor.body", "技能正文（Markdown）"),
+      attr: { for: bodyId },
+    });
     contentEl.createDiv({
       cls: "oc-skill-editor-field-hint",
       text: tr(this.t, "modals.skillEditor.bodyHint",
         "AI 调用这个技能时会读到这部分。写清楚工作流、参数、注意事项。"),
     });
-    const bodyArea = contentEl.createEl("textarea", { cls: "oc-skill-editor-body" });
+    const bodyArea = contentEl.createEl("textarea", {
+      cls: "oc-skill-editor-body",
+      attr: { id: bodyId },
+    });
     bodyArea.rows = 16;
     bodyArea.value = isEdit ? this.initial.body : "";
 
@@ -280,17 +299,27 @@ class SkillEditorModal extends Modal {
   }
 
   _field(container, { label, hint, value, multiline, rows, disabled }) {
-    const lab = container.createDiv({ cls: "oc-skill-editor-field-label" });
-    lab.setText(label);
+    const controlId = nextModalControlId("skill-field");
+    container.createEl("label", {
+      cls: "oc-skill-editor-field-label",
+      text: label,
+      attr: { for: controlId },
+    });
     if (hint) {
       container.createDiv({ cls: "oc-skill-editor-field-hint", text: hint });
     }
     let input;
     if (multiline) {
-      input = container.createEl("textarea", { cls: "oc-skill-editor-input" });
+      input = container.createEl("textarea", {
+        cls: "oc-skill-editor-input",
+        attr: { id: controlId },
+      });
       input.rows = rows || 3;
     } else {
-      input = container.createEl("input", { cls: "oc-skill-editor-input", attr: { type: "text" } });
+      input = container.createEl("input", {
+        cls: "oc-skill-editor-input",
+        attr: { type: "text", id: controlId },
+      });
     }
     if (disabled) input.disabled = true;
     input.value = value || "";
@@ -328,13 +357,26 @@ class AskUserQuestionModal extends Modal {
     this.close();
   }
 
+  isQuestionAnswered(index) {
+    const st = this.state[index];
+    if (!st) return false;
+    return st.selectedLabels.size > 0 || (st.otherChecked && st.otherText.trim().length > 0);
+  }
+
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-ask-modal");
     contentEl.createEl("h2", { text: tr(this.t, "modals.ask.title", "FLOWnote 想问你") });
 
     const questions = Array.isArray(this.payload.questions) ? this.payload.questions : [];
+    let okBtn = null;
+    const refreshSubmitState = () => {
+      if (!okBtn) return;
+      okBtn.disabled = questions.length === 0 || questions.some((_q, index) => !this.isQuestionAnswered(index));
+    };
+
     questions.forEach((q, qIdx) => {
       const block = contentEl.createDiv({ cls: "oc-ask-question" });
       block.createEl("h3", { text: q.question || "" });
@@ -362,7 +404,9 @@ class AskUserQuestionModal extends Modal {
           } else {
             st.selectedLabels.clear();
             if (input.checked) st.selectedLabels.add(opt.label);
+            st.otherChecked = false;
           }
+          refreshSubmitState();
         });
       });
 
@@ -383,9 +427,11 @@ class AskUserQuestionModal extends Modal {
         if (!isMulti && otherInput.checked) {
           st.selectedLabels.clear();
         }
+        refreshSubmitState();
       });
       textInput.addEventListener("input", () => {
         this.state[qIdx].otherText = String(textInput.value || "");
+        refreshSubmitState();
       });
     });
 
@@ -394,12 +440,14 @@ class AskUserQuestionModal extends Modal {
       cls: "mod-muted",
       text: tr(this.t, "modals.ask.dismiss", "跳过"),
     });
-    const okBtn = actions.createEl("button", {
+    okBtn = actions.createEl("button", {
       cls: "mod-cta",
       text: tr(this.t, "modals.ask.submit", "提交"),
     });
+    refreshSubmitState();
     cancelBtn.addEventListener("click", () => this.resolveAndClose({ dismissed: true }));
     okBtn.addEventListener("click", () => {
+      if (questions.length === 0 || questions.some((_q, index) => !this.isQuestionAnswered(index))) return;
       const answers = {};
       questions.forEach((q, qIdx) => {
         const st = this.state[qIdx];
@@ -436,6 +484,7 @@ class PromptAppendModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-prompt-modal");
     contentEl.createEl("h2", { text: tr(this.t, "modals.append.title", "Model Requested Additional Input") });
     contentEl.createDiv({
@@ -476,11 +525,13 @@ class ModelSelectorModal extends Modal {
     this.options = options || {};
     this.filterText = "";
     this.listEl = null;
+    this.selectedIndex = 0;
   }
 
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-model-modal");
 
     const tFn = this.options && typeof this.options.t === "function" ? this.options.t : null;
@@ -492,11 +543,19 @@ class ModelSelectorModal extends Modal {
 
     const search = contentEl.createEl("input", {
       cls: "oc-model-search",
-      attr: { type: "text", placeholder: tr(tFn, "modals.model.search", "Search provider/model...") },
+      attr: {
+        type: "text",
+        placeholder: tr(tFn, "modals.model.search", "Search provider/model..."),
+        "aria-label": tr(tFn, "modals.model.search", "Search provider/model..."),
+      },
     });
     search.addEventListener("input", () => {
       this.filterText = String(search.value || "").trim().toLowerCase();
+      this.selectedIndex = 0;
       this.renderList();
+    });
+    search.addEventListener("keydown", (event) => {
+      this.moveSelectionForKey(event, { focus: true });
     });
 
     const actions = contentEl.createDiv({ cls: "oc-model-modal-actions" });
@@ -521,19 +580,45 @@ class ModelSelectorModal extends Modal {
       this.close();
     });
 
-    this.listEl = contentEl.createDiv({ cls: "oc-model-list" });
+    this.listEl = contentEl.createDiv({
+      cls: "oc-model-list",
+      attr: { role: "group", "aria-label": tr(tFn, "modals.model.title", "Select Model") },
+    });
+    const currentIndex = this.getFilteredModels().indexOf(this.options.currentModel);
+    if (currentIndex >= 0) this.selectedIndex = currentIndex;
     this.renderList();
+  }
+
+  getFilteredModels() {
+    const models = Array.isArray(this.options.models) ? this.options.models : [];
+    return models.filter((item) => {
+      if (!this.filterText) return true;
+      return String(item || "").toLowerCase().includes(this.filterText);
+    });
+  }
+
+  moveSelectionForKey(event, options = {}) {
+    const models = this.getFilteredModels();
+    return handleSelectableCollectionNavigation(event, {
+      index: this.selectedIndex,
+      length: models.length,
+      onMove: (nextIndex) => {
+        this.selectedIndex = nextIndex;
+        this.renderList();
+        if (options.focus && this.listEl) {
+          const next = this.listEl.querySelector(".oc-model-item.is-selected");
+          if (next && typeof next.focus === "function") next.focus();
+        }
+      },
+    });
   }
 
   renderList() {
     if (!this.listEl) return;
     this.listEl.empty();
 
-    const models = Array.isArray(this.options.models) ? this.options.models : [];
-    const filtered = models.filter((item) => {
-      if (!this.filterText) return true;
-      return String(item || "").toLowerCase().includes(this.filterText);
-    });
+    const filtered = this.getFilteredModels();
+    this.selectedIndex = Math.max(0, Math.min(filtered.length - 1, Number(this.selectedIndex) || 0));
 
     if (!filtered.length) {
       const tFn = this.options && typeof this.options.t === "function" ? this.options.t : null;
@@ -541,14 +626,25 @@ class ModelSelectorModal extends Modal {
       return;
     }
 
-    filtered.forEach((model) => {
-      const row = this.listEl.createDiv({ cls: "oc-model-item" });
-      if (model === this.options.currentModel) row.addClass("is-active");
-      row.createDiv({ cls: "oc-model-item-id", text: model });
+    filtered.forEach((model, index) => {
+      const isCurrent = model === this.options.currentModel;
+      const isSelected = index === this.selectedIndex;
+      const row = this.listEl.createEl("button", {
+        cls: "oc-model-item",
+        attr: {
+          type: "button",
+          "aria-pressed": isCurrent ? "true" : "false",
+          "aria-current": isSelected ? "true" : "false",
+          tabindex: isSelected ? "0" : "-1",
+        },
+      });
+      if (isCurrent) row.addClass("is-active");
+      if (isSelected) row.addClass("is-selected");
+      row.createSpan({ cls: "oc-model-item-id", text: model });
       const tFn = this.options && typeof this.options.t === "function" ? this.options.t : null;
-      row.createDiv({
+      row.createSpan({
         cls: "oc-model-item-meta",
-        text: model === this.options.currentModel
+        text: isCurrent
           ? tr(tFn, "modals.model.current", "Current")
           : tr(tFn, "modals.model.clickToSwitch", "Click to switch"),
       });
@@ -556,6 +652,9 @@ class ModelSelectorModal extends Modal {
       row.addEventListener("click", async () => {
         if (typeof this.options.onSelect === "function") await this.options.onSelect(model);
         this.close();
+      });
+      row.addEventListener("keydown", (event) => {
+        this.moveSelectionForKey(event, { focus: true });
       });
     });
   }
@@ -584,6 +683,7 @@ class TemplateEditorModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-template-editor-modal");
 
     contentEl.createEl("h2", {
@@ -654,6 +754,7 @@ class AgentModeNoticeModal extends Modal {
     const { contentEl } = this;
     if (!contentEl) return;
     contentEl.empty();
+    applyResponsiveModalSurface(this, contentEl);
     contentEl.addClass("oc-release-modal");
 
     const isUpdate = this.options.kind === "update";

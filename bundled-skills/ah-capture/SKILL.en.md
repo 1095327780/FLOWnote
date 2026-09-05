@@ -1,6 +1,10 @@
 ---
 name: ah-capture
-description: Use for quick daytime capture into today's daily note: records, new tasks, completed tasks, and tomorrow-plan items with minimal friction.
+description: "Use for quick daytime capture into today's daily note: records, new tasks, completed tasks, and tomorrow-plan items with minimal friction."
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Quick Capture
@@ -37,4 +41,3 @@ If unclear, ask once: "Should this go to Records, Tasks, or Tomorrow Plan?"
 - Do not route across days unless the user explicitly says tomorrow or another date.
 - Confirm what was written and where.
 - Use configured note paths over any hardcoded examples.
-

@@ -72,6 +72,38 @@ test("resolveSkillFromPrompt should support /skills <id> alias", () => {
   }
 });
 
+test("resolveSkillFromPrompt should build a canonical command for mobile slug-only entries", () => {
+  const fixture = loadCommandRouterWithMockObsidian();
+  try {
+    const { resolveSkillFromPrompt } = fixture.commandRouterMethods;
+    const completionPolicy = {
+      state: "declared",
+      mode: "effect",
+      requiredEffects: [],
+      requiredInteractions: ["ask_user"],
+      minReceipts: null,
+      errorCode: null,
+    };
+    const context = {
+      plugin: {
+        skillService: null,
+        __flownoteMobileSkillList: [{
+          slug: "ah-note",
+          name: "ah-note",
+          completionPolicy,
+        }],
+      },
+    };
+
+    const resolved = resolveSkillFromPrompt.call(context, "/ah-note");
+    assert.equal(resolved.command, "/ah-note");
+    assert.equal(resolved.skill.slug, "ah-note");
+    assert.deepEqual(resolved.skill.completionPolicy, completionPolicy);
+  } finally {
+    fixture.restore();
+  }
+});
+
 test("resolveSkillFromPrompt should refresh skills before matching slash command", () => {
   const fixture = loadCommandRouterWithMockObsidian();
   try {
@@ -96,6 +128,33 @@ test("resolveSkillFromPrompt should refresh skills before matching slash command
     assert.equal(resolved.skill.id, "custom-skill");
     assert.equal(resolved.command, "/custom-skill");
     assert.equal(resolved.promptText, "执行");
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("resolveSkillFromPrompt should not route a standard skill with user-invocable false", () => {
+  const fixture = loadCommandRouterWithMockObsidian();
+  try {
+    const { resolveSkillFromPrompt } = fixture.commandRouterMethods;
+    const context = {
+      plugin: {
+        skillService: {
+          getSkills() {
+            return [
+              { id: "model-only", name: "model-only", userInvocable: false },
+              { id: "user-only", name: "user-only", disableModelInvocation: true, userInvocable: true },
+            ];
+          },
+        },
+      },
+    };
+
+    const blocked = resolveSkillFromPrompt.call(context, "/model-only");
+    assert.equal(blocked.skill, null);
+
+    const explicit = resolveSkillFromPrompt.call(context, "/user-only");
+    assert.equal(explicit.skill.id, "user-only");
   } finally {
     fixture.restore();
   }

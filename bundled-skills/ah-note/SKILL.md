@@ -1,6 +1,11 @@
 ---
 name: ah-note
 description: Use when 需要在早间创建今日日记，聚合昨日未完成与计划来源，设定今日聚焦并触发周月年回顾提醒时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
+      required_interactions: [ask_user]
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

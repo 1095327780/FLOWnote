@@ -3,22 +3,39 @@ import { build } from "esbuild";
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const {
+  assertBundledSkillReferences,
+  collectBundledSkillFiles,
+} = require("./check-bundled-skill-references.js");
+const {
+  splitSkillFrontmatter,
+  parseFlowNoteCompletionMetadata,
+} = require("../runtime/skill-frontmatter.js");
 
 const ROOT = process.cwd();
 const RELEASE_DIR = path.join(ROOT, "release");
 const BUNDLED_SKILLS_DIR = path.join(ROOT, "bundled-skills");
 const GENERATED_RUNTIME_DIR = path.join(ROOT, "runtime", "generated");
 const EMBEDDED_BUNDLED_SKILLS_FILE = path.join(GENERATED_RUNTIME_DIR, "bundled-skills-embedded.js");
+const YAML_BROWSER_ENTRY = path.join(
+  path.dirname(require.resolve("yaml/package.json")),
+  "browser",
+  "index.js",
+);
 
-const SKIP_FILE_BASENAMES = new Set([
-  ".DS_Store",
-]);
-const SKIP_DIR_BASENAMES = new Set([
-  "__pycache__",
-]);
-const SKIP_FILE_SUFFIXES = [
-  ".pyc",
-];
+// Obsidian desktop exposes Node built-ins, while Obsidian mobile only exposes
+// partial compatibility shims. Keep the overall bundle on the Node platform
+// for desktop integrations, but force YAML onto its browser entry so the same
+// Skill parser has identical semantics on both hosts.
+const mobileSafeYamlPlugin = {
+  name: "flownote-mobile-safe-yaml",
+  setup(buildContext) {
+    buildContext.onResolve({ filter: /^yaml$/ }, () => ({ path: YAML_BROWSER_ENTRY }));
+  },
+};
 
 async function ensureDirClean(dir) {
   await fs.rm(dir, { recursive: true, force: true });
@@ -32,45 +49,6 @@ async function copyAsset(filename) {
 async function assertExists(filename) {
   const full = path.join(RELEASE_DIR, filename);
   await fs.access(full);
-}
-
-function toPosixPath(value) {
-  return String(value || "").split(path.sep).join("/");
-}
-
-function shouldSkipBundledEntry(name, isDirectory) {
-  const basename = String(name || "");
-  if (!basename) return true;
-  if (basename.startsWith(".")) return true;
-  if (isDirectory && SKIP_DIR_BASENAMES.has(basename)) return true;
-  if (!isDirectory && SKIP_FILE_BASENAMES.has(basename)) return true;
-  if (!isDirectory && SKIP_FILE_SUFFIXES.some((suffix) => basename.endsWith(suffix))) return true;
-  return false;
-}
-
-async function collectBundledSkillFiles(rootDir, currentDir = rootDir, output = []) {
-  let entries = [];
-  try {
-    entries = await fs.readdir(currentDir, { withFileTypes: true });
-  } catch {
-    return output;
-  }
-
-  entries.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  for (const entry of entries) {
-    if (!entry) continue;
-    if (shouldSkipBundledEntry(entry.name, entry.isDirectory())) continue;
-    const absPath = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) {
-      await collectBundledSkillFiles(rootDir, absPath, output);
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const relative = toPosixPath(path.relative(rootDir, absPath));
-    if (!relative) continue;
-    output.push(relative);
-  }
-  return output;
 }
 
 function asciiEscape(value) {
@@ -88,15 +66,40 @@ function asciiEscape(value) {
 async function buildEmbeddedBundledSkillsModule() {
   await fs.mkdir(GENERATED_RUNTIME_DIR, { recursive: true });
 
-  const relativeFiles = await collectBundledSkillFiles(BUNDLED_SKILLS_DIR);
+  const relativeFiles = collectBundledSkillFiles(BUNDLED_SKILLS_DIR);
   const fileMap = {};
+  const documentMap = {};
   const hash = crypto.createHash("sha1");
   let totalBytes = 0;
 
   for (const relativePath of relativeFiles) {
     const absPath = path.join(BUNDLED_SKILLS_DIR, relativePath.split("/").join(path.sep));
     const content = await fs.readFile(absPath);
-    fileMap[relativePath] = content.toString("utf8");
+    const text = content.toString("utf8");
+    fileMap[relativePath] = text;
+    if (/\/(?:SKILL)(?:\.(?:zh-CN|en|ru))?\.md$/.test(`/${relativePath}`)) {
+      const parsed = splitSkillFrontmatter(text);
+      if (parsed.errorCode) {
+        throw new Error(`invalid Skill frontmatter: ${relativePath} (${parsed.errorCode})`);
+      }
+      const completionPolicy = parseFlowNoteCompletionMetadata(parsed.frontmatter);
+      if (completionPolicy.state === "invalid") {
+        throw new Error(
+          `invalid Skill completion metadata: ${relativePath} (${completionPolicy.errorCode})`,
+        );
+      }
+      const slug = relativePath.split("/", 1)[0];
+      if (String(parsed.frontmatter.name || "").trim() !== slug) {
+        throw new Error(`Skill name must match its bundled directory: ${relativePath} (expected ${slug})`);
+      }
+      documentMap[relativePath] = {
+        frontmatter: parsed.frontmatter,
+        // Keep the body in the canonical raw file map and store only its
+        // boundary, avoiding a second copy of every large Skill instruction.
+        bodyOffset: text.length - parsed.body.length,
+        completionPolicy,
+      };
+    }
     totalBytes += content.byteLength;
     hash.update(`${relativePath}\n`);
     hash.update(content);
@@ -105,6 +108,7 @@ async function buildEmbeddedBundledSkillsModule() {
   const versionSeed = hash.digest("hex");
   const embeddedVersion = `${versionSeed}:${relativeFiles.length}`;
   const serializedMap = asciiEscape(JSON.stringify(fileMap));
+  const serializedDocuments = asciiEscape(JSON.stringify(documentMap));
 
   const moduleSource = [
     "\"use strict\";",
@@ -112,11 +116,13 @@ async function buildEmbeddedBundledSkillsModule() {
     `const EMBEDDED_BUNDLED_SKILLS_VERSION = \"${embeddedVersion}\";`,
     `const EMBEDDED_BUNDLED_SKILLS_FILE_COUNT = ${relativeFiles.length};`,
     `const EMBEDDED_BUNDLED_SKILLS_FILES = Object.freeze(${serializedMap});`,
+    `const EMBEDDED_BUNDLED_SKILL_DOCUMENTS = Object.freeze(${serializedDocuments});`,
     "",
     "module.exports = {",
     "  EMBEDDED_BUNDLED_SKILLS_VERSION,",
     "  EMBEDDED_BUNDLED_SKILLS_FILE_COUNT,",
     "  EMBEDDED_BUNDLED_SKILLS_FILES,",
+    "  EMBEDDED_BUNDLED_SKILL_DOCUMENTS,",
     "};",
     "",
   ].join("\n");
@@ -131,6 +137,7 @@ async function buildEmbeddedBundledSkillsModule() {
 }
 
 async function main() {
+  assertBundledSkillReferences(BUNDLED_SKILLS_DIR);
   const embedResult = await buildEmbeddedBundledSkillsModule();
   console.log(
     `[build-release] embedded bundled-skills files=${embedResult.fileCount} bytes=${embedResult.totalBytes} version=${embedResult.embeddedVersion}`,
@@ -145,6 +152,7 @@ async function main() {
     platform: "node",
     target: "es2020",
     external: ["obsidian"],
+    plugins: [mobileSafeYamlPlugin],
     sourcemap: false,
     legalComments: "none",
     logLevel: "info",

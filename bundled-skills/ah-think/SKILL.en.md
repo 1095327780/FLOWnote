@@ -1,6 +1,10 @@
 ---
 name: ah-think
 description: Use for structured thinking with mental models, questioning, argument mapping, and decision support.
+metadata:
+  flownote:
+    completion:
+      mode: answer
 ---
 
 # Thinking Toolkit
@@ -31,4 +35,3 @@ Goal: help the user think more clearly before writing or deciding.
 - Do not force every model onto the problem.
 - Make assumptions explicit.
 - Separate observation, inference, and decision.
-

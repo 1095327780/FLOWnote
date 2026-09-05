@@ -1,6 +1,10 @@
 ---
 name: ah-memory
 description: Use when 需要在多个 ah-* 技能之间持续追踪进度、同步待办与避免会话切换后状态丢失时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

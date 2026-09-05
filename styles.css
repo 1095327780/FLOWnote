@@ -6,6 +6,9 @@
 /* Base -------------------------------------------------- */
 .oc-root {
   height: 100%;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: flownote;
 }
 
 .oc-surface {
@@ -433,9 +436,26 @@ body.theme-light .oc-surface {
   background: var(--oc-surface-muted);
 }
 
-.oc-session-item:focus-visible {
+.oc-session-item-switch:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--oc-brand-strong) 72%, transparent);
   outline-offset: 1px;
+}
+
+.oc-session-item-switch {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
 }
 
 .oc-session-item.is-active {
@@ -864,7 +884,9 @@ body.theme-light .oc-surface {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overflow-anchor: none;
+  overscroll-behavior-x: none;
   padding: 12px 0;
   display: flex;
   flex-direction: column;
@@ -990,16 +1012,30 @@ body.theme-light .oc-surface {
 .oc-message {
   position: relative;
   min-width: 0;
+  box-sizing: border-box;
   border-radius: 8px;
   padding: 10px 14px;
-  max-width: 95%;
+  max-width: 100%;
   border: 1px solid transparent;
 }
 
 .oc-message-user {
   align-self: flex-end;
+  max-width: 88%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.oc-message-user > .oc-message-content {
+  width: fit-content;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, rgb(var(--oc-brand-rgb)) 34%, var(--oc-border));
+  border-radius: 8px;
   background: color-mix(in srgb, var(--background-secondary) 72%, rgb(var(--oc-brand-rgb)) 28%);
-  border-color: color-mix(in srgb, rgb(var(--oc-brand-rgb)) 34%, var(--oc-border));
 }
 
 .oc-message-user ::selection {
@@ -1031,6 +1067,17 @@ body.theme-light .oc-surface {
   display: none;
 }
 
+.oc-message-assistant.has-execution-status .oc-msg-head {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+}
+
+.oc-message-assistant.has-execution-status .oc-msg-role,
+.oc-message-assistant.has-execution-status .oc-msg-error {
+  display: none;
+}
+
 .oc-msg-role {
   font-size: 11px;
   color: var(--text-muted);
@@ -1040,6 +1087,22 @@ body.theme-light .oc-surface {
 .oc-msg-error {
   font-size: 11px;
   color: var(--text-error);
+}
+
+.oc-msg-status {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
+}
+
+.oc-message.is-failed .oc-msg-status,
+.oc-message.is-interrupted .oc-msg-status,
+.oc-message.is-suspended .oc-msg-status,
+.oc-message.is-blocked .oc-msg-status {
+  color: var(--text-warning);
+  background: color-mix(in srgb, var(--text-warning) 10%, transparent);
 }
 
 .oc-message-content {
@@ -1055,46 +1118,57 @@ body.theme-light .oc-surface {
 }
 
 .oc-message.is-pending .oc-message-content:empty::after {
-  content: "…";
-  animation: oc-pulse 1s infinite;
+  content: none;
 }
 
 .oc-message.is-pending .oc-message-content {
   white-space: pre-wrap;
 }
 
-.oc-message-content.oc-runtime-tail {
-  min-height: 18px;
+@keyframes oc-runtime-dots {
+  0%, 100% {
+    opacity: 0.34;
+    transform: translateY(1px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+
+/* Current liveness belongs to the whole turn, not to the reply body or the
+ * collapsible process rail. It remains visible between model and tool steps. */
+.oc-runtime-status {
+  min-width: 0;
+  min-height: 22px;
+  margin-top: 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 7px;
   color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-.oc-message-content.oc-runtime-tail::before {
+.oc-runtime-status::before {
   content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--text-muted);
+  flex: 0 0 auto;
+  width: 18px;
+  height: 5px;
+  background: radial-gradient(circle closest-side, currentColor 90%, transparent) 0 50% / 6px 5px repeat-x;
 }
 
-.oc-message-content.oc-runtime-tail.is-working {
-  color: var(--text-normal);
+.oc-runtime-status.is-working {
+  color: var(--oc-brand-strong);
+  font-weight: 600;
 }
 
-.oc-message-content.oc-runtime-tail.is-working::before {
-  background: var(--oc-brand-strong);
-  animation: oc-pulse 1s infinite;
+.oc-runtime-status.is-working::before {
+  animation: oc-runtime-dots 1.1s ease-in-out infinite;
 }
 
-.oc-message-content.oc-runtime-tail.is-error {
+.oc-runtime-status.is-error {
   color: var(--text-error);
-}
-
-.oc-message-content.oc-runtime-tail.is-error::before {
-  background: var(--text-error);
 }
 
 .oc-message-content p {
@@ -1138,25 +1212,20 @@ body.theme-light .oc-surface {
   margin: 0;
 }
 
-.oc-message-assistant .oc-text-block {
-  padding-inline-end: 30px;
-}
-
-.oc-text-copy-btn {
+.oc-root .oc-text-copy-btn {
   appearance: none;
   font: inherit;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  position: absolute;
-  top: 4px;
-  inset-inline-end: 2px;
+  position: static;
   border: 1px solid transparent;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--background-primary) 84%, transparent);
+  background: transparent;
+  box-shadow: none;
   color: var(--text-faint);
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.7;
   transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
   z-index: 2;
   display: inline-flex;
@@ -1174,11 +1243,8 @@ body.theme-light .oc-surface {
   fill: none;
 }
 
-.oc-text-block:hover .oc-text-copy-btn {
-  opacity: 1;
-}
-
 .oc-text-copy-btn:hover {
+  opacity: 1;
   color: var(--text-normal);
   border-color: var(--oc-border-hover);
   background: var(--background-modifier-hover);
@@ -1268,28 +1334,42 @@ body.theme-light .oc-surface {
   font-size: 12px;
 }
 
-.oc-user-msg-actions {
-  position: absolute;
-  bottom: -20px;
-  right: 0;
+.oc-user-msg-actions,
+.oc-assistant-msg-actions {
+  position: static;
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  margin-top: 4px;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 
-.oc-message-user:hover .oc-user-msg-actions {
+.oc-user-msg-actions {
+  justify-content: flex-end;
+}
+
+.oc-assistant-msg-actions {
+  justify-content: flex-start;
+}
+
+.oc-message-user:hover .oc-user-msg-actions,
+.oc-message-user:focus-within .oc-user-msg-actions,
+.oc-message-assistant:hover .oc-assistant-msg-actions,
+.oc-message-assistant:focus-within .oc-assistant-msg-actions {
   opacity: 1;
 }
 
-.oc-inline-action {
+.oc-root .oc-inline-action {
   appearance: none;
   font: inherit;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--oc-border) 72%, transparent);
-  background: color-mix(in srgb, var(--background-primary) 86%, transparent);
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
   cursor: pointer;
   width: 24px;
@@ -1321,10 +1401,94 @@ body.theme-light .oc-surface {
 
 /* Assistant Thinking / Tool Blocks -------------------------------------------------- */
 .oc-part-list {
-  margin-top: 8px;
+  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.oc-root .oc-process-disclosure,
+.oc-root button.oc-process-summary {
+  width: max-content;
+  max-width: 100%;
+  min-height: 28px;
+  margin: 0 0 3px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  text-align: start;
+}
+
+.oc-root .oc-process-disclosure:hover,
+.oc-root button.oc-process-summary:hover {
+  color: var(--text-normal);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.oc-root .oc-process-disclosure:focus-visible,
+.oc-root button.oc-process-summary:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.oc-process-summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  transition: transform 120ms ease;
+}
+
+.oc-process-summary-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.oc-part-list:not(.is-process-collapsed) > .oc-process-disclosure .oc-process-summary-icon {
+  transform: rotate(90deg);
+}
+
+.oc-process-summary-label {
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.oc-process-summary-count {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.oc-process-summary-count:not(:empty)::before {
+  content: "·";
+  margin-inline-end: 5px;
+}
+
+.oc-part-list.is-process-collapsed > .oc-part-slot.is-process-activity {
+  display: none;
+}
+
+.oc-part-list.has-process-summary:not(.is-process-collapsed) > .oc-part-slot.is-process-activity {
+  margin-inline-start: 5px;
+  padding-inline-start: 5px;
+  border-inline-start: 1px solid color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+}
+
+.oc-part-list.has-process-summary > .oc-part-slot.is-final-activity {
+  margin-top: 7px;
+}
+
+.oc-part-slot {
   min-width: 0;
 }
 
@@ -1337,6 +1501,19 @@ body.theme-light .oc-surface {
   margin-inline-start: 7px;
   padding-inline-start: 14px;
   padding-block: 2px;
+}
+
+.oc-stream-text-part.is-process {
+  border-left-color: color-mix(in srgb, var(--text-faint) 52%, var(--background-modifier-border));
+  color: var(--text-muted);
+}
+
+.oc-stream-text-part.is-final {
+  position: relative;
+  margin: 8px 0 0;
+  padding: 0;
+  border-left: 0;
+  color: var(--text-normal);
 }
 
 .oc-stream-text-part.is-completed {
@@ -1352,15 +1529,26 @@ body.theme-light .oc-surface {
   line-height: 1.6;
 }
 
+.oc-stream-text-part.is-streaming .oc-stream-text-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.oc-stream-text-part.is-final .oc-stream-text-content {
+  font-size: var(--font-text-size);
+  line-height: 1.6;
+}
+
 .oc-thinking-block {
-  margin: 8px 0;
+  margin: 0;
 }
 
 .oc-thinking-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  min-height: 32px;
+  padding: 4px 6px;
   cursor: pointer;
   list-style: none;
 }
@@ -1425,17 +1613,21 @@ body.theme-light .oc-surface {
 }
 
 .oc-tool-call {
-  margin: 8px 0;
+  margin: 0;
+  min-width: 0;
 }
 
 .oc-tool-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
+  gap: 7px;
+  min-height: 32px;
+  padding: 4px 6px;
   cursor: pointer;
   overflow: hidden;
   list-style: none;
+  border-radius: 7px;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .oc-tool-header::-webkit-details-marker {
@@ -1443,33 +1635,36 @@ body.theme-light .oc-surface {
 }
 
 .oc-tool-header:hover {
-  opacity: 0.85;
+  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent);
 }
 
 .oc-tool-icon {
   display: flex;
   align-items: center;
-  color: var(--text-accent);
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .oc-tool-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .oc-tool-name {
-  font-family: var(--font-monospace);
+  font-family: var(--font-interface);
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 550;
   color: var(--text-normal);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .oc-tool-summary {
-  font-family: var(--font-monospace);
-  font-size: 13px;
+  font-family: var(--font-interface);
+  font-size: 12.5px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -1489,6 +1684,35 @@ body.theme-light .oc-surface {
   margin-left: auto;
 }
 
+.oc-tool-duration {
+  flex-shrink: 0;
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.oc-tool-expand-indicator,
+.oc-patch-expand-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  transition: transform 140ms ease;
+  flex-shrink: 0;
+}
+
+.oc-tool-expand-indicator svg,
+.oc-patch-expand-indicator svg {
+  width: 13px;
+  height: 13px;
+}
+
+.oc-tool-call[open] > .oc-tool-header .oc-tool-expand-indicator,
+.oc-tool-call.oc-tool-patch[open] > .oc-tool-header .oc-patch-expand-indicator {
+  transform: rotate(90deg);
+}
+
 .oc-tool-status svg {
   width: 14px;
   height: 14px;
@@ -1503,6 +1727,10 @@ body.theme-light .oc-surface {
 }
 
 .oc-tool-status.status-completed {
+  color: var(--text-faint);
+}
+
+.oc-tool-call.is-verified .oc-tool-status.status-completed {
   color: var(--color-green);
 }
 
@@ -1511,10 +1739,11 @@ body.theme-light .oc-surface {
 }
 
 .oc-tool-content {
-  padding: 4px 0;
-  padding-inline-start: 16px;
-  margin-inline-start: 7px;
-  border-inline-start: 2px solid var(--background-modifier-border);
+  padding: 6px 8px 9px 13px;
+  margin: 0 6px 4px 15px;
+  border-inline-start: 1px solid var(--background-modifier-border);
+  max-height: min(360px, 46vh);
+  overflow: auto;
 }
 
 .oc-tool-call.is-running .oc-tool-content {
@@ -1522,6 +1751,10 @@ body.theme-light .oc-surface {
 }
 
 .oc-tool-call.is-completed .oc-tool-content {
+  border-inline-start-color: var(--background-modifier-border);
+}
+
+.oc-tool-call.is-verified .oc-tool-content {
   border-inline-start-color: color-mix(in srgb, var(--text-success) 55%, var(--background-modifier-border));
 }
 
@@ -1534,6 +1767,10 @@ body.theme-light .oc-surface {
   color: color-mix(in srgb, var(--text-error) 78%, var(--text-muted));
 }
 
+.oc-tool-call.is-error > .oc-tool-header {
+  background: color-mix(in srgb, var(--text-error) 7%, transparent);
+}
+
 .oc-tool-call[data-tool-name="question"] .oc-tool-content {
   border-inline-start-color: color-mix(in srgb, var(--oc-brand) 60%, var(--background-modifier-border));
 }
@@ -1544,23 +1781,6 @@ body.theme-light .oc-surface {
 
 .oc-tool-call.oc-tool-patch .oc-tool-content {
   border-inline-start-color: color-mix(in srgb, var(--oc-brand-strong) 48%, var(--background-modifier-border));
-}
-
-.oc-patch-expand-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-faint);
-  transition: transform 140ms ease;
-}
-
-.oc-patch-expand-indicator svg {
-  width: 14px;
-  height: 14px;
-}
-
-.oc-tool-call.oc-tool-patch[open] > .oc-tool-header .oc-patch-expand-indicator {
-  transform: rotate(90deg);
 }
 
 .oc-patch-summary-divider,
@@ -1784,6 +2004,105 @@ body.theme-light .oc-surface {
   display: none;
 }
 
+@media (max-width: 520px) {
+  .oc-part-list {
+    gap: 1px;
+  }
+
+  .oc-tool-header {
+    min-height: 40px;
+    gap: 6px;
+    padding-inline: 4px;
+  }
+
+  .oc-tool-name {
+    max-width: 38%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .oc-tool-summary {
+    font-size: 12px;
+  }
+
+  .oc-tool-duration,
+  .oc-patch-summary-divider {
+    display: none;
+  }
+
+  .oc-tool-content {
+    margin-inline: 14px 4px;
+    padding-inline-start: 12px;
+  }
+}
+
+:is(body.is-mobile, body .is-mobile) .oc-tool-header,
+:is(body.is-mobile, body .is-mobile) .oc-thinking-header,
+:is(body.is-mobile, body .is-mobile) .oc-process-disclosure,
+:is(body.is-mobile, body .is-mobile) button.oc-process-summary {
+  min-height: 44px;
+}
+
+:is(body.is-mobile, body .is-mobile) .oc-process-disclosure,
+:is(body.is-mobile, body .is-mobile) button.oc-process-summary {
+  padding-inline: 0 8px;
+}
+
+:is(body.is-mobile, body .is-mobile) .oc-part-list.has-process-summary:not(.is-process-collapsed) > .oc-part-slot.is-process-activity {
+  margin-inline-start: 3px;
+  padding-inline-start: 3px;
+}
+
+:is(body.is-mobile, body .is-mobile) .oc-message-meta:where(*) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Mobile chat owns one vertical viewport. Message utilities are siblings below
+ * the bubble/answer, while wide code remains locally scrollable. */
+:is(body.is-mobile, body .is-mobile) .oc-message-user:where(*) {
+  max-width: 86%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:is(body.is-mobile, body .is-mobile) .oc-message-user > .oc-message-content {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--m-accent) 28%, var(--m-border));
+  border-radius: 18px 18px 6px 18px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--m-accent) 22%, var(--m-surface-2)) 0%,
+    color-mix(in srgb, var(--m-accent) 12%, var(--m-surface-1)) 100%);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+:is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-message-user > .oc-message-content {
+  border-color: #b4d4f0;
+  background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%);
+  box-shadow: 0 2px 6px rgba(0, 113, 227, 0.1);
+}
+
+:is(body.is-mobile, body .is-mobile) :is(
+  .oc-message,
+  .oc-message-content,
+  .oc-part-list,
+  .oc-part-slot,
+  .oc-stream-text-part,
+  .oc-stream-text-content,
+  .oc-message-meta
+) {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .oc-question-inline-note {
   margin-bottom: 4px;
   font-size: 12px;
@@ -1908,22 +2227,33 @@ body.theme-light .oc-surface {
 }
 
 .oc-message-meta {
-  margin: 8px 0 0;
-  padding: 8px 10px;
-  border: 1px solid var(--oc-border);
-  border-radius: 7px;
-  font-size: 12px;
-  font-family: var(--font-monospace);
-  color: var(--text-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 7px 0 0;
+  padding: 0;
+  border: 0;
+  font-size: 10.5px;
+  font-family: var(--font-interface);
+  color: var(--text-faint);
+  line-height: 1.35;
+  background: transparent;
 }
 
-.oc-message-meta.is-error {
-  color: var(--text-error);
-  border-color: color-mix(in srgb, var(--text-error) 50%, var(--oc-border));
-  background: color-mix(in srgb, var(--text-error) 7%, transparent);
+.oc-message-meta-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.oc-message-meta-separator {
+  color: color-mix(in srgb, var(--text-faint) 70%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-process-summary-icon {
+    transition: none;
+  }
 }
 
 /* Legacy standalone reasoning fallback */
@@ -3513,6 +3843,88 @@ padding: 3px 7px;
   }
 }
 
+/* Obsidian panes can be narrow inside a wide desktop window. Keep viewport
+ * queries above as a compatibility fallback, but make the shared chat layout
+ * respond to its actual pane width. Platform-specific touch/safe-area behavior
+ * remains under `.is-mobile`. */
+@container flownote (max-width: 1100px) {
+  .oc-side:where(*) {
+    max-height: 220px;
+  }
+}
+
+@container flownote (max-width: 860px) {
+  .oc-suggest-grid:where(*) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container flownote (max-width: 700px) {
+  .oc-shell:where(*) {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .oc-main,
+  .oc-side:where(*):where(*) {
+    padding: 9px;
+  }
+
+  .oc-toolbar:where(*) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .oc-toolbar-left:where(*),
+  .oc-toolbar-right:where(*) {
+    width: 100%;
+  }
+
+  .oc-select:where(*):where(*):where(*) {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+  }
+
+  .oc-toolbar-btn:where(*) {
+    flex: 1;
+  }
+
+  .oc-input-wrapper:where(*) {
+    border-radius: 20px;
+    min-height: 150px;
+    padding: 7px 8px 8px;
+  }
+
+  .oc-input {
+    font-size: 15px;
+    min-height: 82px;
+  }
+
+  .oc-input-toolbar:where(*) {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .oc-model-select-inline-wrap:where(*) {
+    max-width: 52cqw;
+  }
+
+  .oc-model-select-inline-text:where(*) {
+    max-width: min(52cqw, 260px);
+  }
+
+  .oc-history-menu {
+    width: min(330px, calc(100cqw - 28px));
+  }
+}
+
+@container flownote (max-width: 560px) {
+  .oc-suggest-grid:where(*):where(*) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Compatibility aliases -------------------------------------- */
 .oc-layout {
   display: grid;
@@ -4221,6 +4633,12 @@ body:not(.theme-dark).is-mobile .modal.oc-modal-capture.oc-modal-capture {
 .is-mobile .oc-root.oc-surface.is-kb-open {
   padding-bottom: 0;
 }
+.is-mobile .oc-root.oc-surface.is-kb-open {
+  /* Remove the closed-keyboard navbar reservation in the same frame that
+   * Obsidian shrinks the leaf. Animating this padding exposes a temporary
+   * empty strip between the composer and the software keyboard. */
+  transition: none;
+}
 .is-mobile .oc-shell {
   height: 100%;
   padding: 0;
@@ -4332,12 +4750,15 @@ body:not(.theme-dark).is-mobile .modal.oc-modal-capture.oc-modal-capture {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  overscroll-behavior-x: none;
   padding: 8px 14px 12px;
   -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 .is-mobile .oc-messages::-webkit-scrollbar {
   width: 0;
@@ -4456,17 +4877,16 @@ body:not(.theme-dark).is-mobile .modal.oc-modal-capture.oc-modal-capture {
   margin-top: 6px;
 }
 
-/* User bubble: glassy cyan-tinted pill on the right */
+/* The user row owns layout only; the content child owns the visible bubble so
+ * copy/retry actions stay outside it. */
 .is-mobile .oc-message-user {
   align-self: flex-end;
   max-width: 86%;
-  padding: 10px 14px;
-  border-radius: 18px 18px 6px 18px;
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--m-accent) 22%, var(--m-surface-2)) 0%,
-    color-mix(in srgb, var(--m-accent) 12%, var(--m-surface-1)) 100%);
-  border: 1px solid color-mix(in srgb, var(--m-accent) 28%, var(--m-border));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), 0 0 0 1px color-mix(in srgb, var(--m-accent) 8%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--m-text);
 }
 .is-mobile .oc-message-user .oc-msg-head {
@@ -4784,15 +5204,22 @@ body:not(.theme-dark).is-mobile .modal.oc-modal-capture.oc-modal-capture {
   padding-bottom: 6px;
 }
 
-/* ---- Pulse animation kept consistent across mobile/desktop ---- */
-@keyframes oc-pulse-m {
-  0%:where(*), 100%:where(*) { opacity: 1; }
-  50%:where(*)      { opacity: 0.32; }
-}
+/* ---- Persistent mobile turn status ---- */
 .is-mobile .oc-message.is-pending .oc-message-content:empty::after {
-  content: "▍";
-  color: var(--m-accent);
-  animation: oc-pulse-m 0.9s ease-in-out infinite;
+  content: none;
+}
+.is-mobile .oc-runtime-status {
+  min-height: 28px;
+  margin-top: 8px;
+  color: var(--m-text-dim);
+  font-size: 13px;
+}
+.is-mobile .oc-runtime-status.is-working {
+  color: var(--m-accent, var(--oc-brand-strong));
+  font-weight: 650;
+}
+.is-mobile .oc-runtime-status.is-error {
+  color: var(--m-accent-coral, var(--text-error));
 }
 
 /* ================================================================
@@ -4900,7 +5327,7 @@ body.theme-light .is-mobile .oc-mobile-suggest-card:active {
 
 /* User message bubble — soft blue tint instead of dark glassy.
  * Replace the dark drop-shadow which would look heavy on white. */
-body.theme-light .is-mobile .oc-message-user {
+body.theme-light .is-mobile .oc-message-user > .oc-message-content {
   background: linear-gradient(135deg,
     color-mix(in srgb, var(--m-accent) 14%, var(--m-surface-1)) 0%,
     color-mix(in srgb, var(--m-accent) 8%, var(--m-surface-1)) 100%);
@@ -5086,332 +5513,6 @@ body.theme-light .is-mobile .oc-slash-command-item-meta {
   color: var(--m-text-dim);
 }
 
-/* Pulse cursor — slimmer color so the light bg doesn't get a glowing
- * vertical bar that looks out of place. */
-body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::after {
-  color: var(--m-accent);
-}
-
-/* ================================================================
- * SYSTEM LIGHT MODE OVERRIDE (OS-level signal, theme-agnostic)
- *
- * Many users keep Obsidian on a dark theme by habit but use the device
- * in bright light. When that happens, the chat header/composer stay
- * dark even though the user expects "light mode". This block forces
- * readable light surfaces for FLOWnote's chat shell whenever the OS
- * reports light — independent of `body.theme-light` (which may not be
- * set if Obsidian is configured dark) and independent of `.is-mobile`.
- *
- * Scope is restricted to FLOWnote elements (`.oc-*`) so we don't leak
- * into the user's notes or other plugin UIs.
- * ================================================================ */
-@media (prefers-color-scheme: light) {
-  /* Surface canvas */
-  .oc-root.oc-surface {
-    background-color: #f5f6f9;
-    background-image: none;
-    color: #1a1d24;
-  }
-  .oc-shell:where(*):where(*) {
-    background: #f5f6f9;
-    background-image: linear-gradient(180deg, #ffffff 0%, #f5f6f9 100%);
-  }
-
-  /* Header strip and its action buttons */
-  .oc-header:where(*) {
-    background: #ffffff;
-    color: #1a1d24;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    border-bottom: 1px solid #d4d8e0;
-  }
-  .oc-brand-title:where(*),
-  .oc-header-meta:where(*) {
-    color: #1a1d24;
-  }
-  .oc-icon-btn:where(*),
-  .oc-header-btn:where(*),
-  .oc-header-btn.oc-icon-btn:where(*) {
-    background: #ffffff;
-    border: 1px solid #d4d8e0;
-    color: #1a1d24;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  }
-  .oc-icon-btn:hover:where(*),
-  .oc-icon-btn:active,
-  .oc-header-btn:hover:where(*),
-  .oc-header-btn:active {
-    background: #eef3fa;
-    border-color: #0071e3;
-    color: #0071e3;
-  }
-  .oc-icon-btn svg:where(*),
-  .oc-header-btn svg {
-    color: currentColor;
-  }
-
-  /* Composer (bottom input area) */
-  .oc-composer:where(*) {
-    background: #ffffff;
-    background-image: none;
-    border-top: 1px solid #d4d8e0;
-  }
-  .oc-input-wrapper:where(*):where(*) {
-    background: #ffffff;
-    background-image: none;
-    border: 1px solid #d4d8e0;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 18px rgba(0, 0, 0, 0.06);
-  }
-  .oc-input-wrapper:focus-within:where(*) {
-    border-color: #0071e3;
-    box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.4), 0 6px 18px rgba(0, 0, 0, 0.06);
-  }
-  .oc-composer textarea,
-  .oc-composer .oc-input,
-  .oc-composer-input,
-  .oc-input-wrapper textarea {
-    color: #1a1d24;
-    background: transparent;
-  }
-  .oc-composer textarea::placeholder {
-    color: #828b9b;
-  }
-
-  /* Send / attach buttons in the composer */
-  .oc-context-link-btn,
-  .oc-cancel-btn:where(*) {
-    background: #ffffff;
-    border: 1px solid #d4d8e0;
-    color: #4a5366;
-  }
-  .is-mobile .oc-model-select-inline-wrap:where(*) {
-    background: #eff1f6;
-    background-image: none;
-    border: 1px solid #d4d8e0;
-    color: #4a5366;
-    box-shadow: none;
-  }
-  .is-mobile .oc-model-select-inline-text:where(*) {
-    color: #4a5366;
-  }
-  .is-mobile .oc-model-select-inline-caret:where(*) {
-    color: #828b9b;
-  }
-  .is-mobile .oc-model-select-inline:where(*),
-  .is-mobile .oc-model-select-inline select {
-    background: transparent;
-    background-color: transparent;
-    color: transparent;
-    border: none;
-    box-shadow: none;
-    -webkit-appearance: none;
-    appearance: none;
-  }
-  .oc-send-btn:where(*) {
-    color: #ffffff;
-  }
-
-  /* Assistant message body markdown — force readable dark text. The
-   * markdown renderer's default `--text-normal` may be diluted by the
-   * user's theme; override every wrapper class. */
-  .oc-message-content,
-  .oc-message-content p:where(*),
-  .oc-message-content li,
-  .oc-message-content td:where(*),
-  .oc-message-content blockquote,
-  .oc-message-content .markdown-rendered,
-  .oc-message-content .markdown-preview-view {
-    color: #1a1d24;
-  }
-  .oc-message-content h1,
-  .oc-message-content h2,
-  .oc-message-content h3,
-  .oc-message-content h4,
-  .oc-message-content h5,
-  .oc-message-content h6 {
-    color: #0058b3;
-  }
-  .oc-message-content a {
-    color: #0071e3;
-  }
-  .oc-message-content a.oc-vault-path-link code:where(*) {
-    color: #0071e3;
-  }
-  .oc-message-content strong,
-  .oc-message-content b {
-    color: #0b0d12;
-  }
-  .oc-message-content code:where(*),
-  .oc-message-content kbd {
-    background: #eff1f6;
-    color: #1a1d24;
-    border: 1px solid #d4d8e0;
-  }
-  .oc-message-content pre:where(*) {
-    background: #eff1f6;
-    border: 1px solid #d4d8e0;
-  }
-  .oc-message-content pre code {
-    background: transparent;
-    color: #1a1d24;
-  }
-  /* User message bubble — soft blue tint on white */
-  .oc-message-user:where(*) {
-    background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%);
-    border: 1px solid #b4d4f0;
-    color: #1a1d24;
-  }
-
-  /* File picker / slash-command picker / mention picker popup. Uses
-   * `var(--background-secondary)` which Obsidian fills dark in dark
-   * theme — force readable light surface + dark text. */
-  .oc-context-file-picker,
-  .oc-slash-command-picker {
-    background: #ffffff;
-    border: 1px solid #d4d8e0;
-    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.04);
-    color: #1a1d24;
-  }
-  .oc-context-file-picker-search:where(*) {
-    background: #f5f6f9;
-    border: 1px solid #d4d8e0;
-    color: #1a1d24;
-  }
-  .oc-context-file-picker-search::placeholder {
-    color: #828b9b;
-  }
-  .oc-context-file-picker-empty:where(*) {
-    color: #4a5366;
-  }
-  .oc-context-file-picker-item:where(*) {
-    color: #1a1d24;
-  }
-  .oc-context-file-picker-item-name:where(*) {
-    color: #1a1d24;
-  }
-  .oc-context-file-picker-item-path:where(*) {
-    color: #4a5366;
-  }
-  .oc-context-file-picker-item-meta:where(*) {
-    color: #0058b3;
-  }
-  .oc-context-file-picker-item:hover:where(*),
-  .oc-context-file-picker-item.is-selected:where(*),
-  .oc-context-file-picker-item:active {
-    background: #eef3fa;
-  }
-  .oc-slash-command-item-command:where(*) {
-    color: #0058b3;
-  }
-  .oc-slash-command-item-meta:where(*) {
-    color: #4a5366;
-  }
-
-  /* History dropdown (session switcher in header) */
-  .oc-history-menu:where(*) {
-    background: #ffffff;
-    border: 1px solid #d4d8e0;
-    color: #1a1d24;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
-  }
-
-  /* Mobile welcome screen suggestion cards — paper-tone palette so they
-   * read as readable cards on a bright canvas. Each card keeps its
-   * category-tinted bottom border (via the --card-accent custom prop
-   * set inline), but the body becomes warm off-white with charcoal
-   * text. Active state lifts the card with a soft shadow rather than
-   * the heavy dark drop-shadow from the dark-mode rule. */
-  .is-mobile .oc-mobile-suggest-card,
-  .oc-mobile-suggest-card,
-  .oc-suggest-card:where(*) {
-    background: #fbfaf6;
-    background-image: linear-gradient(160deg, #ffffff 0%, #f5f3ee 100%);
-    border: 1px solid #e3e1d8;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.04);
-    color: #1a1d24;
-  }
-  .is-mobile .oc-mobile-suggest-card:active:where(*),
-  .oc-mobile-suggest-card:active,
-  .oc-suggest-card:hover:where(*),
-  .oc-suggest-card:focus-visible:where(*),
-  .oc-suggest-card:active {
-    transform: translateY(-2px);
-    border-color: color-mix(in srgb, var(--card-accent, #0071e3) 50%, #d4d8e0);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-accent, #0071e3) 25%, transparent),
-                0 10px 24px rgba(0, 0, 0, 0.08);
-  }
-  .is-mobile .oc-mobile-suggest-card:where(*)::before,
-  .oc-mobile-suggest-card::before,
-  .oc-suggest-card:where(*)::before {
-    opacity: 0.85;
-  }
-  .is-mobile .oc-mobile-suggest-cmd:where(*),
-  .oc-mobile-suggest-cmd,
-  .oc-suggest-cmd:where(*) {
-    color: var(--card-accent, #0058b3);
-  }
-  .is-mobile .oc-mobile-suggest-title:where(*),
-  .oc-mobile-suggest-title,
-  .oc-suggest-title:where(*) {
-    color: #1a1d24;
-  }
-  .is-mobile .oc-mobile-suggest-hint:where(*),
-  .oc-mobile-suggest-hint,
-  .oc-suggest-hint:where(*) {
-    color: #5b6478;
-  }
-  /* Welcome greeting + hint above the cards */
-  .is-mobile .oc-welcome-greeting,
-  .oc-welcome-greeting:where(*) {
-    background: linear-gradient(120deg, #1a1d24 0%, #0071e3 55%, #d97706 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    -webkit-text-fill-color: transparent;
-  }
-  .is-mobile .oc-empty,
-  .oc-empty:where(*) {
-    color: #4a5366;
-  }
-
-  /* Mobile-specific overrides keep working too. */
-  body:not(.theme-dark) .is-mobile .oc-root.oc-surface {
-    --m-bg:           #f5f6f9;
-    --m-surface-1:    #ffffff;
-    --m-surface-2:    #eff1f6;
-    --m-surface-3:    #e3e6ed;
-    --m-border:       #d4d8e0;
-    --m-border-soft:  rgba(0, 0, 0, 0.08);
-    --m-text:         #1a1d24;
-    --m-text-dim:     #4a5366;
-    --m-text-faint:   #828b9b;
-    --m-accent:        #0071e3;
-    --m-accent-strong: #0058b3;
-    background-color: #f5f6f9;
-    color: #1a1d24;
-  }
-  body:not(.theme-dark) .is-mobile .oc-header {
-    background: #ffffff;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    border-bottom: 1px solid #d4d8e0;
-  }
-  body:not(.theme-dark) .is-mobile .oc-composer {
-    background: #f5f6f9;
-    border-top: 1px solid #d4d8e0;
-  }
-  body:not(.theme-dark) .is-mobile .oc-input-wrapper {
-    background: #ffffff;
-    border: 1px solid #d4d8e0;
-  }
-  body:not(.theme-dark) .is-mobile .oc-message-content,
-  body:not(.theme-dark) .is-mobile .oc-message-content p,
-  body:not(.theme-dark) .is-mobile .oc-message-content li,
-  body:not(.theme-dark) .is-mobile .oc-message-content td {
-    color: #1a1d24;
-  }
-}
-
 /* Mobile light polish: Obsidian Mobile may put `is-mobile` on the body
  * itself, while desktop-like shells may put it on an ancestor below body.
  * Keep both selector shapes so the light palette reliably reaches the
@@ -5489,7 +5590,7 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
   color: #1a1d24;
 }
 
-:is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-message-user {
+:is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-message-user > .oc-message-content {
   background: linear-gradient(135deg, #e9f2fc 0%, #f3f8fd 100%);
   border: 1px solid #b4d4f0;
   color: #1a1d24;
@@ -5535,8 +5636,6 @@ body.theme-light .is-mobile .oc-message.is-pending .oc-message-content:empty::af
   color: #1a1d24;
 }
 
-:is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-text-copy-btn,
-:is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-inline-action,
 :is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-code-copy-btn {
   background: #ffffff;
   border-color: #d4d8e0;
@@ -7415,43 +7514,6 @@ body.theme-light .oc-home-action.is-primary {
   color: #ffffff;
 }
 
-.is-mobile .oc-home {
-  padding: 8px 10px calc(14px + env(safe-area-inset-bottom, 0px));
-  gap: 10px;
-}
-
-.is-mobile .oc-home-card {
-  padding: 12px;
-}
-
-.is-mobile .oc-home-heading {
-  font-size: 22px;
-}
-
-.is-mobile .oc-home-hero-panel {
-  min-width: 0;
-}
-
-.is-mobile .oc-home-hero-signals {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.is-mobile .oc-home-hero-actions .oc-home-action {
-  flex: 1 1 0;
-}
-
-.is-mobile .oc-home-project-list {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.is-mobile .oc-home-project {
-  padding: 10px;
-}
-
-.is-mobile .oc-home-heatmap-wrap {
-  margin-inline: -2px;
-}
-
 @container (max-width: 520px) {
   .oc-home-hero:where(*):where(*):where(*):where(*):where(*):where(*) {
     grid-template-columns: minmax(0, 1fr);
@@ -7855,23 +7917,6 @@ body.theme-light .oc-home-stat:where(*) {
   box-shadow: 0 5px 18px rgba(31, 68, 105, 0.055);
 }
 
-.is-mobile .oc-home:where(*) {
-  padding: 8px 10px calc(14px + env(safe-area-inset-bottom, 0px));
-}
-
-.is-mobile .oc-home-hero:where(*) {
-  grid-template-columns: minmax(0, 1fr);
-  padding: 13px;
-}
-
-.is-mobile .oc-home-hero-signals:where(*) {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.is-mobile .oc-home-hero-actions .oc-home-action:where(*) {
-  flex: 1 1 128px;
-}
-
 @container (max-width: 640px) {
   .oc-home-hero:where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*) {
     grid-template-columns: minmax(0, 1fr);
@@ -8229,82 +8274,6 @@ body.theme-light .oc-home-stat:where(*) {
   }
 }
 
-/* Top quick actions ------------------------------------------------- */
-.oc-home-actions-card-top {
-  padding: 8px;
-}
-
-.oc-home-actions-card-top .oc-home-action-grid {
-  margin-top: 0;
-  display: grid;
-  grid-template-columns: 40px repeat(4, minmax(72px, 1fr));
-  gap: 8px;
-}
-
-.oc-home-actions-card-top .oc-home-action {
-  min-height: 34px;
-  padding: 0 9px;
-  justify-content: center;
-  gap: 0;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.oc-home-actions-card-top .oc-home-action:not(.is-icon-only) .oc-home-action-icon {
-  display: none;
-}
-
-.oc-home-actions-card-top .oc-home-action.is-icon-only {
-  width: 40px;
-  min-width: 40px;
-  padding: 0;
-}
-
-.oc-home-actions-card-top .oc-home-action.is-icon-only .oc-home-action-label {
-  display: none;
-}
-
-.oc-home-actions-card-top .oc-home-action-icon svg,
-.oc-home-actions-card-top .oc-home-action-icon .svg-icon {
-  width: 17px;
-  height: 17px;
-}
-
-.is-mobile .oc-home-hero:where(*):where(*) {
-  display: none;
-}
-
-.is-mobile .oc-home-actions-card-top {
-  padding: 6px;
-}
-
-.is-mobile .oc-home-actions-card-top .oc-home-action-grid {
-  grid-template-columns: 34px repeat(4, minmax(56px, 1fr));
-  gap: 5px;
-}
-
-.is-mobile .oc-home-actions-card-top .oc-home-action {
-  min-height: 32px;
-  padding: 0 5px;
-  border-radius: 7px;
-  font-size: 11px;
-}
-
-.is-mobile .oc-home-actions-card-top .oc-home-action.is-icon-only {
-  width: 34px;
-  min-width: 34px;
-}
-
-@container (max-width: 430px) {
-  .oc-home-actions-card-top .oc-home-action-grid:where(*) {
-    grid-template-columns: 34px repeat(2, minmax(0, 1fr));
-  }
-
-  .oc-home-actions-card-top .oc-home-action:where(*) {
-    min-height: 31px;
-  }
-}
-
 /* Hero-integrated quick actions ------------------------------------- */
 .oc-home-hero .oc-home-action-grid-hero {
   margin-top: 0;
@@ -8354,61 +8323,6 @@ body.theme-light .oc-home-stat:where(*) {
 
   .oc-home-hero-date:where(*):where(*):where(*):where(*) {
     justify-content: flex-end;
-  }
-}
-
-@container (max-width: 760px) {
-  .oc-home-hero:where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*) {
-    grid-template-columns: minmax(0, 1fr);
-    min-height: auto;
-    padding: 10px;
-  }
-
-  .oc-home-hero-text:where(*):where(*),
-  .oc-home-hero-date:where(*):where(*):where(*):where(*):where(*) {
-    display: none;
-  }
-
-  .oc-home-hero-panel:where(*):where(*):where(*):where(*):where(*):where(*):where(*):where(*) {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
-}
-
-.is-mobile .oc-home-hero:where(*):where(*):where(*) {
-  display: grid;
-  padding: 7px;
-}
-
-.is-mobile .oc-home-hero-text,
-.is-mobile .oc-home-hero-date {
-  display: none;
-}
-
-.is-mobile .oc-home-hero-panel:where(*) {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero {
-  grid-template-columns: 34px repeat(4, minmax(56px, 1fr));
-  gap: 5px;
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action {
-  min-height: 32px;
-  padding: 0 5px;
-  border-radius: 7px;
-  font-size: 11px;
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action.is-icon-only {
-  width: 34px;
-  min-width: 34px;
-}
-
-@container (max-width: 430px) {
-  .oc-home-hero .oc-home-action-grid-hero:where(*) {
-    grid-template-columns: 34px repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -8509,97 +8423,219 @@ body.theme-light .oc-home-stat:where(*) {
   }
 }
 
-/* Mobile hero height guard ------------------------------------------ */
+/* Mobile home — canonical presentation ------------------------------
+ * This is the single mobile authority for the Home dashboard. Keep the
+ * information architecture shared with desktop; only reflow it here. */
+body.is-mobile .oc-home,
+body .is-mobile .oc-home {
+  --home-line: rgba(113, 128, 150, 0.16);
+  --home-paper: color-mix(in srgb, var(--background-primary) 94%, var(--background-secondary) 6%);
+  --home-paper-2: color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary) 8%);
+  width: 100%;
+  max-width: 100%;
+  padding: 10px 10px calc(16px + env(safe-area-inset-bottom, 0px));
+  gap: 10px;
+  overflow-x: hidden;
+}
+
+body.theme-light.is-mobile .oc-home,
+body.theme-light .is-mobile .oc-home {
+  --home-line: rgba(71, 85, 105, 0.12);
+  --home-paper: #ffffff;
+  --home-paper-2: #f6f8fb;
+}
+
+body.theme-dark.is-mobile .oc-home,
+body.theme-dark .is-mobile .oc-home {
+  --home-line: rgba(226, 232, 240, 0.09);
+  --home-paper: color-mix(in srgb, var(--background-primary) 91%, #18202c 9%);
+  --home-paper-2: color-mix(in srgb, var(--background-secondary) 90%, #111827 10%);
+}
+
+.is-mobile .oc-home-hero,
+.is-mobile .oc-home-card,
+.is-mobile .oc-home-stat {
+  border: 1px solid var(--home-line);
+  border-radius: 14px;
+  background: var(--home-paper);
+  box-shadow: none;
+}
+
 .is-mobile .oc-home-hero {
-  flex: 0 0 auto;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   height: auto;
+  padding: 14px;
+  gap: 11px;
+  align-items: start;
   overflow: visible;
-  align-items: center;
-  padding: 2px 6px;
+  border-left-width: 1px;
+  flex: 0 0 auto;
 }
 
-.is-mobile .oc-home-hero-panel:where(*):where(*) {
-  min-height: 34px;
-  align-items: stretch;
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero:where(*) {
-  min-height: 34px;
-  grid-auto-rows: 34px;
-  align-items: stretch;
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action:where(*) {
-  height: 34px;
-  min-height: 34px;
-  line-height: 1;
-  align-self: stretch;
-}
-
-@container (max-width: 430px) {
-  .is-mobile .oc-home-hero:where(*):where(*):where(*):where(*) {
-    min-height: 82px;
-  }
-
-  .is-mobile .oc-home-hero .oc-home-action-grid-hero:where(*):where(*) {
-    grid-auto-rows: 34px;
-    row-gap: 5px;
-  }
-}
-
-.is-mobile .oc-home-hero-panel:where(*):where(*):where(*) {
-  min-height: 0;
-  align-items: center;
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero:where(*):where(*):where(*) {
-  min-height: 0;
-  grid-auto-rows: 32px;
-  gap: 5px;
-  align-items: center;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.is-mobile .oc-home-hero .oc-home-action-grid-hero::-webkit-scrollbar {
+.is-mobile .oc-home-hero::before,
+.is-mobile .oc-home-card::before,
+.is-mobile .oc-home-stat::after {
   display: none;
 }
 
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action:where(*):where(*) {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 5px;
-  border-radius: 7px;
-  font-size: 11px;
+.is-mobile .oc-home-hero-text {
+  display: block;
+  min-width: 0;
 }
 
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action.is-icon-only:where(*) {
-  width: 34px;
-  min-width: 34px;
+.is-mobile .oc-home-eyebrow {
+  display: none;
 }
 
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action-icon svg,
-.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action-icon .svg-icon {
-  width: 17px;
-  height: 17px;
+.is-mobile .oc-home-heading {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.25;
 }
 
-@container (max-width: 430px) {
-  .is-mobile .oc-home-hero:where(*):where(*):where(*):where(*):where(*) {
-    min-height: 0;
-  }
+.is-mobile .oc-home-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
 
-  .is-mobile .oc-home-hero .oc-home-action-grid-hero:where(*):where(*):where(*):where(*) {
-    grid-template-columns: 34px repeat(4, minmax(56px, 1fr));
-    grid-auto-rows: 32px;
-    row-gap: 0;
-  }
+.is-mobile .oc-home-hero-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+}
 
-  .is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action:where(*):where(*):where(*) {
-    height: 32px;
-    min-height: 32px;
-  }
+.is-mobile .oc-home-hero-date {
+  display: flex;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.is-mobile .oc-home-hero .oc-home-action-grid-hero {
+  position: static;
+  display: grid;
+  grid-template-columns: 44px repeat(4, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  gap: 4px;
+  overflow: visible;
+}
+
+.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  padding: 6px 3px;
+  justify-content: center;
+  gap: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--home-paper-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action:not(.is-icon-only) .oc-home-action-icon {
+  display: none;
+}
+
+.is-mobile .oc-home-hero .oc-home-action-grid-hero .oc-home-action.is-icon-only {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  justify-content: center;
+}
+
+.is-mobile .oc-home-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  overflow: visible;
+}
+
+.is-mobile .oc-home-stat {
+  width: auto;
+  min-width: 0;
+  min-height: 74px;
+  padding: 10px;
+  gap: 8px;
+  overflow: hidden;
+  grid-column: span 2;
+}
+
+.is-mobile .oc-home-stat:nth-child(1),
+.is-mobile .oc-home-stat:nth-child(2) {
+  grid-column: span 3;
+}
+
+.is-mobile .oc-home-stat:nth-child(n + 3) .oc-home-stat-detail {
+  display: none;
+}
+
+.is-mobile .oc-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.is-mobile .oc-home-card {
+  padding: 13px;
+  overflow: hidden;
+}
+
+.is-mobile .oc-home-focus,
+.is-mobile .oc-home-task-list,
+.is-mobile .oc-home-heatmap-wrap,
+.is-mobile .oc-home-recent-item {
+  border-color: transparent;
+  background: var(--home-paper-2);
+  box-shadow: none;
+}
+
+.is-mobile .oc-home-task-empty-inline {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.is-mobile .oc-home-card-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 7px;
+}
+
+.is-mobile .oc-home-card-actions .oc-home-action {
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 8px;
+  justify-content: center;
+  border-color: transparent;
+  white-space: normal;
+}
+
+.is-mobile .oc-home-card-actions .oc-home-action-label {
+  line-height: 1.35;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.is-mobile .oc-home-heatmap-wrap {
+  margin-inline: 0;
+  padding: 10px;
 }
 
 /* Final mobile capture overrides: keep the adaptive sheet above later theme rules. */
@@ -8649,4 +8685,428 @@ body.theme-light .oc-home-stat:where(*) {
 
 .oc-shortcut-simple-hint {
   line-height: 1.55;
+}
+
+/* Mobile utility controls stay visible without inflating the dense home/chat UI. */
+.is-mobile .oc-user-msg-actions,
+.is-mobile .oc-assistant-msg-actions {
+  position: static;
+  opacity: 1;
+  margin-top: 4px;
+  gap: 4px;
+}
+
+.oc-home-project:focus-visible,
+.oc-home-recent-item:focus-visible,
+.oc-home-heatmap-cell.is-clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--oc-brand-strong) 72%, transparent);
+  outline-offset: 2px;
+}
+
+.is-mobile .oc-context-file-picker-item {
+  min-height: 44px;
+}
+
+.is-mobile .oc-text-copy-btn,
+.is-mobile .oc-inline-action,
+.is-mobile .oc-code-copy-btn {
+  min-width: 44px;
+  min-height: 44px;
+  opacity: 1;
+}
+
+.is-mobile .oc-text-copy-btn,
+.is-mobile .oc-inline-action {
+  border-color: transparent;
+  background: transparent;
+}
+
+.is-mobile .oc-skill-editor-modal,
+.is-mobile .oc-template-editor-modal {
+  box-sizing: border-box;
+  min-width: 0;
+  width: calc(100vw - 24px);
+  max-width: 100%;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+}
+
+.is-mobile .oc-session-rename-input,
+.is-mobile .oc-context-file-picker-search,
+.is-mobile .oc-model-search,
+.is-mobile .oc-prompt-input,
+.is-mobile .oc-skill-editor-input,
+.is-mobile .oc-ask-other-text {
+  font-size: 16px;
+  min-height: 44px;
+}
+
+.is-mobile .oc-skill-editor-input,
+.is-mobile .oc-skill-editor-body,
+.is-mobile .oc-template-editor-body {
+  font-size: 16px;
+}
+
+.is-mobile .oc-skill-editor-actions,
+.is-mobile .oc-template-editor-actions,
+.is-mobile .oc-skill-mgmt-actions,
+.is-mobile .oc-template-mgmt-actions {
+  flex-wrap: wrap;
+}
+
+.is-mobile .oc-skill-editor-actions button,
+.is-mobile .oc-template-editor-actions button,
+.is-mobile .oc-skill-mgmt-actions button,
+.is-mobile .oc-template-mgmt-actions button {
+  min-height: 44px;
+}
+
+.is-mobile .oc-model-modal-actions button,
+.is-mobile .oc-perm-actions button,
+.is-mobile .oc-prompt-actions button,
+.is-mobile .oc-ask-actions button,
+.is-mobile .oc-release-actions button {
+  min-height: 44px;
+}
+
+.is-mobile .oc-model-item,
+.is-mobile .oc-skill-item,
+.is-mobile .oc-ask-option label {
+  min-height: 44px;
+}
+
+.is-mobile .claudian-ask-question-inline {
+  font-size: 14px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+}
+
+.is-mobile .claudian-ask-tab-bar {
+  overflow-x: auto;
+  padding-inline: max(10px, env(safe-area-inset-left, 0px));
+}
+
+.is-mobile .claudian-ask-item {
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+}
+
+.is-mobile .claudian-ask-item input.claudian-ask-custom-text,
+.is-mobile .claudian-ask-item input.claudian-ask-custom-text:hover,
+.is-mobile .claudian-ask-item input.claudian-ask-custom-text:focus {
+  font-size: 16px;
+  min-height: 44px;
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .is-mobile .oc-header { padding-top: max(6px, env(safe-area-inset-top, 0px)); }
+  .is-mobile .oc-composer { padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)); }
+  .is-mobile .oc-inline-question-host.is-active { max-height: 46%; }
+
+  /* Preserve the message/question viewport on short landscape screens. The
+   * text field and toolbar share one row; linked-context chips still span the
+   * full width when present. Touch controls keep their 44px contract. */
+  .is-mobile .oc-input-wrapper {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "context context"
+      "input toolbar";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+
+  .is-mobile .oc-context-row {
+    grid-area: context;
+  }
+
+  .is-mobile .oc-composer textarea,
+  .is-mobile .oc-composer .oc-input,
+  .is-mobile .oc-composer-input,
+  .is-mobile .oc-input-wrapper textarea {
+    grid-area: input;
+    width: 100%;
+    min-height: 44px;
+    max-height: 44px;
+    padding-block: 4px;
+  }
+
+  .is-mobile .oc-input-toolbar {
+    grid-area: toolbar;
+    padding: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-root,
+  .oc-root *,
+  .oc-root *::before,
+  .oc-root *::after,
+  .oc-skill-editor-modal,
+  .oc-skill-editor-modal *,
+  .oc-template-editor-modal,
+  .oc-template-editor-modal *,
+  .claudian-ask-question-inline,
+  .claudian-ask-question-inline * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Shared mobile form + modal contract. Keep this final so legacy, component-
+ * specific sizing cannot quietly reduce touch targets on a narrow screen. */
+:root {
+  --oc-mobile-touch-target: 44px;
+}
+
+.is-mobile .oc-responsive-modal-shell {
+  box-sizing: border-box;
+  width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  max-width: 100%;
+  max-height: calc(100vh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.is-mobile .oc-responsive-modal {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+}
+
+.is-mobile .oc-responsive-modal :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select),
+.is-mobile .oc-settings-root .setting-item-control :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: var(--oc-mobile-touch-target);
+  font-size: 16px;
+}
+
+.is-mobile .oc-responsive-modal button,
+.is-mobile .oc-responsive-modal summary,
+.is-mobile .oc-settings-root .setting-item-control button {
+  min-height: var(--oc-mobile-touch-target);
+}
+
+.is-mobile .oc-responsive-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.is-mobile .oc-responsive-modal-actions > button {
+  flex: 1 1 120px;
+}
+
+.is-mobile .oc-responsive-modal :is(
+  .oc-model-modal-actions,
+  .oc-perm-actions,
+  .oc-skill-editor-actions,
+  .oc-ask-actions,
+  .oc-prompt-actions,
+  .oc-template-editor-actions,
+  .oc-release-actions
+) {
+  flex-wrap: wrap;
+}
+
+.is-mobile .oc-model-list,
+.is-mobile .oc-skill-list {
+  max-height: min(360px, calc(100dvh - 260px));
+}
+
+@media (max-width: 520px) {
+  .is-mobile .oc-settings-root .setting-item {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .is-mobile .oc-settings-root .setting-item-info,
+  .is-mobile .oc-settings-root .setting-item-control {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .is-mobile .oc-settings-root .setting-item-info {
+    flex: 1 1 100%;
+  }
+
+  .is-mobile .oc-settings-root .setting-item-control {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .is-mobile .oc-settings-root .setting-item-control > :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+    width: 100%;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .is-mobile .oc-responsive-modal-shell {
+    max-height: calc(100dvh - 12px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+
+  .is-mobile .oc-responsive-modal {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.is-mobile .oc-capture-btn,
+.is-mobile .oc-home-task-row,
+.is-mobile .oc-message-context-chip {
+  min-height: var(--oc-mobile-touch-target);
+}
+
+/* Native selectable rows share one visual reset; interaction semantics live in
+ * the shared picker controller instead of being reimplemented with click-only divs. */
+.oc-model-item {
+  appearance: none;
+  width: 100%;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.oc-context-file-picker-item {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.oc-context-file-picker-item-text,
+.oc-context-file-picker-item-name,
+.oc-context-file-picker-item-path,
+.oc-slash-command-item-command,
+.oc-model-item-id,
+.oc-model-item-meta {
+  display: block;
+}
+
+/* Project-card actions are siblings: the main region opens the file while the
+ * explicit chat button remains an independent native control. */
+.oc-home-project {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  cursor: default;
+}
+
+.oc-home-project-main {
+  min-width: 0;
+  cursor: pointer;
+  outline: none;
+}
+
+.oc-home-project-chat {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.oc-home-project-main:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--oc-brand-strong) 72%, transparent);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+/* Review rows are native buttons so every answer can be revisited with a
+ * keyboard or VoiceOver without changing their compact visual hierarchy. */
+.claudian-ask-review-pair {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.claudian-ask-review-pair:hover,
+.claudian-ask-review-pair:focus-visible {
+  background: var(--background-modifier-hover);
+}
+
+.claudian-ask-review-pair:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--oc-brand-strong) 72%, transparent);
+  outline-offset: 2px;
+}
+
+.claudian-ask-review-body,
+.claudian-ask-review-q-text,
+.claudian-ask-review-a-text,
+.claudian-ask-review-empty {
+  display: block;
+}
+
+.is-mobile .claudian-ask-review-pair {
+  min-height: var(--oc-mobile-touch-target);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-responsive-modal,
+  .oc-responsive-modal * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.oc-home-heatmap-grid button.oc-home-heatmap-cell {
+  appearance: none;
+  border: 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  font: inherit;
+  box-shadow: none;
+}
+
+/* Mobile light-theme rules above style generic activity cards. Response stats
+ * are deliberately not a card: keep the same quiet, unframed footer on every
+ * platform and theme. */
+:is(body.is-mobile, body .is-mobile) .oc-message-meta:where(*) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:is(body.theme-light.is-mobile, body.theme-light .is-mobile, body:not(.theme-dark).is-mobile, body:not(.theme-dark) .is-mobile) .oc-message-meta:where(*) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }

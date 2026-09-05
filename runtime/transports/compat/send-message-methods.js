@@ -1,3 +1,7 @@
+const {
+  reconcileTerminalAssistantTimeline,
+} = require("../shared/assistant-activity-timeline");
+
 function createSendMessageMethods(deps = {}) {
   const {
     streamPseudo,
@@ -486,6 +490,7 @@ function createSendMessageMethods(deps = {}) {
       text: "",
       reasoning: "",
       meta: "",
+      stats: null,
       blocks: [],
       completed: false,
     };
@@ -496,6 +501,7 @@ function createSendMessageMethods(deps = {}) {
         text: String(payload && payload.text ? payload.text : ""),
         reasoning: String(payload && payload.reasoning ? payload.reasoning : ""),
         meta: String(payload && payload.meta ? payload.meta : ""),
+        stats: payload && payload.stats && typeof payload.stats === "object" ? payload.stats : null,
         blocks: payload && Array.isArray(payload.blocks) ? payload.blocks : [],
         completed: this.isMessageEnvelopeCompleted(envelope),
       };
@@ -512,6 +518,7 @@ function createSendMessageMethods(deps = {}) {
         text: String(streamed.text || ""),
         reasoning: String(streamed.reasoning || ""),
         meta: String(streamed.meta || ""),
+        stats: streamed.stats && typeof streamed.stats === "object" ? streamed.stats : finalized.stats,
         blocks: Array.isArray(streamed.blocks) ? streamed.blocks : [],
         completed: Boolean(streamed.completed),
       };
@@ -548,6 +555,7 @@ function createSendMessageMethods(deps = {}) {
         text: String(streamed.text || ""),
         reasoning: String(streamed.reasoning || ""),
         meta: String(streamed.meta || ""),
+        stats: streamed.stats && typeof streamed.stats === "object" ? streamed.stats : finalized.stats,
         blocks: Array.isArray(streamed.blocks) ? streamed.blocks : [],
         completed: Boolean(streamed.completed),
       };
@@ -579,6 +587,7 @@ function createSendMessageMethods(deps = {}) {
           text: hint,
           reasoning: "",
           meta: hint,
+          stats: null,
           blocks: [],
           completed: false,
         };
@@ -724,10 +733,13 @@ function createSendMessageMethods(deps = {}) {
       }
     }
 
+    finalized = reconcileTerminalAssistantTimeline(streamed, finalized);
+
     const messageId = finalized.messageId;
     const text = finalized.text || "";
     const reasoning = finalized.reasoning || "";
     const meta = finalized.meta || "";
+    const stats = finalized.stats && typeof finalized.stats === "object" ? finalized.stats : null;
     const blocks = Array.isArray(finalized.blocks) ? finalized.blocks : [];
 
     if (this.settings.enableStreaming) {
@@ -755,7 +767,7 @@ function createSendMessageMethods(deps = {}) {
         blockCount: blocks.length,
         messageId,
       })}`);
-      return { messageId, text, reasoning, meta, blocks, sessionId };
+      return { messageId, text, reasoning, meta, stats, blocks, sessionId };
     } finally {
       await questionWatch.stop();
     }

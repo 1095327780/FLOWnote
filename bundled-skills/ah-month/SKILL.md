@@ -1,6 +1,10 @@
 ---
 name: ah-month
 description: Use when 需要在月底做月度复盘，统一处理本月残留记录与“以后再说”缓冲，并产出下月方向与月记时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

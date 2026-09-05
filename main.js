@@ -16,6 +16,10 @@ const {
   normalizePath = (value) => String(value || ""),
   requestUrl = async () => ({ status: 500, text: "", json: null }),
 } = obsidianModule;
+const {
+  migrateLegacyTemplaterConfig,
+} = require("./runtime/templater-config-migration");
+const { DiagnosticTrace } = require("./runtime/diagnostic-trace");
 
 const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 
@@ -393,6 +397,20 @@ class FLOWnoteAssistantPlugin extends Plugin {
     this.__mobileMethodsLoaded = true;
   }
 
+  async reconcileLegacyTemplaterConfig() {
+    const result = await migrateLegacyTemplaterConfig(this);
+    if (result && result.migrated) {
+      this.log(`repaired obsolete Templater scripts-folder setting via ${result.source}`);
+    }
+    return result;
+  }
+
+  scheduleLegacyTemplaterConfigReconciliation() {
+    const workspace = this.app && this.app.workspace;
+    if (!workspace || typeof workspace.onLayoutReady !== "function") return;
+    workspace.onLayoutReady(() => this.reconcileLegacyTemplaterConfig());
+  }
+
   async onload() {
     // Register the custom FLOWnote icon BEFORE anything (desktop or
     // mobile) calls addRibbonIcon with it. Skipping this causes the
@@ -401,6 +419,9 @@ class FLOWnoteAssistantPlugin extends Plugin {
       const { registerFLOWnoteIcons } = require("./runtime/icons");
       registerFLOWnoteIcons(obsidianModule.addIcon);
     } catch (_e) { /* non-fatal */ }
+
+    await this.reconcileLegacyTemplaterConfig();
+    this.scheduleLegacyTemplaterConfigReconciliation();
 
     if (Platform.isMobile) {
       this.ensureMobileMethodsLoaded();
@@ -450,6 +471,17 @@ class FLOWnoteAssistantPlugin extends Plugin {
       }
 
       this.sessionStore = new runtime.SessionStore(this);
+      const recoveredRuns = this.sessionStore.recoverInterruptedExecutions(Date.now());
+      if (recoveredRuns > 0) {
+        this.log(`recovered ${recoveredRuns} interrupted agent execution(s)`);
+        await this.persistState();
+      }
+      const checkpointSweep = typeof this.sweepContinuationCheckpoints === "function"
+        ? await this.sweepContinuationCheckpoints()
+        : null;
+      if (checkpointSweep && checkpointSweep.removed > 0) {
+        this.log(`removed ${checkpointSweep.removed} orphaned continuation checkpoint(s)`);
+      }
 
       const vaultPath = this.getVaultPath();
       this.skillService = new runtime.SkillService(vaultPath, this.settings);
@@ -543,27 +575,17 @@ class FLOWnoteAssistantPlugin extends Plugin {
     if (settings.debugLogs) {
       console.log("[FLOWnote]", line);
     }
-    // Always mirror [direct-agent] lines to a file inside the plugin
-    // dir — these are the only logs we currently have for the new
-    // agent runtime, and the user can't easily share dev-tools console
-    // output. File logging is gated NOT on debugLogs because it's a
-    // diagnostic for a maturing subsystem (will be removed once stable).
-    const text = String(line || "");
-    if (text.startsWith("[direct-agent]")) {
-      this._appendAgentTrace(text).catch(() => { /* swallow */ });
-    }
   }
 
-  async _appendAgentTrace(line) {
-    try {
-      const adapter = this.app && this.app.vault && this.app.vault.adapter;
-      if (!adapter || typeof adapter.append !== "function") return;
-      const path = `${this.manifest && this.manifest.dir ? this.manifest.dir : ".obsidian/plugins/flownote"}/agent-trace.log`;
-      const ts = new Date().toISOString();
-      await adapter.append(path, `${ts} ${line}\n`);
-    } catch {
-      // Never let logging break the plugin. Silent on failure.
+  traceDiagnostic(event, metadata) {
+    if (!this._diagnosticTrace) {
+      this._diagnosticTrace = new DiagnosticTrace({
+        adapter: this.app && this.app.vault && this.app.vault.adapter,
+        getEnabled: () => Boolean(this.settings && this.settings.debugLogs),
+        getPath: () => `${this.manifest && this.manifest.dir ? this.manifest.dir : ".obsidian/plugins/flownote"}/agent-trace.log`,
+      });
     }
+    return this._diagnosticTrace.record(event, metadata);
   }
 
   getVaultPath() {

@@ -236,6 +236,11 @@ const sessionBootstrapMethods = {
     this.schemaVersion = Number.isFinite(rawSchemaVersion) && rawSchemaVersion > 0
       ? Math.floor(rawSchemaVersion)
       : RUNTIME_SCHEMA_VERSION;
+    const rawRuntimeRevision = Number(raw && raw.runtimeRevision ? raw.runtimeRevision : 0);
+    this.runtimeRevision = Number.isSafeInteger(rawRuntimeRevision) && rawRuntimeRevision > 0
+      ? rawRuntimeRevision
+      : 0;
+    this.committedRuntimeRevision = this.runtimeRevision;
 
     if (raw.settings || raw.runtimeState) {
       const rawSettings = raw.settings || {};
@@ -317,11 +322,42 @@ const sessionBootstrapMethods = {
 
   async persistState() {
     this.schemaVersion = RUNTIME_SCHEMA_VERSION;
-    await this.saveData({
+    const revision = Math.max(0, Number(this.runtimeRevision || 0)) + 1;
+    this.runtimeRevision = revision;
+    // Capture an immutable generation before entering the async save queue.
+    // Otherwise a later UI mutation can change the object being serialized by
+    // an earlier saveData call, and two overlapping writes can land backwards.
+    const snapshot = JSON.parse(JSON.stringify({
       schemaVersion: this.schemaVersion,
+      runtimeRevision: revision,
       settings: this.settings,
       runtimeState: this.runtimeState,
-    });
+    }));
+    const previous = this.__flownotePersistTail || Promise.resolve();
+    const commit = previous
+      .catch(() => undefined)
+      .then(() => this.saveData(snapshot))
+      .then(() => {
+        this.committedRuntimeRevision = revision;
+        return revision;
+      });
+    this.__flownotePersistTail = commit;
+    return commit;
+  },
+
+  async sweepContinuationCheckpoints(options = {}) {
+    try {
+      const { sweepOrphanedContinuationCheckpoints } = require("../chat/direct-checkpoint-lifecycle");
+      return await sweepOrphanedContinuationCheckpoints(this, {
+        minimumAgeMs: options.minimumAgeMs === undefined ? 300_000 : options.minimumAgeMs,
+        now: options.now,
+      });
+    } catch (error) {
+      if (typeof this.log === "function") {
+        this.log(`continuation checkpoint sweep skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return null;
+    }
   },
 
   showAgentModeNoticeIfNeeded() {
@@ -465,6 +501,9 @@ const sessionBootstrapMethods = {
     const removed = this.sessionStore.removeSession(sessionId);
     if (!removed) return false;
     await this.persistState();
+    // Session state is durable before mark-and-sweep. The grace window keeps
+    // any concurrently created, not-yet-committed content blob safe.
+    void this.sweepContinuationCheckpoints().catch(() => null);
     return true;
   },
 

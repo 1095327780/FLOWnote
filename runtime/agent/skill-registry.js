@@ -47,79 +47,15 @@
 const MAX_LISTING_DESC_CHARS = 250;
 const MAX_RESOURCE_LISTING = 200;
 
-// Front matter parsing — we accept the YAML-subset commonly used in
-// Anthropic skill manifests: `key: value` and `key: [a, b, c]`. We do
-// NOT pull in a full YAML dependency; the format is intentionally flat.
+const {
+  splitSkillFrontmatter,
+  parseFlowNoteCompletionMetadata,
+} = require("../skill-frontmatter");
+
+// Public alias kept for callers/tests. All surfaces now share the same full
+// YAML decoder instead of maintaining subtly different flat parsers.
 function parseFrontmatter(raw) {
-  const out = { frontmatter: {}, body: raw };
-  if (!raw.startsWith("---")) return out;
-  const match = raw.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/);
-  if (!match) return out;
-  const fmText = match[1] || "";
-  // Strip any blank lines between the closing `---` and the start of the body.
-  const body = raw.slice(match[0].length).replace(/^(?:\r?\n)+/, "");
-  const fm = {};
-  const lines = fmText.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/\s+$/, "");
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    if (/^\s/.test(line)) continue;
-    const colon = line.indexOf(":");
-    if (colon === -1) continue;
-    const key = line.slice(0, colon).trim();
-    let value = line.slice(colon + 1).trim();
-    if (!key) continue;
-
-    if (value === "|" || value === ">") {
-      const block = [];
-      let j = i + 1;
-      for (; j < lines.length; j++) {
-        const next = lines[j];
-        if (next.trim() && !/^\s/.test(next)) break;
-        block.push(next.replace(/^\s{2}/, ""));
-      }
-      fm[key] = value === ">" ? block.join(" ").replace(/\s+/g, " ").trim() : block.join("\n").trimEnd();
-      i = j - 1;
-      continue;
-    }
-
-    if (value === "") {
-      const list = [];
-      let j = i + 1;
-      for (; j < lines.length; j++) {
-        const next = lines[j].replace(/\s+$/, "");
-        if (!next.trim()) continue;
-        const item = next.match(/^\s*-\s*(.*)$/);
-        if (item) {
-          list.push(parseFrontmatterScalar(item[1].trim()));
-          continue;
-        }
-        if (/^\s/.test(next)) continue;
-        break;
-      }
-      if (list.length > 0) {
-        fm[key] = list.map(String).filter(Boolean);
-        i = j - 1;
-        continue;
-      }
-    }
-
-    fm[key] = parseFrontmatterScalar(value);
-  }
-  return { frontmatter: fm, body };
-}
-
-function parseFrontmatterScalar(value) {
-  if (typeof value !== "string") return value;
-  if (value.startsWith("[") && value.endsWith("]")) {
-    return splitDelimitedList(value.slice(1, -1), { splitOnSpace: false })
-      .map((s) => stripQuotes(s.trim()))
-      .filter(Boolean);
-  }
-  const stripped = stripQuotes(value);
-  if (stripped === "true" || stripped === "false") return stripped === "true";
-  return stripped;
+  return splitSkillFrontmatter(raw);
 }
 
 function stripQuotes(value) {
@@ -224,7 +160,7 @@ function coerceBoolean(value, defaultValue) {
   return defaultValue;
 }
 
-function buildSkillManifest({ frontmatter, body, dirPath, filePath, resourcePaths, embeddedResourceFiles } = {}) {
+function buildSkillManifest({ frontmatter, body, dirPath, filePath, resourcePaths, embeddedResourceFiles, frontmatterError } = {}) {
   const slug = dirNameOf(dirPath || (filePath ? String(filePath).replace(/\/SKILL\.md$/i, "") : ""));
   const name = coerceString(firstDefined(frontmatter, ["name"])) || slug;
   const description = coerceString(firstDefined(frontmatter, ["description"])) || "";
@@ -251,6 +187,12 @@ function buildSkillManifest({ frontmatter, body, dirPath, filePath, resourcePath
     model: coerceString(firstDefined(frontmatter, ["model"])),
     context: coerceString(firstDefined(frontmatter, ["context"])),
     agent: coerceString(firstDefined(frontmatter, ["agent"])),
+    // Preserve standard Agent Skills metadata verbatim. The completion policy
+    // is a separately normalized, fail-closed projection for runtime use.
+    metadata: frontmatter && typeof frontmatter.metadata === "object" && !Array.isArray(frontmatter.metadata)
+      ? frontmatter.metadata
+      : undefined,
+    completionPolicy: parseFlowNoteCompletionMetadata(frontmatter, { frontmatterError }),
     paths: paths.length > 0 ? paths : undefined,
     disableModelInvocation: coerceBoolean(
       firstDefined(frontmatter, ["disable-model-invocation", "disable_model_invocation", "disableModelInvocation"]),
@@ -423,7 +365,7 @@ async function loadSkills({ rootPath, vault } = {}) {
     try {
       const raw = await readFile(vault, filePath);
       if (typeof raw !== "string") continue;
-      const { frontmatter, body } = parseFrontmatter(raw);
+      const { frontmatter, body, errorCode: frontmatterError } = parseFrontmatter(raw);
       const resourcePaths = Array.isArray(entry.resourcePaths)
         ? entry.resourcePaths
         : Array.isArray(entry.resources)
@@ -435,6 +377,7 @@ async function loadSkills({ rootPath, vault } = {}) {
         dirPath,
         filePath,
         resourcePaths,
+        frontmatterError,
       });
       if (!manifest.name) continue;
       out.push(manifest);

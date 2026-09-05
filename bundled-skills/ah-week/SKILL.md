@@ -1,6 +1,10 @@
 ---
 name: ah-week
 description: Use when 需要在周末做周回顾，处理本周残留，并基于“上周计划 vs 本周执行”且对齐本月计划来确认下周计划时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

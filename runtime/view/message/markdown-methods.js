@@ -291,8 +291,7 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
       this.attachInternalLinkHandlers(container);
       if (typeof onRendered === "function") onRendered();
       const shouldForceBottom = Boolean(
-        this.currentAbort
-        || (typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom()),
+        typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom(),
       );
       this.scheduleScrollMessagesToBottom(shouldForceBottom);
     })
@@ -309,8 +308,7 @@ function renderMarkdownSafely(container, markdownText, onRendered) {
       this.enhanceVaultPathLinks(container);
       this.attachInternalLinkHandlers(container);
       const shouldForceBottom = Boolean(
-        this.currentAbort
-        || (typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom()),
+        typeof this.hasActiveForceBottom === "function" && this.hasActiveForceBottom(),
       );
       this.scheduleScrollMessagesToBottom(shouldForceBottom);
     });

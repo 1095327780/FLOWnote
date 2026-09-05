@@ -1,6 +1,11 @@
 ---
 name: ah-note
-description: Use for the morning workflow: create or update today's daily note, carry over yesterday's plan, set one focus, and prepare today's tasks.
+description: "Use for the morning workflow: create or update today's daily note, carry over yesterday's plan, set one focus, and prepare today's tasks."
+metadata:
+  flownote:
+    completion:
+      mode: effect
+      required_interactions: [ask_user]
 ---
 
 # Daily Note Creation

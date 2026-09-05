@@ -1,6 +1,10 @@
 ---
 name: ah-month
-description: Use for monthly review and planning: synthesize weekly reviews, project progress, and direction for the next month.
+description: "Use for monthly review and planning: synthesize weekly reviews, project progress, and direction for the next month."
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Monthly Review
@@ -20,4 +24,3 @@ Goal: turn weekly execution into monthly direction.
 - Do not overfit to a single day.
 - Separate output, learning, and system friction.
 - Use configured note paths over examples.
-

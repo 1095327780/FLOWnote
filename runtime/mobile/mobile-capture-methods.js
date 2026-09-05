@@ -5,6 +5,10 @@ const { normalizeMobileSettings } = require("./mobile-settings-utils");
 const { CaptureModal } = require("./capture-modal");
 const { MobileSettingsTab } = require("./mobile-settings-tab");
 const { registerShortcutProtocolHandlers } = require("./shortcut-protocol");
+const {
+  getEmbeddedSkillCatalog,
+  mergeAuthoritativeSkillCatalog,
+} = require("../skill-catalog");
 const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 const MOBILE_COMMAND_ICONS = Object.freeze({
   quickCapture: "sparkles",
@@ -13,90 +17,34 @@ const MOBILE_COMMAND_ICONS = Object.freeze({
   newSession: "plus",
 });
 
-// Read the embedded bundled-skills index — we use it as the last-ditch
-// fallback when the vault-side scan finds nothing (e.g. a fresh install
-// where the user hasn't synced any skill folders yet).
-const embeddedBundledSkillsModule = (() => {
-  try { return require("../generated/bundled-skills-embedded"); } catch { return {}; }
-})();
-const EMBEDDED_BUNDLED_SKILLS_FILES =
-  embeddedBundledSkillsModule && embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
-    ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
-    : {};
-
-/**
- * Parse the YAML-ish frontmatter of an embedded SKILL.md and return
- * {name, description}. Cheap — we only need name + description for the
- * slash-command listing.
- */
-function parseEmbeddedSkillFrontmatter(rawText) {
-  const raw = String(rawText || "");
-  if (!raw.startsWith("---")) return { name: "", description: "" };
-  const end = raw.indexOf("\n---", 3);
-  if (end < 0) return { name: "", description: "" };
-  const fmText = raw.slice(3, end).replace(/^\r?\n/, "");
-  const out = { name: "", description: "" };
-  for (const line of fmText.split(/\r?\n/)) {
-    const colon = line.indexOf(":");
-    if (colon <= 0) continue;
-    const key = line.slice(0, colon).trim();
-    let value = line.slice(colon + 1).trim().replace(/^['"]|['"]$/g, "");
-    if (key === "name") out.name = value;
-    else if (key === "description") out.description = value;
-  }
-  return out;
-}
-
 /**
  * Synchronous skill list from the embedded bundle. Used as the initial
  * `__flownoteMobileSkillList` value so `/` autocomplete works the
  * moment the chat view opens, before any vault.adapter scan returns.
  */
 function embeddedSkillListSync() {
-  const seen = new Set();
-  const out = [];
-  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
-    if (!filePath.endsWith("/SKILL.md")) continue;
-    const slug = filePath.split("/")[0];
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-    const { name, description } = parseEmbeddedSkillFrontmatter(
-      EMBEDDED_BUNDLED_SKILLS_FILES[filePath],
-    );
-    out.push({ slug, name: name || slug, description: description || "" });
-  }
-  out.sort((a, b) => a.slug.localeCompare(b.slug));
-  return out;
+  return getEmbeddedSkillCatalog().filter((skill) => skill.userInvocable !== false);
 }
 
 /**
  * Build the slash-command skill list for mobile. Walks the configured
  * skillsDir plus common FLOWnote/OpenCode/Claude skill roots AND
- * always merges the embedded bundle on top — vault wins when both
- * have a slug, embedded fills gaps.
+ * always merges the embedded bundle first. Product-owned bundled Skills keep
+ * their embedded execution contract; vault entries add only non-bundled Skills.
  *
  * Why merge instead of "vault if any, else embedded": iOS Obsidian
- * Sync occasionally drops individual files inside a synced dotfolder
- * (notably the 2-char `ah/` directory). The vault scan returns 20
- * skills but is missing `ah`; a plain "fallback-only-if-empty" model
- * never injects it. Merging means the user sees every skill in the
- * popup AND the agent can `skill_invoke` any of them.
+ * Sync can leave a bundled SKILL.md stale or drop an individual file. If that
+ * stale copy wins, mobile chat loses newly declared interaction/effect policy.
+ * Embedded-first identity ownership keeps execution semantics versioned with
+ * the plugin while still discovering every user-authored Skill from the vault.
  */
 async function loadMobileSkillList(plugin) {
   const tried = [];
-  const bySlug = new Map();
-  const addEntry = (entry) => {
-    if (!entry) return;
-    const slug = String(entry.slug || "").trim();
-    if (!slug || bySlug.has(slug)) return;
-    bySlug.set(slug, {
-      slug,
-      name: String(entry.name || slug),
-      description: String(entry.description || ""),
-    });
-  };
+  const userEntries = [];
 
   const { listSkills } = require("../settings/skill-management");
+
+  tried.push(`embedded authority → ${getEmbeddedSkillCatalog().length}`);
 
   const originalDir = plugin.settings && plugin.settings.skillsDir;
   const roots = dedupeSkillRoots([
@@ -110,7 +58,7 @@ async function loadMobileSkillList(plugin) {
     try {
       if (plugin.settings) plugin.settings.skillsDir = root;
       const list = await listSkills(plugin);
-      for (const item of list || []) addEntry(item);
+      for (const item of list || []) userEntries.push(item);
       tried.push(`${root || "skillsDir"} → ${list ? list.length : 0}`);
     } catch (e) {
       tried.push(`${root || "skillsDir"} error: ${e && e.message ? e.message : e}`);
@@ -119,22 +67,8 @@ async function loadMobileSkillList(plugin) {
     }
   }
 
-  // Embedded bundle backfill — guarantees `/` autocomplete works
-  //    on first launch AND patches over iOS Sync-dropped folders.
-  let embeddedAdded = 0;
-  for (const filePath of Object.keys(EMBEDDED_BUNDLED_SKILLS_FILES)) {
-    if (!filePath.endsWith("/SKILL.md")) continue;
-    const slug = filePath.split("/")[0];
-    if (!slug || bySlug.has(slug)) continue;
-    const { name, description } = parseEmbeddedSkillFrontmatter(
-      EMBEDDED_BUNDLED_SKILLS_FILES[filePath],
-    );
-    addEntry({ slug, name: name || slug, description: description || "" });
-    embeddedAdded += 1;
-  }
-  tried.push(`embedded backfill → +${embeddedAdded}`);
-
-  const result = Array.from(bySlug.values()).sort((a, b) => a.slug.localeCompare(b.slug));
+  const result = mergeAuthoritativeSkillCatalog(userEntries)
+    .filter((skill) => skill.userInvocable !== false);
   if (typeof plugin.log === "function") {
     plugin.log(`[mobile] slash-command skill list loaded: ${result.length} (${tried.join("; ")})`);
   }
@@ -291,6 +225,19 @@ const mobileCaptureMethodsMixin = {
     }
 
     this.sessionStore = new runtime.SessionStore(this);
+    const recoveredRuns = typeof this.sessionStore.recoverInterruptedExecutions === "function"
+      ? this.sessionStore.recoverInterruptedExecutions(Date.now())
+      : 0;
+    if (recoveredRuns > 0) {
+      if (typeof this.log === "function") this.log(`recovered ${recoveredRuns} interrupted agent execution(s)`);
+      await this.persistState();
+    }
+    const checkpointSweep = typeof this.sweepContinuationCheckpoints === "function"
+      ? await this.sweepContinuationCheckpoints()
+      : null;
+    if (checkpointSweep && checkpointSweep.removed > 0 && typeof this.log === "function") {
+      this.log(`removed ${checkpointSweep.removed} orphaned continuation checkpoint(s)`);
+    }
 
     // Pre-warm the slash-command skill list. Two-phase: a SYNCHRONOUS
     // first pass from the embedded bundle (guarantees `/` autocomplete
@@ -413,4 +360,4 @@ const mobileCaptureMethodsMixin = {
   },
 };
 
-module.exports = { mobileCaptureMethodsMixin };
+module.exports = { mobileCaptureMethodsMixin, embeddedSkillListSync };

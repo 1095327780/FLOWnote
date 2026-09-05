@@ -34,32 +34,65 @@ function ensureBlocksContainer(row) {
   return container;
 }
 
+function hasTimelineFinalBlock(blocks) {
+  return (Array.isArray(blocks) ? blocks : []).some((block) => (
+    String(block && block.type || "").trim().toLowerCase() === "stream-text"
+    && String(block && block.phase || "").trim().toLowerCase() === "final"
+    && Boolean(String(block && (block.text || block.detail) || "").trim())
+  ));
+}
+
+function classifyAssistantTimelineBlocks(rawBlocks) {
+  const blocks = Array.isArray(rawBlocks) ? rawBlocks : [];
+  const finalIndexes = [];
+  blocks.forEach((block, index) => {
+    if (
+      String(block && block.type || "").trim().toLowerCase() === "stream-text"
+      && String(block && block.phase || "").trim().toLowerCase() === "final"
+    ) {
+      finalIndexes.push(index);
+    }
+  });
+  const finalSet = new Set(finalIndexes);
+  const hasProcessSignal = blocks.some((block) => {
+    const type = String(block && block.type || "").trim().toLowerCase();
+    const phase = String(block && block.phase || "").trim().toLowerCase();
+    return phase === "process" || ["tool", "patch", "reasoning", "subtask", "agent"].includes(type);
+  });
+  const processIndexes = finalIndexes.length
+    ? blocks.map((_block, index) => index).filter((index) => !finalSet.has(index))
+    : (hasProcessSignal ? blocks.map((_block, index) => index) : []);
+  const toolCount = processIndexes.filter((index) => {
+    const type = String(blocks[index] && blocks[index].type || "").trim().toLowerCase();
+    return type === "tool" || type === "patch";
+  }).length;
+  return {
+    hasFinal: finalIndexes.length > 0,
+    hasProcess: processIndexes.length > 0,
+    processIndexes,
+    finalIndexes,
+    toolCount,
+  };
+}
+
 function reorderAssistantMessageLayout(row) {
   if (!row) return;
   const body = row.querySelector(".oc-message-content");
   if (!body || body.parentElement !== row) return;
 
   const reasoning = row.querySelector(".oc-message-reasoning");
-  if (reasoning && reasoning.parentElement === row) {
-    row.insertBefore(reasoning, body);
-  }
-
   const parts = row.querySelector(".oc-part-list");
-  if (parts && parts.parentElement === row) {
-    row.insertBefore(parts, body);
-  }
-
+  const runtime = row.querySelector(".oc-runtime-status");
   const meta = row.querySelector(".oc-message-meta");
-  if (meta && meta.parentElement === row) {
-    row.insertBefore(meta, body);
-  }
-
-  row.appendChild(body);
+  const actions = row.querySelector(".oc-assistant-msg-actions");
+  [reasoning, parts, body, runtime, meta, actions].forEach((element) => {
+    if (element && element.parentElement === row) row.appendChild(element);
+  });
 }
 
 function normalizeBlockStatus(status) {
   const value = String(status || "").trim().toLowerCase();
-  if (["completed", "running", "pending", "error"].includes(value)) return value;
+  if (["completed", "running", "pending", "error", "unknown"].includes(value)) return value;
   return "pending";
 }
 
@@ -67,7 +100,7 @@ function resolveDisplayBlockStatus(block, messagePending) {
   const status = this.normalizeBlockStatus(block && block.status);
   if (status === "error" || status === "completed") return status;
   if (messagePending) return status;
-  return "completed";
+  return "unknown";
 }
 
 function blockTypeLabel(type) {
@@ -90,6 +123,7 @@ function blockStatusLabel(status) {
   if (value === "completed") return tFromContext(this, "view.block.status.completed", "Completed");
   if (value === "running") return tFromContext(this, "view.block.status.running", "Running");
   if (value === "error") return tFromContext(this, "view.block.status.error", "Failed");
+  if (value === "unknown") return tFromContext(this, "view.block.status.unknown", "Result unknown — check changes");
   return tFromContext(this, "view.block.status.pending", "Pending");
 }
 
@@ -423,6 +457,7 @@ function fileNameOnly(pathLike) {
 function pickToolInput(block) {
   if (!block || typeof block !== "object") return null;
   if (block.toolInput && typeof block.toolInput === "object") return block.toolInput;
+  if (block.input && typeof block.input === "object") return block.input;
   if (block.raw && block.raw.state && block.raw.state.input && typeof block.raw.state.input === "object") {
     return block.raw.state.input;
   }
@@ -779,6 +814,8 @@ function findMessageRow(messageId) {
 const blockUtilsMethods = {
   ensureReasoningContainer,
   ensureBlocksContainer,
+  hasTimelineFinalBlock,
+  classifyAssistantTimelineBlocks,
   reorderAssistantMessageLayout,
   normalizeBlockStatus,
   resolveDisplayBlockStatus,

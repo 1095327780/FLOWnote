@@ -118,6 +118,13 @@ function createVaultSearchTool({ vault, normalizePath } = {}) {
     name: "vault_search",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "search",
+      targets: [normalize((input && input.path) || "") || "/"],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

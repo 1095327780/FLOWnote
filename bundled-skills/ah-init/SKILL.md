@@ -1,6 +1,10 @@
 ---
 name: ah-init
 description: 知识库初始化与索引管理。用于首次搭建知识库、迁移旧笔记，或后续维护索引统计，统一完成目录校验、页面初始化、索引生成与状态汇报。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。
