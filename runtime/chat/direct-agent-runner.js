@@ -1,15 +1,25 @@
 // Bridge: agent loop + Obsidian Vault → existing chat view handlers.
-//
-// runDirectAgentTurn is the direct-mode counterpart to
-// opencodeClient.sendMessage. It returns the same response shape
-// ({ messageId, text, reasoning, meta, blocks }) so the orchestrator's
-// finalizeAssistantDraft works unchanged.
-//
-// All UI updates flow through the handler callbacks (onToken / onBlocks
-// / onPermissionRequest) that chat-orchestrator passes in. This file
-// does not touch the DOM directly.
-
+// UI updates flow through chat-orchestrator callbacks; this file does not touch the DOM.
 const { runAgentLoop } = require("../agent/agent-loop");
+const { DirectExecutionJournal } = require("./direct-execution-journal");
+const { projectCheckpointRef } = require("../agent/durable-execution-projection");
+const { buildAnthropicHistory } = require("./history-builder");
+const { prepareContinuationContext, buildSuspensionCopy } = require("./direct-continuation-context");
+const {
+  createContinuationCheckpointStore,
+  continuationStoreUnavailableError,
+} = require("./direct-checkpoint-lifecycle");
+const { createDirectActivityTimeline } = require("./direct-activity-timeline");
+const { createDirectUsageAccumulator } = require("./direct-response-stats");
+const {
+  buildVerifiedCompletionSummary,
+  mergeVerifiedCompletionSummary,
+} = require("./direct-completion-summary");
+const {
+  EXECUTION_FALLBACK_COPY,
+  resolveTurnExecutionContract, createExplicitSkillWorkflowContract, createExecutionState,
+  acceptAssistantDelta, recordExecutionReceipt, executionContractLog,
+} = require("../agent/execution-contract");
 const { ToolRegistry } = require("../agent/tool-registry");
 const { createVaultReadTool } = require("../agent/tools/vault-read");
 const { createVaultWriteTool } = require("../agent/tools/vault-write");
@@ -30,57 +40,28 @@ const { createAskUserTool } = require("../agent/tools/ask-user");
 const { createSkillInvokeTool } = require("../agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../agent/tools/skill-resource-read");
 const {
-  loadSkills,
-  formatSkillListing,
-  SkillRegistry,
-  parseFrontmatter,
-  buildSkillManifest,
-  normalizeResourcePaths,
-  substituteArguments,
-  renderSkillTemplateVariables,
+  loadSkills, formatSkillListing, SkillRegistry, parseFrontmatter,
+  buildSkillManifest, normalizeResourcePaths, substituteArguments, renderSkillTemplateVariables,
 } = require("../agent/skill-registry");
-const FILE_MUTATION_TOOLS = /^(vault_write|vault_edit|vault_move|vault_property|vault_daily|vault_create_dir)$/;
+const { skillIdentityKeys } = require("../skill-catalog");
 const { NOTE_PATH_DEFAULTS_BY_LOCALE, getDefaultNotePaths, getSkillDocLocale } = require("../localized-defaults");
 
-// Embedded bundled-skills index — used as a fallback when the user's
-// vault doesn't have skill folders synced yet. The plugin bundle has
-// every shipping skill compiled in; on iOS Obsidian Sync filters
-// dotfolders by default so `.flownote/skills/` is often absent on the
-// mobile device even though it exists on desktop.
-const embeddedBundledSkillsModule = (() => {
-  try { return require("../generated/bundled-skills-embedded"); } catch { return {}; }
-})();
-const EMBEDDED_BUNDLED_SKILLS_FILES =
-  embeddedBundledSkillsModule && embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
-    ? embeddedBundledSkillsModule.EMBEDDED_BUNDLED_SKILLS_FILES
-    : {};
-const { FileStateCache } = require("../agent/file-state-cache");
+// Embedded fallback for devices where synced dotfolders are absent.
+const {
+  EMBEDDED_BUNDLED_SKILLS_FILES,
+  getEmbeddedSkillDocument,
+} = require("../embedded-skill-documents");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
 const { getProviderSpec } = require("../providers/registry");
+const { getIntlLocale, normalizeSupportedLocale, materializeLocalizedMarkdownFiles } = require("../i18n-locale-utils");
 const {
-  getIntlLocale,
-  normalizeSupportedLocale,
-  materializeLocalizedMarkdownFiles,
-} = require("../i18n-locale-utils");
-const {
-  DEFAULT_NOTE_PATHS_ZH,
-  DEFAULT_NOTE_PATHS_EN,
-  DEFAULT_NOTE_PATHS_RU,
-  DEFAULT_META_PATHS_ZH,
-  DEFAULT_META_PATHS_EN,
-  DEFAULT_META_PATHS_RU,
-  getDefaultNotePathsByLocale,
-  getDefaultMetaPathsByLocale,
-  normalizeNotePaths,
-  normalizeMetaPaths,
+  DEFAULT_NOTE_PATHS_ZH, DEFAULT_NOTE_PATHS_EN, DEFAULT_NOTE_PATHS_RU,
+  DEFAULT_META_PATHS_ZH, DEFAULT_META_PATHS_EN, DEFAULT_META_PATHS_RU,
+  getDefaultNotePathsByLocale, getDefaultMetaPathsByLocale, normalizeNotePaths, normalizeMetaPaths,
 } = require("../settings-utils");
 const { BASE_SYSTEM_PROMPT } = require("./direct-agent-system-prompt");
-const {
-  addEmbeddedTemplateAliases,
-  addEmbeddedTemplateVaultOverrides,
-} = require("./embedded-skill-templates");
-
+const { addEmbeddedTemplateAliases, addEmbeddedTemplateVaultOverrides } = require("./embedded-skill-templates");
 const DEFAULT_SKILL_ROOT = ".opencode/skills";
 const SUPPLEMENTAL_SKILL_ROOTS = [
   ".flownote/skills",
@@ -90,9 +71,27 @@ const SUPPLEMENTAL_SKILL_ROOTS = [
 ];
 const pad2 = (value) => String(value).padStart(2, "0");
 
-// Local-timezone YYYY-MM-DD. Local — not UTC — because the user's "today"
-// is whatever calendar date their wall clock shows. Used to anchor the
-// model when it writes daily notes, weekly reviews, etc.
+function resolveMainTurnTokenBudget(settings, provider) {
+  const modelId = provider && provider.userConfig && provider.userConfig.model;
+  const models = provider && provider.spec && Array.isArray(provider.spec.models)
+    ? provider.spec.models
+    : [];
+  const activeModel = models.find((model) => model && model.id === modelId);
+  const modelMax = Number(activeModel && activeModel.maxOutput);
+  const normalizedModelMax = Number.isFinite(modelMax) && modelMax > 0
+    ? Math.floor(modelMax)
+    : 0;
+  const userMax = Number(settings && settings.direct && settings.direct.maxOutputTokens);
+  if (Number.isFinite(userMax) && userMax > 0) {
+    const normalizedUserMax = Math.floor(userMax);
+    return normalizedModelMax > 0
+      ? Math.min(normalizedUserMax, normalizedModelMax)
+      : normalizedUserMax;
+  }
+  return normalizedModelMax || 16_384;
+}
+
+// User-local calendar date for daily and weekly note workflows.
 function getLocalISODate(now) {
   const d = now instanceof Date ? now : new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -102,7 +101,6 @@ function getLocalHHmm(now) {
   const d = now instanceof Date ? now : new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-
 const ZH_WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
 function describeToday(now, locale = "zh-CN") {
@@ -124,6 +122,14 @@ function runnerText(locale, zh, en, ru) {
   if (normalizedLocale === "zh-CN") return zh;
   if (normalizedLocale === "ru") return ru || en;
   return en;
+}
+
+function assistantTextFromContent(content) {
+  return (Array.isArray(content) ? content : [])
+    .filter((block) => block && block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("")
+    .trim();
 }
 
 function getRunnerLocale(owner) {
@@ -197,11 +203,7 @@ function buildSystemPrompt(skillManifests, opts) {
   return parts.join("\n\n");
 }
 
-// Default folder layout the bundled skills hardcode. When the user
-// overrides any of these in `settings.notePaths`, we surface the
-// override to the model in a "Note path overrides" block of the system
-// prompt — the model is instructed to use the override whenever a skill
-// references the default path.
+// Default bundled layout; configured overrides are authoritative.
 const DEFAULT_NOTE_PATH_LAYOUT = getDefaultNotePaths("zh-CN");
 const NOTE_PATH_LABELS = {
   dailyNotes:       "Daily notes 每日笔记",
@@ -242,56 +244,7 @@ function formatNotePathOverrides(notePaths, locale = "zh-CN") {
   return lines.join("\n");
 }
 
-/**
- * Convert the session store's plain {role,text} messages into the
- * Anthropic-shape conversation the agent loop expects.
- *
- * Skips:
- *   - the in-flight assistant draft (no content yet)
- *   - any pending assistant messages
- *   - empty-text messages
- *   - the LAST user message (it's the one that was just pushed by
- *     mountPendingDraft, and it contains the raw user input WITHOUT
- *     the composePromptWithLinkedFiles wrapper — the runner will append
- *     the properly composed userText as the actual current turn)
- *
- * @param {Array<Object>} storedMessages
- * @param {string}        draftId           the in-flight assistant draft to skip
- * @returns {Array<{role: 'user'|'assistant', content: Array}>}
- */
-function buildAnthropicHistory(storedMessages, draftId) {
-  const out = [];
-  for (const msg of storedMessages || []) {
-    if (!msg || (msg.role !== "user" && msg.role !== "assistant")) continue;
-    if (msg.id === draftId) continue;
-    if (msg.role === "assistant" && msg.pending) continue;
-    const text = String(msg.text || "");
-    if (!text) continue;
-    out.push({
-      role: msg.role,
-      content: [{ type: "text", text }],
-    });
-  }
-  // Drop the most recent user message: it's the just-pushed raw-input
-  // version. The caller will append the composed userText (which carries
-  // any linked-context file blocks) as the actual current turn.
-  if (out.length > 0 && out[out.length - 1].role === "user") {
-    out.pop();
-  }
-  return out;
-}
-
-/**
- * Build the tool registry the agent loop runs with. M2 ships the full
- * tool surface: vault_read, vault_list, vault_search, vault_edit,
- * vault_write, web_fetch, web_request, ask_user, skill_invoke, skill_resource_read.
- *
- * @param {Object} app  Obsidian App
- * @param {Function} [normalizePath]
- * @param {SkillRegistry} [skillRegistry]   omit to skip skill_invoke registration
- * @param {Object} [plugin]                 plugin settings for skill secrets
- * @returns {ToolRegistry}
- */
+/** Build the direct agent's Obsidian, web, user-input, and Skill tools. */
 function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin, now = new Date()) {
   const registry = new ToolRegistry();
   if (app && app.vault) {
@@ -411,30 +364,57 @@ function buildSkillTemplateVariables(plugin, now = new Date()) {
   return { notePaths, metaPaths, skillsDir, defaultPathReplacements, now, currentDate, currentTime, currentDateTime: `${currentDate} ${currentTime}` };
 }
 
+function resolveExplicitSkillInvocation(skillRegistry, preloadedSkillCommand) {
+  const requested = preloadedSkillCommand && typeof preloadedSkillCommand === "object"
+    ? preloadedSkillCommand
+    : null;
+  if (!requested) return null;
+  const requestedName = String(requested.skill || requested.command || "").replace(/^\/+/, "").trim();
+  const errorWithCode = (message, code) => {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  };
+  if (!requestedName) {
+    throw errorWithCode("This skill command is invalid.", "SKILL_COMMAND_INVALID");
+  }
+  const skill = skillRegistry && typeof skillRegistry.get === "function"
+    ? skillRegistry.get(requestedName)
+    : null;
+  if (!skill) {
+    throw errorWithCode(`Skill /${requestedName} is unavailable.`, "SKILL_NOT_FOUND");
+  }
+  if (skill.userInvocable === false) {
+    throw errorWithCode(`Skill /${requestedName} cannot be started from chat.`, "SKILL_NOT_USER_INVOCABLE");
+  }
+  const canonicalName = String(skill.slug || skill.name || requestedName).replace(/^\/+/, "").trim() || requestedName;
+  const registryPolicy = skill.completionPolicy;
+  const requestedPolicy = requested.completionPolicy && typeof requested.completionPolicy === "object"
+    ? requested.completionPolicy
+    : null;
+  const registryPolicyState = String((registryPolicy && registryPolicy.state) || "legacy_unclassified");
+  const completionPolicy = registryPolicyState === "legacy_unclassified" && requestedPolicy
+    ? requestedPolicy
+    : registryPolicy;
+  return {
+    skill: completionPolicy === registryPolicy ? skill : { ...skill, completionPolicy },
+    skillName: String(skill.name || requestedName),
+    command: `/${canonicalName}`,
+    args: requested.args === undefined || requested.args === null
+      ? ""
+      : String(requested.args),
+  };
+}
+
 function buildPreloadedSkillTurnText({
-  skillRegistry,
+  explicitSkillInvocation,
   plugin,
-  preloadedSkillCommand,
   userText,
   locale,
   now,
 }) {
-  if (!skillRegistry || typeof skillRegistry.get !== "function") return String(userText || "");
-  const requested = preloadedSkillCommand && typeof preloadedSkillCommand === "object"
-    ? preloadedSkillCommand
-    : null;
-  if (!requested) return String(userText || "");
-
-  const skillName = String(requested.skill || requested.command || "").replace(/^\/+/, "").trim();
-  if (!skillName) return String(userText || "");
-  const skill = skillRegistry.get(skillName);
-  if (!skill || skill.disableModelInvocation) return String(userText || "");
-
-  const args = String(
-    requested.args !== undefined && requested.args !== null
-      ? requested.args
-      : userText,
-  ).trim();
+  if (!explicitSkillInvocation) return String(userText || "");
+  const { skill, args, command } = explicitSkillInvocation;
   const skillTemplateVariables = buildSkillTemplateVariables(plugin, now);
   let body = renderSkillTemplateVariables(skill.body, skillTemplateVariables);
   body = substituteArguments(body, args, skill.argumentNames || []);
@@ -447,7 +427,6 @@ function buildPreloadedSkillTurnText({
         resources.length > 40 ? `  ... ${resources.length - 40} more` : "",
       ].filter(Boolean).join("\n")
     : "";
-  const command = String(requested.command || `/${skill.name}`).trim();
   const preface = runnerText(
     locale,
     [
@@ -534,8 +513,8 @@ async function ensureSkillRegistry(plugin) {
       loaded = await loadSkills({ rootPath: skillRoot, vault: plugin.app.vault });
     } catch (e) {
       loaded = [];
-      if (typeof plugin.log === "function") {
-        plugin.log(`[direct-agent] skill load failed for ${skillRoot}: ${e && e.message ? e.message : e}`);
+      if (typeof plugin.traceDiagnostic === "function") {
+        void plugin.traceDiagnostic("agent.skill_load_failed", { errorType: "skill_load_failed" });
       }
     }
     for (const manifest of loaded) {
@@ -552,22 +531,12 @@ async function ensureSkillRegistry(plugin) {
   if (skippedVaultBundled > 0 && typeof plugin.log === "function") {
     plugin.log(`[direct-agent] ignored ${skippedVaultBundled} vault copy/copies of bundled skill(s); using embedded bundle`);
   }
+  if (skippedVaultBundled > 0 && typeof plugin.traceDiagnostic === "function") {
+    void plugin.traceDiagnostic("agent.bundled_skill_copies_ignored", { skippedVaultBundledCount: skippedVaultBundled });
+  }
   const registry = new SkillRegistry(manifests);
   plugin.__flownoteSkillCache = { root: cacheKey, registry };
   return registry;
-}
-
-function skillIdentityKeys(manifest) {
-  const keys = [];
-  for (const value of [
-    manifest && manifest.name,
-    manifest && manifest.slug,
-    ...((manifest && manifest.aliases) || []),
-  ]) {
-    const key = String(value || "").trim().replace(/^\/+/, "");
-    if (key) keys.push(key);
-  }
-  return keys;
 }
 
 /**
@@ -606,12 +575,13 @@ function buildEmbeddedSkillManifests(locale = "zh-CN") {
     if (!slug) continue;
     const filePath = localizedEmbeddedSkillDocPath(slug, locale);
     if (!filePath) continue;
-    const raw = String(EMBEDDED_BUNDLED_SKILLS_FILES[filePath] || "");
-    const { frontmatter, body } = parseFrontmatter(raw);
+    const document = getEmbeddedSkillDocument(filePath);
+    if (!document) continue;
     const embeddedResourceFiles = resourcesBySlug[slug] || {};
     out.push(buildSkillManifest({
-      frontmatter,
-      body,
+      frontmatter: document.frontmatter,
+      body: document.body,
+      frontmatterError: document.errorCode,
       // dirPath is informational only; embedded skills don't live in the
       // vault. We use a sentinel prefix so vault_read / vault_edit don't
       // accidentally try to treat it as a real path.
@@ -630,184 +600,26 @@ function invalidateSkillCache(plugin) {
   if (plugin) plugin.__flownoteSkillCache = null;
 }
 
-/**
- * Render the working set of assistant content blocks (text + tool calls)
- * as the "blocks" array the chat view already knows how to draw.
- *
- * View block shapes (matched to existing renderer):
- *   { type: 'stream-text', text }
- *   { type: 'tool', tool: <name>, status: 'running'|'done'|'error',
- *     input, output, durationMs }
- */
-// Map our internal tool-use status to the chat view's renderer status.
-// Renderer expects one of: 'pending' | 'running' | 'completed' | 'error'.
-function toRendererStatus(status, isError) {
-  if (isError) return "error";
-  if (status === "running") return "running";
-  if (status === "done") return "completed";
-  if (status === "pending") return "pending";
-  return "pending";
-}
-
-function summarizeToolInput(toolName, input) {
-  if (!input || typeof input !== "object") return "";
-  if (toolName === "vault_read") {
-    const path = typeof input.path === "string" ? input.path : "";
-    if (!path) return "";
-    if (typeof input.offset === "number" || typeof input.limit === "number") {
-      return `${path} (lines ${input.offset || 1}-${input.limit ? (input.offset || 1) + input.limit - 1 : "end"})`;
-    }
-    return path;
-  }
-  if (toolName === "vault_write") {
-    const path = typeof input.path === "string" ? input.path : "";
-    const mode = typeof input.mode === "string" ? input.mode : "create";
-    return path ? `${mode} → ${path}` : mode;
-  }
-  if (toolName === "vault_edit") {
-    return typeof input.path === "string" ? input.path : "";
-  }
-  if (toolName === "vault_list") {
-    const path = typeof input.path === "string" && input.path ? input.path : "/";
-    return input.pattern ? `${path} (${input.pattern})` : path;
-  }
-  if (toolName === "vault_search") {
-    const q = typeof input.query === "string" ? input.query : "";
-    return input.path ? `"${q}" in ${input.path}` : `"${q}"`;
-  }
-  if (toolName === "vault_daily") {
-    const mode = typeof input.mode === "string" ? input.mode : "read";
-    const date = typeof input.date === "string" ? input.date : "today";
-    return `${mode} ${date}`;
-  }
-  if (toolName === "vault_property") {
-    const op = typeof input.op === "string" ? input.op : "get";
-    return `${op} ${input.name || "?"} → ${input.path || "?"}`;
-  }
-  if (toolName === "vault_backlinks") {
-    return typeof input.path === "string" ? input.path : "";
-  }
-  if (toolName === "vault_tasks") {
-    const status = typeof input.status === "string" ? input.status : "open";
-    const path = typeof input.path === "string" && input.path ? input.path : "/";
-    return `${status} in ${path}`;
-  }
-  if (toolName === "vault_tags") {
-    const mode = typeof input.mode === "string" ? input.mode : "list";
-    if (mode === "files") return `files ${input.tag || ""}`;
-    return "list";
-  }
-  if (toolName === "vault_move") {
-    const from = typeof input.from === "string" ? input.from : "?";
-    const to = typeof input.to === "string" ? input.to : "?";
-    return `${from} → ${to}`;
-  }
-  if (toolName === "vault_create_dir") {
-    return typeof input.path === "string" ? input.path : "";
-  }
-  if (toolName === "vault_get_active_file") {
-    return "";
-  }
-  if (toolName === "skill_invoke") {
-    const skill = typeof input.skill === "string" ? input.skill : "";
-    return input.args ? `${skill} ${input.args}` : skill;
-  }
-  if (toolName === "skill_resource_read") {
-    const skill = typeof input.skill === "string" ? input.skill : "";
-    const path = typeof input.path === "string" ? input.path : "";
-    return skill && path ? `${skill}/${path}` : path || skill;
-  }
-  if (toolName === "ask_user") {
-    const qs = Array.isArray(input.questions) ? input.questions : [];
-    return qs.length ? `${qs.length} question(s): ${qs[0].header || qs[0].question || ""}` : "";
-  }
-  if (toolName === "web_fetch") {
-    return typeof input.url === "string" ? input.url : "";
-  }
-  if (toolName === "web_request") {
-    const method = typeof input.method === "string" && input.method ? input.method.toUpperCase() : "GET";
-    return typeof input.url === "string" ? `${method} ${input.url}` : method;
-  }
-  try { return JSON.stringify(input).slice(0, 120); } catch { return ""; }
-}
-
-function normalizeToolPath(value) {
-  return String(value || "")
-    .replace(/\\+/g, "/")
-    .replace(/\/{2,}/g, "/")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "")
-    .trim();
-}
-
-function isInternalMemoryReadProbe(toolName, input) {
-  if (String(toolName || "").trim().toLowerCase() !== "vault_read") return false;
-  const path = normalizeToolPath(input && input.path);
-  return path === "Meta/ai-memory/STATUS.md"
-    || path.startsWith("Meta/ai-memory/")
-    || path === "Meta/.ai-memory/STATUS.md"
-    || path.startsWith("Meta/.ai-memory/");
-}
-
-function isExpectedInternalToolNoise(tu) {
-  if (!tu || !isInternalMemoryReadProbe(tu.name, tu.input)) return false;
-  if (!tu.isError) return true;
-  return /^vault_read:\s+file not found at /i.test(String(tu.output || "").trim());
-}
-
-function renderBlocks(state) {
-  const blocks = [];
-  if (state.text && state.text.length > 0) {
-    blocks.push({ type: "stream-text", text: state.text });
-  }
-  for (const tu of state.toolUses) {
-    const status = toRendererStatus(tu.status, tu.isError);
-    const summary = summarizeToolInput(tu.name, tu.input);
-    const outputText = typeof tu.output === "string" ? tu.output : "";
-    const hidden = isExpectedInternalToolNoise(tu);
-    blocks.push({
-      type: "tool",
-      tool: tu.name,
-      status,
-      summary,
-      detail: outputText,
-      input: tu.input,
-      output: outputText,
-      isError: !!tu.isError,
-      hidden,
-      internal: hidden,
-      durationMs: tu.durationMs,
-    });
-  }
-  return blocks;
-}
-
-/**
- * @param {Object} args
- * @param {Object} args.view                     chat view
- * @param {string} args.sessionId
- * @param {string} args.draftId
- * @param {string} args.userText                 the user's just-submitted text
- * @param {Object} args.handlers                 from createTransportHandlers
- * @param {AbortSignal} [args.signal]
- * @param {Function}    [args.requestImpl]       injection for tests
- * @param {ToolRegistry} [args.toolRegistryOverride] injection for tests
- * @param {Function}    [args.runAgentLoopImpl]  injection for tests
- * @param {Object}      [args.preloadedSkillCommand] explicit slash skill to preload in direct mode
- * @returns {Promise<{messageId: string, text: string, reasoning: string, meta: string, blocks: Array}>}
- */
+// Direct-mode entrypoint. Test-only overrides are accepted at provider, loop,
+// registry, contract, and Skill boundaries; continuation IDs select one exact checkpoint.
 async function runDirectAgentTurn({
   view,
   sessionId,
   draftId,
   userText,
+  intentText,
   handlers,
   signal,
   requestImpl,
   toolRegistryOverride,
   runAgentLoopImpl,
+  resolveExecutionContractImpl,
+  executionContractOverride,
   skillRegistryOverride,
   preloadedSkillCommand,
+  continuationMessageId,
+  continuationRunId,
+  checkpointStoreOverride,
 }) {
   const plugin = view.plugin;
   let settings = plugin.settings.agentProvider || {};
@@ -839,14 +651,10 @@ async function runDirectAgentTurn({
     settings = mobileOverride;
   }
 
-  // ---------------------------------------------------------------------
-  // 1. Resolve Provider (will throw on missing key etc. — let it propagate)
-  // ---------------------------------------------------------------------
+  // Resolve Provider (missing configuration is surfaced to the caller).
   const provider = resolveAgentProvider(settings, { requestImpl });
 
-  // ---------------------------------------------------------------------
-  // 2. Load skills + build the tool registry against the live vault
-  // ---------------------------------------------------------------------
+  // Load skills and build the tool registry against the live vault.
   let normalizePath;
   try {
     // eslint-disable-next-line global-require
@@ -855,6 +663,7 @@ async function runDirectAgentTurn({
     normalizePath = undefined;
   }
   const skillRegistry = skillRegistryOverride || (await ensureSkillRegistry(plugin));
+  const explicitSkillInvocation = resolveExplicitSkillInvocation(skillRegistry, preloadedSkillCommand);
   const locale = getRunnerLocale(view);
   const turnNow = new Date();
   const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry, plugin, turnNow);
@@ -873,33 +682,91 @@ async function runDirectAgentTurn({
     },
   );
 
-  // ---------------------------------------------------------------------
-  // 3. Build the conversation
-  // ---------------------------------------------------------------------
-  const stored = (plugin.sessionStore && typeof plugin.sessionStore.getActiveMessages === "function")
-    ? plugin.sessionStore.getActiveMessages()
-    : [];
-  const history = buildAnthropicHistory(stored, draftId);
-  // buildAnthropicHistory drops the most recent user message because
-  // that's the raw version from the session store. Append the composed
-  // userText (which the orchestrator built via composePromptWithLinkedFiles
-  // and skill injection) as the actual current turn.
-  const turnText = buildPreloadedSkillTurnText({
-    skillRegistry,
+  // The orchestrator binds a request to sessionId before any asynchronous
+  // setup begins.  Never re-resolve history through the currently active chat:
+  // the user may switch sessions while skills/providers are still loading.
+  const sessionStore = plugin.sessionStore;
+  const stored = (sessionStore && typeof sessionStore.getSessionMessages === "function")
+    ? sessionStore.getSessionMessages(sessionId)
+    : ((sessionStore && typeof sessionStore.getActiveMessages === "function")
+      ? sessionStore.getActiveMessages()
+      : []);
+  const checkpointStore = createContinuationCheckpointStore(
     plugin,
-    preloadedSkillCommand,
+    view.app && view.app.vault,
+    checkpointStoreOverride,
+  );
+  const continuationContext = await prepareContinuationContext({
+    storedMessages: stored,
+    draftId,
     userText,
-    locale,
-    now: turnNow,
+    continuationMessageId,
+    continuationRunId,
+    sessionId,
+    sessionStore: plugin.sessionStore,
+    persistState: typeof plugin.persistState === "function" ? () => plugin.persistState() : null,
+    vault: view.app && view.app.vault,
+    checkpointStore,
   });
-  history.push({ role: "user", content: [{ type: "text", text: turnText }] });
+  const continuation = continuationContext.continuation;
+  let history;
+  if (continuation) {
+    history = continuationContext.history;
+  } else {
+    history = buildAnthropicHistory(stored, draftId);
+    // buildAnthropicHistory drops the most recent user message because
+    // that's the raw version from the session store. Append the composed
+    // userText (which the orchestrator built via composePromptWithLinkedFiles
+    // and skill injection) as the actual current turn.
+    const turnText = buildPreloadedSkillTurnText({
+      explicitSkillInvocation,
+      plugin,
+      userText,
+      locale,
+      now: turnNow,
+    });
+    history.push({ role: "user", content: [{ type: "text", text: turnText }] });
+  }
 
-  // ---------------------------------------------------------------------
-  // 4. Translate agent-loop events → chat handler calls
-  // ---------------------------------------------------------------------
-  /** @type {{text: string, toolUses: Array<{id:string,name:string,input:any,status:string,output:any,isError:boolean,startedAt:number,durationMs:number}>}} */
-  const state = { text: "", toolUses: [] };
+  // An explicit standard Skill is already an authoritative host-side routing
+  // decision.  It enters the main model turn directly; only ordinary natural
+  // language uses the model-based task-contract resolver.
+  const executionContract = continuation
+    ? continuationContext.executionContract
+    : explicitSkillInvocation
+    ? createExplicitSkillWorkflowContract({
+        skillName: explicitSkillInvocation.skillName,
+        command: explicitSkillInvocation.command,
+        args: explicitSkillInvocation.args,
+        completionPolicy: explicitSkillInvocation.skill.completionPolicy,
+      })
+    : await resolveTurnExecutionContract({
+        override: executionContractOverride,
+        resolver: resolveExecutionContractImpl,
+        hasInjectedLoop: !!runAgentLoopImpl,
+        provider,
+        userText: intentText === undefined ? userText : intentText,
+        signal,
+      });
+
+  const state = createExecutionState(executionContract);
+  if (continuation) state.effectReceipts = continuationContext.effectReceipts;
+  state.workflowDisposition = null;
+  state.workflowCompletionMode = null;
+  state.workflowReleased = false;
+  state.standardSkillAnswerOnly = false;
+  state.suspension = null;
+  const activityTimeline = createDirectActivityTimeline(draftId);
+  const usageAccumulator = createDirectUsageAccumulator();
+  const journal = new DirectExecutionJournal({
+    runId: draftId,
+    onSnapshot: handlers && handlers.onExecutionSnapshot,
+  });
+  await journal.start(executionContract, {
+    resumeFromRunId: continuationContext.resumeFromRunId,
+  });
   let stopReason = null;
+  let lastWorkflowCandidateText = "";
 
   function findToolUse(toolUseId) {
     return state.toolUses.find((t) => t.id === toolUseId);
@@ -907,8 +774,27 @@ async function runDirectAgentTurn({
 
   function pushBlocksUpdate() {
     if (handlers && typeof handlers.onBlocks === "function") {
-      handlers.onBlocks(renderBlocks(state));
+      handlers.onBlocks(activityTimeline.blocks());
     }
+  }
+
+  function releaseWorkflowProse(disposition, verified) {
+    if (state.workflowReleased) return;
+    const canRelease = disposition === "blocked"
+      || disposition === "cancelled"
+      || (disposition === "completed" && verified === true);
+    if (!canRelease) return;
+    state.workflowDisposition = disposition;
+    state.workflowReleased = true;
+    if (disposition === "completed") state.effectVerified = true;
+    const releasedText = String(state.provisionalText || lastWorkflowCandidateText || "").trim();
+    state.text = releasedText;
+    state.provisionalText = "";
+    if (releasedText) activityTimeline.appendFinalText(releasedText);
+    if (handlers && typeof handlers.onToken === "function" && state.text) {
+      handlers.onToken(state.text);
+    }
+    pushBlocksUpdate();
   }
 
   async function onPermissionAsk(req) {
@@ -929,15 +815,12 @@ async function runDirectAgentTurn({
       if (decision === "once")   return { behavior: "allow" };
       return { behavior: "deny" };
     } catch (e) {
-      log(`permission ask failed: ${e instanceof Error ? e.message : String(e)}`);
+      trace("agent.permission_ask_failed", { errorType: "permission_ask_failed" });
       return { behavior: "deny" };
     }
   }
 
-  // ask_user bridge: the tool yields a question payload; we surface it
-  // through the handlers.onAskUser callback the chat view installs. If
-  // that callback is missing, the tool itself returns an error result —
-  // the model handles graceful fallback.
+  // Bridge ask_user through the chat view.
   async function askUserFn(payload) {
     if (!handlers || typeof handlers.onAskUser !== "function") {
       throw new Error("no onAskUser handler installed");
@@ -946,30 +829,30 @@ async function runDirectAgentTurn({
   }
 
   const loopImpl = runAgentLoopImpl || runAgentLoop;
-  const log = (msg) => {
-    if (plugin && typeof plugin.log === "function") plugin.log(`[direct-agent] ${msg}`);
+  const trace = (event, metadata) => {
+    if (plugin && typeof plugin.traceDiagnostic === "function") {
+      void plugin.traceDiagnostic(event, metadata);
+    }
   };
 
-  // Use the active model's maxOutput as the per-turn output cap. This
-  // is a ceiling, not a target — the model only generates what it
-  // generates. Setting it to the model's hard limit gives the longest
-  // possible response when the user actually needs it.
-  //
-  // Resolution order:
-  //   1. settings.direct.maxOutputTokens (user override; if non-positive
-  //      it's treated as "use model default")
-  //   2. provider.spec.models[].maxOutput for the active model
-  //   3. fallback constant (16K — safe across all providers)
+  // Output ceiling: user override (clamped to the model's declared maximum),
+  // model limit, then a provider-safe 16K only for unknown model catalogs.
   const activeModelInfo = (provider.spec.models || []).find((m) => m && m.id === provider.userConfig.model);
-  const userMaxOutput = settings && settings.direct && Number(settings.direct.maxOutputTokens);
-  const maxTokensPerTurn = (Number.isFinite(userMaxOutput) && userMaxOutput > 0)
-    ? userMaxOutput
-    : ((activeModelInfo && activeModelInfo.maxOutput) || 16_384);
+  const maxTokensPerTurn = resolveMainTurnTokenBudget(settings, provider);
 
-  log(`turn start provider=${provider.id} model=${provider.userConfig.model} historyLen=${history.length} maxOutput=${maxTokensPerTurn}`);
-  // Diagnostic: dump the actual user-turn text being sent to the model.
-  // First 600 chars are enough to spot whether <<<FLOWNOTE_FILE>>> tags
-  // landed in there.
+  trace("agent.turn_started", {
+    provider: provider.id,
+    model: provider.userConfig.model,
+    historyLength: history.length,
+    maxOutputTokens: maxTokensPerTurn,
+    contractMode: String((executionContract && executionContract.mode) || ""),
+    completionPolicyState: String((executionContract && executionContract.completionPolicyState) || ""),
+    requiredInteractionCount: Array.isArray(executionContract && executionContract.requiredInteractions)
+      ? executionContract.requiredInteractions.length
+      : 0,
+  });
+  // Record only observable prompt shape. Prompt text and linked-file paths
+  // are intentionally excluded from the vault-persisted diagnostic trace.
   try {
     const lastUserMsg = history[history.length - 1];
     if (lastUserMsg && lastUserMsg.role === "user" && Array.isArray(lastUserMsg.content)) {
@@ -977,30 +860,34 @@ async function runDirectAgentTurn({
         .filter((b) => b && b.type === "text")
         .map((b) => String(b.text || ""))
         .join("\n");
-      const head = textJoined.slice(0, 600).replace(/\n/g, " ⏎ ");
-      log(`outgoing user text len=${textJoined.length} head="${head}"`);
       const hasFileTag = /<<<FLOWNOTE_FILE\s+path="/.test(textJoined);
-      log(`outgoing user text has FLOWNOTE_FILE tag=${hasFileTag}`);
+      trace("agent.outgoing_user_shape", {
+        promptLength: textJoined.length,
+        hasFlowNoteFileTag: hasFileTag,
+      });
     }
-  } catch (e) {
-    log(`diagnostic log failed: ${e instanceof Error ? e.message : String(e)}`);
+  } catch (_e) {
+    trace("agent.outgoing_user_shape_failed", { errorType: "outgoing_user_shape_failed" });
   }
 
   // Per-turn FileStateCache — tracks every file the agent reads or
   // writes during this conversation turn. Used by vault_edit to enforce
   // read-before-edit, and by vault_backlinks to sidestep metadataCache
   // reindex lag. Fresh instance each turn so stale state can't leak.
-  const fileStateCache = new FileStateCache();
-
+  const fileStateCache = continuationContext.fileStateCache;
   for await (const ev of loopImpl({
     provider,
     registry,
     system: systemPrompt,
     messages: history,
     maxTokensPerTurn,
+    executionContract,
+    resumeState: continuationContext.resumeState,
+    allowedToolPolicy: explicitSkillInvocation && explicitSkillInvocation.skill.allowedTools,
     signal,
     ctx: {
       app: view.app,
+      signal,
       grants: {},
       askUserFn,
       fileStateCache,
@@ -1009,15 +896,41 @@ async function runDirectAgentTurn({
     onPermissionAsk,
   })) {
     if (!ev) continue;
-    switch (ev.type) {
+    let durableEvent = ev;
+    if (ev.type === "suspended") {
+      try {
+        if (!checkpointStore || typeof checkpointStore.store !== "function") {
+          throw continuationStoreUnavailableError();
+        }
+        const storedRef = projectCheckpointRef(await checkpointStore.store(ev.checkpoint));
+        if (!storedRef) {
+          const error = new Error("Continuation checkpoint storage returned an invalid reference.");
+          error.code = "CONTINUATION_CHECKPOINT_REFERENCE_INVALID";
+          throw error;
+        }
+        durableEvent = { ...ev, checkpointRef: storedRef };
+        delete durableEvent.checkpoint;
+      } catch (error) {
+        const code = String((error && error.code) || "CONTINUATION_CHECKPOINT_STORE_FAILED");
+        await journal.consume({ type: "error", error: { type: code } });
+        throw error;
+      }
+    }
+    await journal.consume(durableEvent);
+    switch (durableEvent.type) {
       case "stream": {
         const inner = ev.event;
         if (!inner) break;
+        usageAccumulator.observe(inner);
         if (inner.type === "content_block_delta" && inner.delta && inner.delta.type === "text_delta") {
-          state.text += inner.delta.text || "";
-          if (handlers && typeof handlers.onToken === "function") {
-            handlers.onToken(state.text);
-          }
+          const deltaText = inner.delta.text || "";
+          const accepted = acceptAssistantDelta(state, executionContract, deltaText);
+          // Timeline visibility and completion authority are separate. Every
+          // model segment stays in arrival order, while only verified prose is
+          // allowed into the terminal assistant text.
+          activityTimeline.appendText(deltaText);
+          if (accepted && handlers && typeof handlers.onToken === "function") handlers.onToken(state.text);
+          pushBlocksUpdate();
         }
         if (inner.type === "message_delta" && inner.delta && typeof inner.delta.stop_reason === "string") {
           stopReason = inner.delta.stop_reason;
@@ -1025,18 +938,63 @@ async function runDirectAgentTurn({
         break;
       }
       case "tool_start": {
-        log(`tool_start ${ev.tool} input=${summarizeToolInput(ev.tool, ev.input)}`);
+        trace("agent.tool_started", { tool: ev.tool });
         state.toolUses.push({
           id: ev.toolUseId,
           name: ev.tool,
           input: ev.input,
+          capabilities: ev.capabilities,
           status: "running",
           output: "",
           isError: false,
           startedAt: Date.now(),
           durationMs: 0,
         });
+        activityTimeline.startTool(state.toolUses[state.toolUses.length - 1]);
         pushBlocksUpdate();
+        break;
+      }
+      case "effect_receipt": {
+        if (executionContract && executionContract.mode === "workflow") {
+          if (ev.receipt) state.effectReceipts.push(ev.receipt);
+        } else {
+          recordExecutionReceipt(state, executionContract, ev.receipt);
+        }
+        if (ev.receipt && ev.receipt.toolUseId) {
+          const receiptTool = findToolUse(ev.receipt.toolUseId);
+          if (receiptTool) activityTimeline.syncTool(receiptTool, ev.receipt);
+        }
+        pushBlocksUpdate();
+        trace("agent.effect_receipt", {
+          tool: ev.receipt && ev.receipt.tool,
+          verified: state.effectVerified,
+        });
+        break;
+      }
+      case "workflow_finish": {
+        state.workflowDisposition = durableEvent.disposition || null;
+        state.workflowCompletionMode = durableEvent.declaration && durableEvent.declaration.mode
+          ? String(durableEvent.declaration.mode)
+          : null;
+        releaseWorkflowProse(durableEvent.disposition, durableEvent.verified);
+        if (durableEvent.disposition === "completed" && durableEvent.verified !== true) {
+          state.completionFailure = {
+            type: "workflow_completion_unverified",
+            message: "Workflow completion was not verified.",
+          };
+          state.provisionalText = "";
+        }
+        trace("agent.workflow_finished", { disposition: durableEvent.disposition, verified: durableEvent.verified === true });
+        break;
+      }
+      case "completion_retry": {
+        const candidate = assistantTextFromContent(ev.provisionalContent)
+          || String(state.provisionalText || "").trim();
+        if (executionContract && executionContract.mode === "workflow" && candidate) {
+          lastWorkflowCandidateText = candidate;
+        }
+        state.provisionalText = "";
+        trace("agent.completion_retry", { attempt: ev.attempt });
         break;
       }
       case "tool_progress": {
@@ -1053,23 +1011,70 @@ async function runDirectAgentTurn({
           t.status = ev.isError ? "error" : "done";
           t.output = ev.content;
           t.isError = !!ev.isError;
+          t.outcome = ev.outcome;
+          if (ev.capabilities) t.capabilities = ev.capabilities;
           t.durationMs = Date.now() - t.startedAt;
-          log(`tool_finish ${ev.tool} status=${t.status} ms=${t.durationMs}`);
+          const receipt = state.effectReceipts.find((item) => item && item.toolUseId === t.id);
+          activityTimeline.syncTool(t, receipt);
+          trace("agent.tool_finished", { tool: ev.tool, status: t.status, durationMs: t.durationMs, isError: !!ev.isError });
         }
         pushBlocksUpdate();
         break;
       }
       case "turn_complete": {
-        log(`turn ${ev.turnIndex} complete stop=${ev.stopReason || "?"} textLen=${state.text.length} toolsSoFar=${state.toolUses.length}`);
+        const unresolvedWorkflow = Boolean(
+          executionContract
+          && executionContract.mode === "workflow"
+          && !state.workflowReleased,
+        );
+        const unresolvedEffect = Boolean(
+          executionContract
+          && executionContract.mode !== "answer"
+          && !state.effectVerified,
+        );
+        if (unresolvedWorkflow) {
+          const candidate = String(state.provisionalText || "").trim();
+          if (candidate) lastWorkflowCandidateText = candidate;
+          state.provisionalText = "";
+        }
+        activityTimeline.completeTurn({ forceProcess: unresolvedWorkflow || unresolvedEffect });
+        usageAccumulator.completeTurn();
+        trace("agent.turn_completed", {
+          turnIndex: ev.turnIndex,
+          stopReason: ev.stopReason,
+          textLength: state.text.length,
+          toolCount: state.toolUses.length,
+        });
         break;
       }
       case "done":
-        // loop signaled completion; exit the for-await
+        if (executionContract && executionContract.mode === "workflow" && ev.disposition) {
+          state.workflowDisposition = state.workflowDisposition || ev.disposition;
+          releaseWorkflowProse(ev.disposition, ev.verified);
+        }
+        break;
+      case "cancelled":
+        state.cancelled = true;
+        break;
+      case "suspended":
+        state.suspension = {
+          reason: durableEvent.reason || "workflow_suspended",
+          stage: durableEvent.stage || "between_turns",
+          turns: durableEvent.turns,
+          checkpointRef: durableEvent.checkpointRef,
+        };
+        state.provisionalText = "";
+        trace("agent.workflow_suspended", { reason: state.suspension.reason, stage: state.suspension.stage, turns: durableEvent.turns });
         break;
       case "error": {
         const err = ev.error || {};
         const message = err.message || err.type || "Agent runtime error.";
-        log(`error ${err.type || ""} ${message}`);
+        trace("agent.error", { errorType: err.type || "agent_error" });
+        if (err.type === "completion_contract_failed") {
+          state.completionFailure = err;
+          state.provisionalText = "";
+          break;
+        }
         const wrapped = new Error(message);
         if (err.type) wrapped.code = err.type;
         throw wrapped;
@@ -1079,41 +1084,40 @@ async function runDirectAgentTurn({
     }
   }
 
-  // ---------------------------------------------------------------------
-  // 5. Compose final response in the shape sendMessage returns
-  // ---------------------------------------------------------------------
-  log(`turn end stop=${stopReason || "?"} textLen=${state.text.length} tools=${state.toolUses.length}`);
-  // Per-tool summary so reading the trace file later tells you exactly
-  // what fired this turn. Format: name(status,Nbytes) — easy to scan
-  // for "the model claimed 3 files but only 1 tool ran".
-  if (state.toolUses.length > 0) {
-    const summary = state.toolUses.map((t) => {
-      const sz = typeof t.output === "string" ? t.output.length : 0;
-      const status = t.isError ? "ERR" : (t.status || "?");
-      return `${t.name}(${status},${sz}b)`;
-    }).join(" ");
-    log(`turn tool summary: ${summary}`);
-  } else {
-    log("turn tool summary: <no tool calls this turn>");
-  }
-  // Diagnostic only — never enforced, never shown to the user. We honor file
-  // changes SYSTEMICALLY, not by inspecting this text: the system prompt's
-  // "Promise = tool call" contract prevents the claim, the agent loop feeds
-  // every tool_result (including is_error) back so the model self-corrects, and
-  // the UI renders a tool card for every call so a fabricated "renamed X"
-  // simply has no matching card. Tool execution is the only source of truth.
-  // The only structural anomaly worth a trace line is a file-mutation tool that
-  // ran but did NOT succeed; an answer-only turn (no mutation tool) is normal
-  // and stays quiet — the per-tool "turn tool summary" above already has status.
-  const succeededMutation = state.toolUses.some((t) => FILE_MUTATION_TOOLS.test(t.name) && !t.isError);
-  const attemptedMutation = state.toolUses.some((t) => FILE_MUTATION_TOOLS.test(t.name));
-  if (attemptedMutation && !succeededMutation) {
-    log(`turn note: file mutation attempted but all attempts errored (tools=${state.toolUses.length}).`);
-  }
+  // Do not delete a consumed checkpoint here. The caller has not yet durably
+  // committed the final assistant message, so a crash at this point must leave
+  // the previous recovery point intact. Once final state is persisted, the
+  // existing mark-and-sweep lifecycle removes the now-unreferenced blob.
 
+  trace("agent.turn_finished", {
+    stopReason,
+    textLength: state.text.length,
+    toolCount: state.toolUses.length,
+  });
   // If the model ran out of output budget before producing anything
   // useful, surface a clear message instead of a silent empty bubble.
-  let finalText = state.text;
+  let finalText = activityTimeline.finalText() || state.text;
+  const genericVerifiedCopy = runnerText(
+    locale,
+    EXECUTION_FALLBACK_COPY.verified.zh,
+    EXECUTION_FALLBACK_COPY.verified.en,
+  );
+  if (state.suspension) {
+    finalText = buildSuspensionCopy(locale, state, runnerText);
+  } else if (state.completionFailure) {
+    finalText = runnerText(locale, EXECUTION_FALLBACK_COPY.incomplete.zh, EXECUTION_FALLBACK_COPY.incomplete.en);
+  } else if (executionContract && executionContract.mode !== "answer" && state.effectVerified && !finalText) {
+    finalText = genericVerifiedCopy;
+  }
+  if (!state.suspension && !state.completionFailure && state.effectVerified) {
+    const verifiedSummary = buildVerifiedCompletionSummary({
+      locale,
+      effectReceipts: state.effectReceipts,
+      toolUses: state.toolUses,
+      includeObservations: !finalText || finalText === genericVerifiedCopy,
+    });
+    finalText = mergeVerifiedCompletionSummary(finalText, verifiedSummary, genericVerifiedCopy);
+  }
   if (!finalText && stopReason === "max_tokens") {
     const modelLabel = activeModelInfo ? activeModelInfo.label : provider.userConfig.model;
     finalText = runnerText(
@@ -1132,21 +1136,40 @@ async function runDirectAgentTurn({
         "• Split the task into smaller steps, then write each part back separately.",
     );
   }
-  const finalBlocks = renderBlocks(state);
-  // Replace the streaming text block (if any) with the final text so the
-  // UI shows the friendly max_tokens warning when appropriate.
-  if (finalText !== state.text) {
-    const idx = finalBlocks.findIndex((b) => b.type === "stream-text");
-    if (idx >= 0) finalBlocks[idx] = { type: "stream-text", text: finalText };
-    else finalBlocks.unshift({ type: "stream-text", text: finalText });
+  if (
+    executionContract
+    && executionContract.mode === "workflow"
+    && executionContract.completionPolicyState === "legacy_unclassified"
+    && state.workflowDisposition === "completed"
+    && state.workflowCompletionMode === "answer"
+    && !state.effectReceipts.some((receipt) => receipt && receipt.verified === true)
+  ) {
+    state.standardSkillAnswerOnly = true;
+    const answerOnlyNotice = runnerText(
+      locale,
+      "ℹ️ 本次标准 Skill 只返回了回答；FLOWnote 没有记录到已验证的笔记读取或更改。",
+      "ℹ️ This standard Skill returned an answer only; FLOWnote recorded no verified note read or change.",
+    );
+    finalText = finalText ? `${answerOnlyNotice}\n\n${finalText}` : answerOnlyNotice;
   }
+  const finalBlocks = activityTimeline.settle(finalText);
   const meta = composeMetaLine(provider, stopReason, state);
+  const usage = usageAccumulator.snapshot();
   return {
     messageId: `direct-${Date.now()}`,
     text: finalText,
     reasoning: "",
     meta,
+    stats: {
+      providerLabel: String((provider.spec && provider.spec.displayName) || provider.id || ""),
+      modelId: String(provider.userConfig && provider.userConfig.model || ""),
+      modelLabel: String((activeModelInfo && activeModelInfo.label) || (provider.userConfig && provider.userConfig.model) || ""),
+      toolCount: state.toolUses.length,
+      usage,
+    },
     blocks: finalBlocks,
+    status: journal.status,
+    execution: { version: 1, events: journal.events },
   };
 }
 
@@ -1157,6 +1180,12 @@ function composeMetaLine(provider, stopReason, state) {
   if (spec && spec.displayName) parts.push(spec.displayName);
   if (model) parts.push(model);
   if (state.toolUses.length > 0) parts.push(`tools=${state.toolUses.length}`);
+  if (state.completionFailure) parts.push("execution=incomplete");
+  else if (state.suspension) parts.push("execution=suspended");
+  else if (state.standardSkillAnswerOnly) parts.push("execution=answer-only");
+  else if (state.effectReceipts && state.effectReceipts.some((receipt) => receipt && receipt.verified)) {
+    parts.push("execution=verified");
+  }
   if (stopReason && stopReason !== "end_turn") parts.push(`stop=${stopReason}`);
   return parts.join(" · ");
 }
@@ -1165,5 +1194,5 @@ module.exports = {
   runDirectAgentTurn, buildAnthropicHistory, buildDefaultToolRegistry, buildSystemPrompt,
   ensureSkillRegistry, invalidateSkillCache, getLocalISODate, getLocalHHmm,
   describeToday, describeCurrentDateTime, DEFAULT_SKILL_ROOT, SUPPLEMENTAL_SKILL_ROOTS,
-  resolveSkillRoots,
+  resolveSkillRoots, resolveMainTurnTokenBudget,
 };

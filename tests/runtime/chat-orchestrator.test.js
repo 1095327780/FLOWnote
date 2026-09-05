@@ -63,14 +63,28 @@ function createSessionStore(runtimeState) {
         target.reasoning = String(payload.reasoning || "");
         target.meta = String(payload.meta || "");
         target.blocks = Array.isArray(payload.blocks) ? payload.blocks : [];
+        target.execution = payload.execution || null;
+        target.status = String(payload.status || (error ? "failed" : "completed"));
       } else {
         target.text = String(payload || "");
       }
       target.error = String(error || "");
       target.pending = false;
     },
+    setAssistantExecution(sessionId, draftId, events) {
+      const target = (runtimeState.messagesBySession[sessionId] || []).find((row) => row.id === draftId);
+      if (!target) return false;
+      target.execution = { version: 1, events: JSON.parse(JSON.stringify(events)) };
+      const terminal = [...events].reverse().find((event) => /^run_(completed|failed|blocked|cancelled|suspended|interrupted)$/.test(String(event && event.type || "")));
+      target.status = terminal ? String(terminal.type).slice(4) : "running";
+      target.pending = !terminal;
+      return true;
+    },
     getActiveMessages() {
       return runtimeState.messagesBySession[runtimeState.activeSessionId] || [];
+    },
+    getSessionMessages(sessionId) {
+      return runtimeState.messagesBySession[sessionId] || [];
     },
   };
 }
@@ -88,6 +102,9 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
   let sentPrompt = "";
   let composeLinkedPaths = [];
   let clearLinkedContextCalled = 0;
+  const forceBottomDurations = [];
+  const renderMessageOptions = [];
+  const refreshedMessageIds = [];
 
   const view = {
     plugin: {
@@ -138,10 +155,14 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
     },
 
     render() {},
-    renderMessages() {},
+    renderMessages(options) { renderMessageOptions.push(options || {}); },
+    refreshMessageItem(messageId) {
+      refreshedMessageIds.push(String(messageId || ""));
+      return true;
+    },
     renderSidebar() {},
     scheduleScrollMessagesToBottom() {},
-    setForceBottomWindow() {},
+    setForceBottomWindow(durationMs) { forceBottomDurations.push(durationMs); },
     setBusy() {},
     setRuntimeStatus() {},
 
@@ -175,6 +196,10 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
     assert.equal(clearLinkedContextCalled, 1);
     assert.deepEqual(view.linkedContextFiles, []);
     assert.equal(persisted, 1);
+    assert.equal(forceBottomDurations.some((duration) => Number(duration) > 0), false);
+    assert.equal(renderMessageOptions.length, 1, "completion should not rebuild the entire transcript");
+    assert.equal(renderMessageOptions[0].forceBottom, true);
+    assert.deepEqual(refreshedMessageIds, [messages[1].id]);
   } finally {
     fixture.restore();
   }
@@ -278,7 +303,7 @@ test("runSendPrompt should keep explicit skill command for native command routin
   }
 });
 
-test("runSendPrompt should preload explicit slash skills in direct mode instead of sending raw command", async () => {
+test("runSendPrompt should preserve empty slash-skill arguments in direct mode", async () => {
   const runtimeState = {
     sessions: [{ id: "s1", title: "新会话", updatedAt: 0 }],
     activeSessionId: "s1",
@@ -293,6 +318,12 @@ test("runSendPrompt should preload explicit slash skills in direct mode instead 
     },
   });
   const sessionStore = createSessionStore(runtimeState);
+  const appendOptions = [];
+  const originalAppendMessage = sessionStore.appendMessage.bind(sessionStore);
+  sessionStore.appendMessage = (sessionId, message, options) => {
+    appendOptions.push(options);
+    originalAppendMessage(sessionId, message);
+  };
 
   const view = {
     plugin: {
@@ -324,9 +355,20 @@ test("runSendPrompt should preload explicit slash skills in direct mode instead 
     parseSkillSelectorSlashCommand() { return null; },
     resolveSkillFromPrompt() {
       return {
-        skill: { id: "ah-capture", name: "ah-capture" },
-        promptText: "读书笔记文本",
-        command: "/ah-capture",
+        skill: {
+          slug: "ah-card",
+          name: "ah-card",
+          completionPolicy: {
+            state: "declared",
+            mode: "effect",
+            requiredEffects: [],
+            requiredInteractions: ["ask_user"],
+            minReceipts: null,
+            errorCode: null,
+          },
+        },
+        promptText: "请使用 skill ah-card 完成这个任务。",
+        command: "",
       };
     },
     getLinkedContextFilePaths() { return []; },
@@ -360,15 +402,170 @@ test("runSendPrompt should preload explicit slash skills in direct mode instead 
   };
 
   try {
-    await fixture.runSendPrompt(view, "/ah-capture 读书笔记文本");
+    await fixture.runSendPrompt(view, "/ah-card", {
+      continuationMessageId: "assistant-paused",
+      continuationRunId: "run-paused",
+    });
 
     assert.ok(captured, "direct runner should be called");
-    assert.equal(captured.userText, "读书笔记文本");
+    assert.equal(captured.userText, "请使用 skill ah-card 完成这个任务。");
+    assert.equal(captured.intentText, "/ah-card");
     assert.deepEqual(captured.preloadedSkillCommand, {
-      skill: "ah-capture",
-      args: "读书笔记文本",
-      command: "/ah-capture",
+      skill: "ah-card",
+      args: "",
+      command: "/ah-card",
+      completionPolicy: {
+        state: "declared",
+        mode: "effect",
+        requiredEffects: [],
+        requiredInteractions: ["ask_user"],
+        minReceipts: null,
+        errorCode: null,
+      },
     });
+    assert.equal(captured.continuationMessageId, "assistant-paused");
+    assert.equal(captured.continuationRunId, "run-paused");
+    assert.deepEqual(appendOptions, [
+      { protectedMessageIds: ["assistant-paused"] },
+      { protectedMessageIds: ["assistant-paused"] },
+    ]);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("runSendPrompt persists a terminal execution only together with final text and blocks", async () => {
+  const runtimeState = {
+    sessions: [{ id: "s1", title: "new chat", updatedAt: 0 }],
+    activeSessionId: "s1",
+    messagesBySession: { s1: [] },
+  };
+  const executionEvents = [
+    { seq: 0, time: 1, type: "run_started", runId: "draft" },
+    { seq: 1, time: 2, type: "tool_started", runId: "draft", toolUseId: "read-1", tool: "vault_read" },
+    { seq: 2, time: 3, type: "tool_finished", runId: "draft", toolUseId: "read-1", isError: false },
+    { seq: 3, time: 4, type: "run_completed", runId: "draft" },
+  ];
+  const persisted = [];
+  const fixture = loadRunSendPromptWithMockObsidian({
+    async runDirectAgentTurn(options) {
+      await options.handlers.onExecutionSnapshot(executionEvents.slice(0, 3));
+      await options.handlers.onExecutionSnapshot(executionEvents);
+      // Simulate an unrelated settings/view save landing after the terminal
+      // event but before the runner has assembled its final response.
+      await options.view.plugin.persistState();
+      return {
+        text: "final answer",
+        reasoning: "",
+        meta: "",
+        blocks: [{ type: "tool", tool: "vault_read", status: "done" }],
+        status: "completed",
+        execution: { version: 1, events: executionEvents },
+      };
+    },
+  });
+  const sessionStore = createSessionStore(runtimeState);
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { agentProvider: { mode: "direct" }, defaultModel: "" },
+      skillService: null,
+      async createSession() { throw new Error("unexpected createSession"); },
+      async persistState() {
+        persisted.push(JSON.parse(JSON.stringify(runtimeState.messagesBySession.s1)));
+      },
+      markModelUnavailable() { return { hidden: false }; },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "",
+    autoScrollEnabled: true,
+    silentAbortBudget: 0,
+    currentAbort: null,
+    linkedContextFiles: [],
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return []; },
+    clearLinkedContextFiles() {},
+    composePromptWithLinkedFiles(prompt) { return String(prompt || ""); },
+    render() {}, renderMessages() {}, refreshHistoryMenu() {}, scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {}, setBusy() {}, setRuntimeStatus() {}, findMessageRow() { return null; },
+    hasReasoningBlock() { return false; }, renderAssistantBlocks() {}, removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {}, renderInlineQuestionPanel() {}, showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; }, removePendingQuestionRequest() {}, hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {}, handleToastEvent() {}, isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "hello");
+    const terminalSnapshots = persisted
+      .map((messages) => messages.find((message) => message.role === "assistant"))
+      .filter((message) => message && message.status === "completed");
+    assert.ok(terminalSnapshots.length > 0);
+    assert.ok(terminalSnapshots.every((message) => message.text === "final answer"));
+    assert.ok(terminalSnapshots.every((message) => message.blocks.length === 1));
+    assert.equal(persisted.at(-1).find((message) => message.role === "assistant").pending, false);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("runSendPrompt atomically finalizes a deferred failed journal when the runner throws", async () => {
+  const runtimeState = {
+    sessions: [{ id: "s1", title: "new chat", updatedAt: 0 }],
+    activeSessionId: "s1",
+    messagesBySession: { s1: [] },
+  };
+  const failedEvents = [
+    { seq: 0, time: 1, type: "run_started", runId: "draft" },
+    { seq: 1, time: 2, type: "run_failed", runId: "draft", code: "PROVIDER_FAILURE" },
+  ];
+  const persisted = [];
+  const fixture = loadRunSendPromptWithMockObsidian({
+    async runDirectAgentTurn(options) {
+      await options.handlers.onExecutionSnapshot(failedEvents.slice(0, 1));
+      await options.handlers.onExecutionSnapshot(failedEvents);
+      await options.view.plugin.persistState();
+      throw new Error("provider disconnected");
+    },
+  });
+  const sessionStore = createSessionStore(runtimeState);
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { agentProvider: { mode: "direct" }, defaultModel: "" },
+      skillService: null,
+      async createSession() { throw new Error("unexpected createSession"); },
+      async persistState() { persisted.push(JSON.parse(JSON.stringify(runtimeState.messagesBySession.s1))); },
+      markModelUnavailable() { return { hidden: false }; },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } }, elements: { messages: null }, selectedModel: "",
+    autoScrollEnabled: true, silentAbortBudget: 0, currentAbort: null, linkedContextFiles: [],
+    parseModelSlashCommand() { return null; }, parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return []; }, clearLinkedContextFiles() {},
+    composePromptWithLinkedFiles(prompt) { return String(prompt || ""); },
+    render() {}, renderMessages() {}, refreshHistoryMenu() {}, scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {}, setBusy() {}, setRuntimeStatus() {}, findMessageRow() { return null; },
+    hasReasoningBlock() { return false; }, renderAssistantBlocks() {}, removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {}, renderInlineQuestionPanel() {}, showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; }, removePendingQuestionRequest() {}, hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {}, handleToastEvent() {}, isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "hello");
+    const assistantSnapshots = persisted
+      .map((messages) => messages.find((message) => message.role === "assistant"))
+      .filter(Boolean);
+    const failedSnapshots = assistantSnapshots.filter((message) => message.status === "failed");
+    assert.ok(assistantSnapshots.some((message) => message.status === "running"));
+    assert.ok(failedSnapshots.length > 0);
+    assert.ok(failedSnapshots.every((message) => /provider disconnected/.test(message.text)));
+    assert.ok(failedSnapshots.every((message) => message.execution.events.at(-1).type === "run_failed"));
   } finally {
     fixture.restore();
   }
@@ -457,6 +654,98 @@ test("runSendPrompt should create an OpenCode session when legacy mode is active
     assert.equal(runtimeState.messagesBySession["local-existing"].length, 0);
     assert.equal(runtimeState.messagesBySession["remote-1"].length, 2);
     assert.equal(runtimeState.messagesBySession["remote-1"][1].text, "legacy final");
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("stream handlers stay bound to their request session after the user switches chats", async () => {
+  const runtimeState = {
+    sessions: [{ id: "s1", title: "First" }, { id: "s2", title: "Second" }],
+    activeSessionId: "s1",
+    messagesBySession: { s1: [], s2: [] },
+  };
+  const sessionStore = createSessionStore(runtimeState);
+  let streamedDraft = null;
+  let backgroundPanelRenders = 0;
+  let backgroundBlockStatusReads = 0;
+
+  const fixture = loadRunSendPromptWithMockObsidian();
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { defaultModel: "" },
+      skillService: null,
+      opencodeClient: {
+        async sendMessage(options) {
+          runtimeState.activeSessionId = "s2";
+          options.onToken("partial in first chat");
+          options.onReasoning("reasoning in first chat");
+          options.onBlocks([{ type: "stream-text", text: "partial in first chat" }]);
+          const currentDraft = runtimeState.messagesBySession.s1.find((message) => message.role === "assistant");
+          streamedDraft = currentDraft
+            ? {
+                text: currentDraft.text,
+                reasoning: currentDraft.reasoning,
+                blocks: Array.isArray(currentDraft.blocks) ? currentDraft.blocks.slice() : [],
+              }
+            : null;
+          return { text: "final in first chat", reasoning: "", meta: "", blocks: [] };
+        },
+      },
+      async createSession() { throw new Error("unexpected createSession"); },
+      async persistState() {},
+      markModelUnavailable() { return { hidden: false }; },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "",
+    autoScrollEnabled: true,
+    silentAbortBudget: 0,
+    currentAbort: null,
+    linkedContextFiles: [],
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return []; },
+    clearLinkedContextFiles() {},
+    render() {},
+    renderMessages() {},
+    refreshHistoryMenu() {},
+    scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {},
+    setBusy() {},
+    setRuntimeStatus() {},
+    findMessageRow() { return null; },
+    hasReasoningBlock() { return false; },
+    renderAssistantBlocks() {},
+    removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {},
+    renderInlineQuestionPanel() { backgroundPanelRenders += 1; },
+    runtimeStatusFromBlocks() {
+      backgroundBlockStatusReads += 1;
+      return { text: "background", tone: "working" };
+    },
+    showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; },
+    removePendingQuestionRequest() {},
+    hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {},
+    handleToastEvent() {},
+    isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "hello");
+
+    assert.ok(streamedDraft);
+    assert.equal(streamedDraft.text, "partial in first chat");
+    assert.equal(streamedDraft.reasoning, "reasoning in first chat");
+    assert.deepEqual(streamedDraft.blocks, [{ type: "stream-text", text: "partial in first chat" }]);
+    assert.deepEqual(runtimeState.messagesBySession.s2, []);
+    assert.equal(backgroundPanelRenders, 0, "a background request must not redraw the newly active chat");
+    assert.equal(backgroundBlockStatusReads, 0, "a background request must not replace the active chat status");
   } finally {
     fixture.restore();
   }

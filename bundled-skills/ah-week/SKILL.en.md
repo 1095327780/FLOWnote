@@ -1,6 +1,10 @@
 ---
 name: ah-week
-description: Use for weekly review and planning: summarize the week, update project direction, and define next week's plan.
+description: "Use for weekly review and planning: summarize the week, update project direction, and define next week's plan."
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Weekly Review

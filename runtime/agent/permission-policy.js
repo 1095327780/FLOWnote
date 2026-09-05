@@ -52,10 +52,15 @@ function callToolFlag(tool, flagName, input) {
   }
 }
 
-function isDangerousToolUse({ tool, toolName, input, permission } = {}) {
+function isDangerousToolUse({ tool, toolName, input, permission, capabilities } = {}) {
   const risk = explicitRisk(permission);
   if (risk === "dangerous") return true;
   if (risk === "safe") return false;
+
+  if (capabilities && typeof capabilities === "object") {
+    if (capabilities.risk === "high") return true;
+    if (capabilities.risk === "low" || capabilities.risk === "medium") return false;
+  }
 
   const name = normalizeToolName(toolName || tool);
   if (name === "vault_move") return true;
@@ -79,13 +84,13 @@ function isDangerousToolUse({ tool, toolName, input, permission } = {}) {
   return true;
 }
 
-function resolvePermissionDecision({ mode, tool, toolName, input, permission } = {}) {
+function resolvePermissionDecision({ mode, tool, toolName, input, permission, capabilities } = {}) {
   const normalized = normalizeToolPermissionMode(mode);
   if (normalized === TOOL_PERMISSION_MODES.AUTO) {
     return { behavior: "allow", reason: "auto" };
   }
   if (normalized === TOOL_PERMISSION_MODES.ASK_DANGEROUS) {
-    const dangerous = isDangerousToolUse({ tool, toolName, input, permission });
+    const dangerous = isDangerousToolUse({ tool, toolName, input, permission, capabilities });
     return dangerous
       ? { behavior: "ask", reason: "dangerous" }
       : { behavior: "allow", reason: "low-risk" };

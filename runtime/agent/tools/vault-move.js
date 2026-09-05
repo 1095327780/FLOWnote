@@ -7,6 +7,7 @@
 // read+create+delete would orphan all the backlinks.
 
 const { buildTool } = require("../tool-registry");
+const { verifyPathTransition, throwIfToolAborted } = require("../vault-effect-verifiers");
 
 const DESCRIPTION =
   "Move or rename a note or folder. Pass `from` (vault-relative path) and " +
@@ -59,6 +60,15 @@ function createVaultMoveTool({ app, normalizePath } = {}) {
     name: "vault_move",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "vault_mutation",
+      risk: "high",
+      concurrency: "serial",
+      presentation: "edit",
+      targets: input
+        ? [normalize(input.from), normalize(input.to)].filter(Boolean)
+        : [],
+    }),
     isReadOnly: () => false,
     isDestructive: () => true, // hard to undo: links get rewritten across the vault
     isConcurrencySafe: () => false,
@@ -92,7 +102,11 @@ function createVaultMoveTool({ app, normalizePath } = {}) {
       return `${from} → ${to}`;
     },
 
-    async *execute(input, _ctx) {
+    async verifyEffect(input) {
+      return verifyPathTransition(app.vault, normalize(input.from), normalize(input.to));
+    },
+
+    async *execute(input, ctx) {
       const from = normalize(input.from);
       const to = normalize(input.to);
       const source = app.vault.getAbstractFileByPath(from);
@@ -115,6 +129,7 @@ function createVaultMoveTool({ app, normalizePath } = {}) {
       }
       yield { type: "progress", message: `move ${from} → ${to}` };
       try {
+        throwIfToolAborted(ctx);
         await app.fileManager.renameFile(source, to);
       } catch (e) {
         yield {

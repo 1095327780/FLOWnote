@@ -11,6 +11,7 @@ const {
   formatSkillListing,
   SkillRegistry,
 } = require("../../../runtime/agent/skill-registry");
+const { parseFlowNoteCompletionMetadata } = require("../../../runtime/skill-frontmatter");
 const { createSkillInvokeTool } = require("../../../runtime/agent/tools/skill-invoke");
 const { createSkillResourceReadTool } = require("../../../runtime/agent/tools/skill-resource-read");
 
@@ -73,6 +74,82 @@ test("parseFrontmatter accepts YAML-style lists and compatibility aliases", () =
   assert.deepEqual(frontmatter["file-path-patterns"], ["books/*.md", "inbox/*.md"]);
   assert.deepEqual(frontmatter.aliases, ["official", "oskill"]);
   assert.equal(body, "Body");
+});
+
+test("parseFrontmatter preserves nested Agent Skills metadata and block scalars", () => {
+  const raw = [
+    "---",
+    "name: completion-skill",
+    "description: >-",
+    "  A folded description with",
+    "  two lines.",
+    "metadata:",
+    "  flownote:",
+    "    completion:",
+    "      mode: effect",
+    "      required_effects:",
+    "        - vault_mutation",
+    "        - network_mutation",
+    "      required_interactions:",
+    "        - ask_user",
+    "      min_receipts: 2",
+    "  vendor:",
+    "    structured: true",
+    "---",
+    "Body",
+  ].join("\n");
+  const { frontmatter } = parseFrontmatter(raw);
+  assert.equal(frontmatter.description, "A folded description with two lines.");
+  assert.deepEqual(frontmatter.metadata, {
+    flownote: {
+      completion: {
+        mode: "effect",
+        required_effects: ["vault_mutation", "network_mutation"],
+        required_interactions: ["ask_user"],
+        min_receipts: 2,
+      },
+    },
+    vendor: { structured: true },
+  });
+});
+
+test("parseFlowNoteCompletionMetadata is strict, fail-closed, and legacy-safe", () => {
+  assert.deepEqual(parseFlowNoteCompletionMetadata({}), {
+    state: "legacy_unclassified",
+    mode: null,
+    requiredEffects: [],
+    requiredInteractions: [],
+    minReceipts: null,
+    errorCode: null,
+  });
+  assert.deepEqual(parseFlowNoteCompletionMetadata({
+    metadata: { flownote: { completion: { mode: "effect", required_effects: ["vault_mutation"], min_receipts: 1 } } },
+  }), {
+    state: "declared",
+    mode: "effect",
+    requiredEffects: ["vault_mutation"],
+    requiredInteractions: [],
+    minReceipts: 1,
+    errorCode: null,
+  });
+  const unknownMode = parseFlowNoteCompletionMetadata({ metadata: { flownote: { completion: { mode: "unsafe" } } } });
+  assert.equal(unknownMode.state, "invalid");
+  assert.equal(unknownMode.errorCode, "invalid_completion_mode");
+  const badEffect = parseFlowNoteCompletionMetadata({ metadata: { flownote: { completion: { mode: "effect", required_effects: ["shell_exec"] } } } });
+  assert.equal(badEffect.state, "invalid");
+  assert.equal(badEffect.errorCode, "invalid_required_effect");
+  const wrongType = parseFlowNoteCompletionMetadata({ metadata: { flownote: { completion: "answer" } } });
+  assert.equal(wrongType.state, "invalid");
+  assert.equal(wrongType.errorCode, "invalid_completion_schema");
+  const interactive = parseFlowNoteCompletionMetadata({
+    metadata: { flownote: { completion: { mode: "effect", required_interactions: ["ask_user", "ask_user"] } } },
+  });
+  assert.deepEqual(interactive.requiredInteractions, ["ask_user"]);
+  const badInteraction = parseFlowNoteCompletionMetadata({
+    metadata: { flownote: { completion: { mode: "effect", required_interactions: ["confirm_in_prose"] } } },
+  });
+  assert.equal(badInteraction.state, "invalid");
+  assert.equal(badInteraction.errorCode, "invalid_required_interaction");
 });
 
 test("parseToolList keeps Bash patterns intact", () => {
@@ -150,6 +227,29 @@ test("loadSkills returns sorted manifests with parsed metadata", async () => {
   assert.deepEqual(manifests.map((m) => m.name), ["ah-card", "ah-note"]);
   assert.equal(manifests[0].body, "body-of-ah-card");
   assert.equal(manifests[1].description, "Daily note");
+});
+
+test("loadSkills keeps the raw metadata object and exposes a completion policy", async () => {
+  const vault = fakeVault({
+    ".opencode/skills/ah-card": [
+      "---",
+      "name: ah-card",
+      "description: Card crafter",
+      "metadata:",
+      "  flownote:",
+      "    completion:",
+      "      mode: effect",
+      "      required_effects: [vault_mutation]",
+      "      min_receipts: 1",
+      "---",
+      "body",
+    ].join("\n"),
+  });
+  const [manifest] = await loadSkills({ rootPath: ".opencode/skills", vault });
+  assert.deepEqual(manifest.metadata, { flownote: { completion: { mode: "effect", required_effects: ["vault_mutation"], min_receipts: 1 } } });
+  assert.deepEqual(manifest.completionPolicy, {
+    state: "declared", mode: "effect", requiredEffects: ["vault_mutation"], requiredInteractions: [], minReceipts: 1, errorCode: null,
+  });
 });
 
 test("loadSkills tracks skill resources and frontmatter aliases", async () => {

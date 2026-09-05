@@ -10,6 +10,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { claimEffectAttempt, projectWebMutationOperation } = require("../effect-attempt-ledger");
 
 const DESCRIPTION =
   "Send an HTTP API request with method, headers, and optional JSON body. " +
@@ -186,11 +187,23 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
   const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? maxBytes : DEFAULT_MAX_BYTES;
   const timeout = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : REQUEST_TIMEOUT_MS;
   const readSecrets = typeof getSecrets === "function" ? getSecrets : () => ({});
+  const localEffectAttempts = [];
 
   return buildTool({
     name: "web_request",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => {
+      const method = normalizeMethod(input && input.method);
+      const mutation = method !== "GET";
+      return {
+        effect: mutation ? "network_mutation" : "observation",
+        risk: isDangerousMethod(method) ? "high" : mutation ? "medium" : "low",
+        concurrency: mutation ? "serial" : "parallel",
+        presentation: "web",
+        targets: input && typeof input.url === "string" ? [input.url] : [],
+      };
+    },
     isReadOnly: (input) => normalizeMethod(input && input.method) === "GET",
     isDestructive: (input) => isDangerousMethod(input && input.method),
     isConcurrencySafe: (input) => normalizeMethod(input && input.method) === "GET",
@@ -249,7 +262,7 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       };
     },
 
-    async *execute(input) {
+    async *execute(input, ctx) {
       const url = String(input.url).trim();
       const method = normalizeMethod(input.method);
       const requestedCap = Number.isInteger(input.maxBytes) ? input.maxBytes : byteCap;
@@ -284,7 +297,33 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
         return;
       }
 
+      let effectAttempt = null;
+      if (method !== "GET") {
+        const claim = await claimEffectAttempt(
+          ctx && Array.isArray(ctx.effectAttempts) ? ctx.effectAttempts : localEffectAttempts,
+          "web_request",
+          projectWebMutationOperation(input),
+        );
+        if (!claim.ok) {
+          yield { type: "result", content: `web_request: ${claim.error}`, isError: true, code: "effect_attempt_unavailable" };
+          return;
+        }
+        if (claim.duplicate) {
+          yield {
+            type: "result",
+            content: `web_request: duplicate external mutation suppressed; original attempt state is ${claim.entry.state}.`,
+            isError: true,
+            code: "duplicate_effect_suppressed",
+          };
+          return;
+        }
+        effectAttempt = claim.entry;
+        if (!hasHeader(headers, "idempotency-key")) headers["Idempotency-Key"] = effectAttempt.idempotencyKey;
+        effectAttempt.state = "sending";
+      }
+
       let response;
+      let timeoutId = null;
       try {
         const request = {
           url,
@@ -296,18 +335,22 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
         const requestPromise = requestUrl(request);
         response = await Promise.race([
           requestPromise,
-          new Promise((_resolve, reject) =>
-            setTimeout(() => reject(new Error(`Timed out after ${timeout}ms`)), timeout),
-          ),
+          new Promise((_resolve, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Timed out after ${timeout}ms`)), timeout);
+          }),
         ]);
       } catch (err) {
+        if (effectAttempt) effectAttempt.state = "unknown_after_send";
         const rawMsg = err instanceof Error ? err.message : String(err);
         yield {
           type: "result",
           content: `web_request: request failed - ${maskKnownSecrets(rawMsg, secrets)}`,
           isError: true,
+          code: effectAttempt ? "unknown_after_send" : "request_failed",
         };
         return;
+      } finally {
+        if (timeoutId !== null) clearTimeout(timeoutId);
       }
 
       const status = Number(response && response.status) || 0;
@@ -325,7 +368,18 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       payload = maskKnownSecrets(payload, secrets);
 
       const content = `URL: ${url}\nHTTP ${status} · ${contentType}\n\n${payload}${truncatedNotice}`;
-      yield { type: "result", content, isError: status < 200 || status >= 400 };
+      const accepted = status >= 200 && status < 300;
+      const rejected = status >= 400 && status < 500;
+      if (effectAttempt) effectAttempt.state = accepted
+        ? "accepted_unverified"
+        : rejected ? "rejected" : "unknown_after_send";
+      yield {
+        type: "result",
+        content,
+        isError: !accepted,
+        code: method === "GET" ? (accepted ? "ok" : "request_failed")
+          : accepted ? "accepted_unverified" : rejected ? "request_rejected" : "unknown_after_send",
+      };
     },
   });
 }

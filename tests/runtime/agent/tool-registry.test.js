@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   TOOL_DEFAULTS,
   buildTool,
+  resolveToolCapabilities,
   ToolRegistry,
 } = require("../../../runtime/agent/tool-registry");
 
@@ -12,6 +13,13 @@ function minimalDef(over = {}) {
     name: "tool_a",
     description: "test tool a",
     inputSchema: { type: "object", properties: {} },
+    capabilities: {
+      effect: "none",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "other",
+      targets: [],
+    },
     async *execute(_input, _ctx) {
       yield { type: "result", content: "ok" };
     },
@@ -44,6 +52,74 @@ test("buildTool requires inputSchema (object)", () => {
 test("buildTool requires execute (function)", () => {
   assert.throws(() => buildTool({ name: "x", description: "d", inputSchema: {} }), /execute must be a function/);
   assert.throws(() => buildTool({ name: "x", description: "d", inputSchema: {}, execute: "no" }), /execute must be a function/);
+});
+
+test("buildTool requires an explicit capabilities contract", () => {
+  assert.throws(
+    () => buildTool({
+      name: "x",
+      description: "d",
+      inputSchema: {},
+      execute: () => {},
+    }),
+    /capabilities is required/,
+  );
+});
+
+test("buildTool rejects incomplete or illegal capability values at build time", () => {
+  const invalid = [
+    {},
+    { effect: "write", risk: "low", concurrency: "parallel", presentation: "other", targets: [] },
+    { effect: "none", risk: "routine", concurrency: "parallel", presentation: "other", targets: [] },
+    { effect: "none", risk: "low", concurrency: "maybe", presentation: "other", targets: [] },
+    { effect: "none", risk: "low", concurrency: "parallel", presentation: "card", targets: [] },
+    { effect: "none", risk: "low", concurrency: "parallel", presentation: "other", targets: "x" },
+    { effect: "none", risk: "low", concurrency: "parallel", presentation: "other", targets: ["x", 1] },
+  ];
+  for (const capabilities of invalid) {
+    assert.throws(() => buildTool(minimalDef({ capabilities })), /capabilities/);
+  }
+  assert.throws(
+    () => buildTool(minimalDef({ capabilities: () => ({ effect: "invalid" }) })),
+    /capabilities/,
+  );
+});
+
+test("resolveToolCapabilities normalizes dynamic contracts into immutable JSON snapshots", () => {
+  const tool = buildTool(minimalDef({
+    capabilities(input) {
+      const writing = !!(input && input.mode === "write");
+      return {
+        effect: writing ? "vault_mutation" : "observation",
+        risk: writing ? "medium" : "low",
+        concurrency: writing ? "serial" : "parallel",
+        presentation: writing ? "edit" : "read",
+        targets: input && input.path ? [` ${input.path} `, input.path] : [],
+        ignored: "not part of the contract",
+      };
+    },
+  }));
+  const input = Object.freeze({ mode: "write", path: "Notes/A.md" });
+  const resolved = resolveToolCapabilities(tool, input);
+
+  assert.deepEqual(resolved, {
+    effect: "vault_mutation",
+    risk: "medium",
+    concurrency: "serial",
+    presentation: "edit",
+    targets: ["Notes/A.md"],
+  });
+  assert.equal(Object.isFrozen(resolved), true);
+  assert.equal(Object.isFrozen(resolved.targets), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(resolved)), resolved);
+  assert.notEqual(resolveToolCapabilities(tool, input), resolved);
+  assert.deepEqual(resolveToolCapabilities(tool, {}), {
+    effect: "observation",
+    risk: "low",
+    concurrency: "parallel",
+    presentation: "read",
+    targets: [],
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -143,6 +219,13 @@ test("toApiSpecs emits Anthropic tool-spec shape with no internal flags", () => 
     name: "vault_read",
     description: "Read a vault note.",
     inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    capabilities: {
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "read",
+      targets: [],
+    },
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
     async *execute() { yield { type: "result", content: "" }; },

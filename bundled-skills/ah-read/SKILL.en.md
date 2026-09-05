@@ -1,6 +1,10 @@
 ---
 name: ah-read
-description: Use for reading workflows: create literature notes, guide extraction, and prepare permanent-note candidates.
+description: "Use for reading workflows: create literature notes, guide extraction, and prepare permanent-note candidates."
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Reading Workflow
@@ -21,4 +25,3 @@ Goal: turn reading into structured literature notes and future permanent notes.
 - Do not turn every highlight into a card.
 - Keep source context in literature notes; move reusable claims into permanent notes.
 - Use configured note paths over examples.
-

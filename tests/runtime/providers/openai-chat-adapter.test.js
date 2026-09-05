@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const Module = require("node:module");
 
 const {
   createOpenAIChatProvider,
@@ -11,6 +12,7 @@ const {
   mapOpenAIFinishReason,
 } = require("../../../runtime/providers/openai-chat-adapter");
 const { PROVIDERS } = require("../../../runtime/providers/registry");
+const { appendResumeInstruction } = require("../../../runtime/agent/continuation-checkpoint");
 
 function openaiUserConfig(over = {}) {
   return {
@@ -186,6 +188,19 @@ test("buildRequestBody splits user tool_result blocks into separate role=tool me
   assert.equal(toolMsg.content, "file contents...");
 });
 
+test("buildRequestBody keeps a resumed tool result immediately after tool_calls before the resume user turn", () => {
+  const resumed = appendResumeInstruction([
+    { role: "user", content: [{ type: "text", text: "go" }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "tu-1", name: "vault_read", input: {} }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "tu-1", content: "file" }] },
+  ], "continue");
+  const body = buildRequestBody({ model: "gpt-5.5", messages: resumed, maxTokens: 16 }, PROVIDERS["openai-official"]);
+
+  assert.deepEqual(body.messages.map((message) => message.role), ["user", "assistant", "tool", "user"]);
+  assert.equal(body.messages[2].tool_call_id, "tu-1");
+  assert.match(body.messages[3].content, /FLOWNOTE_RESUME/);
+});
+
 test("buildRequestBody passes temperature through and omits when absent", () => {
   const body = buildRequestBody({
     model: "x", messages: [], maxTokens: 4, temperature: 0.4,
@@ -344,6 +359,18 @@ test("translateOpenAIChunk closes text block before message_stop", () => {
   assert.equal(types[types.length - 1], "message_stop");
 });
 
+test("translateOpenAIChunk preserves an OpenAI usage-only tail chunk", () => {
+  const state = newState();
+  const events = [
+    ...translateOpenAIChunk({ choices: [{ finish_reason: "stop" }] }, state),
+    ...translateOpenAIChunk({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 } }, state),
+  ];
+  const usageEvent = events.find((event) => event.usage && event.usage.total_tokens === 1500);
+
+  assert.ok(usageEvent);
+  assert.equal(usageEvent.type, "message_delta");
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end createMessage with a scripted SSE response
 // ---------------------------------------------------------------------------
@@ -377,6 +404,7 @@ test("createMessage end-to-end streams Anthropic-shaped events", async () => {
   // Verify URL was built correctly
   assert.equal(seen.value.url, "https://api.openai.com/v1/chat/completions");
   assert.equal(seen.value.headers.Authorization, "Bearer sk-openai");
+  assert.deepEqual(JSON.parse(seen.value.body).stream_options, { include_usage: true });
 });
 
 test("createMessage non-streaming mode synthesizes the canonical event sequence", async () => {
@@ -430,6 +458,59 @@ test("createMessage on error response yields a single error event", async () => 
   assert.equal(events.length, 1);
   assert.equal(events[0].type, "error");
   assert.match(events[0].error.type, /^http_401$/);
+});
+
+test("createMessage preserves AbortError and never falls back to a buffered second request", async () => {
+  const adapterPath = require.resolve("../../../runtime/providers/openai-chat-adapter");
+  const streamingFetchPath = require.resolve("../../../runtime/providers/streaming-fetch");
+  const originalAdapter = require.cache[adapterPath];
+  const streamingModule = require(streamingFetchPath);
+  const originalStreamingFetch = streamingModule.streamingFetch;
+  const originalLoad = Module._load;
+  let streamingCalls = 0;
+  let bufferedCalls = 0;
+
+  streamingModule.streamingFetch = async () => {
+    streamingCalls += 1;
+    const error = new Error("request cancelled");
+    error.name = "AbortError";
+    throw error;
+  };
+  Module._load = function loadWithBufferedFallbackSpy(request, parent, isMain) {
+    if (request === "obsidian") {
+      return {
+        requestUrl: async () => {
+          bufferedCalls += 1;
+          return okSseResponse(OPENAI_SSE_FIXTURE);
+        },
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  delete require.cache[adapterPath];
+
+  try {
+    const { createOpenAIChatProvider: createFreshProvider } = require(adapterPath);
+    const provider = createFreshProvider({
+      spec: PROVIDERS["openai-official"],
+      userConfig: openaiUserConfig(),
+    });
+    await assert.rejects(
+      collect(provider.createMessage({
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+        maxTokens: 16,
+      })),
+      (error) => error && error.name === "AbortError",
+    );
+    assert.equal(streamingCalls, 1);
+    assert.equal(bufferedCalls, 0);
+  } finally {
+    Module._load = originalLoad;
+    streamingModule.streamingFetch = originalStreamingFetch;
+    delete require.cache[adapterPath];
+    if (originalAdapter) require.cache[adapterPath] = originalAdapter;
+  }
 });
 
 test("formatProviderHttpError explains Ollama models without tool support", () => {

@@ -1,6 +1,10 @@
 ---
 name: ah-inbox
 description: Use to process accumulated inbox or leftover records into tasks, permanent notes, projects, or archive decisions.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Inbox Processing

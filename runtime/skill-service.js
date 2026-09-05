@@ -3,6 +3,15 @@
 let fs = {};
 let path = { join: (...parts) => parts.filter(Boolean).join("/") };
 const { isBundledSkillConflictCopySlug } = require("./bundled-skill-slugs");
+const {
+  splitSkillFrontmatter,
+  parseFlowNoteCompletionMetadata,
+} = require("./skill-frontmatter");
+const {
+  getEmbeddedSkillCatalog,
+  mergeAuthoritativeSkillCatalog,
+  skillIdentityKeys,
+} = require("./skill-catalog");
 try {
   const real = require("fs");
   if (real && typeof real.existsSync === "function") fs = real;
@@ -20,40 +29,8 @@ const SUPPLEMENTAL_SKILL_DIRS = [
 ];
 
 function parseFrontmatter(md) {
-  const m = md.match(/^---\n([\s\S]*?)\n---\n?/);
-  if (!m) return { attrs: {}, body: md };
-
-  const attrs = {};
-  const lines = m[1].split(/\r?\n/);
-  for (let idx = 0; idx < lines.length; idx += 1) {
-    const line = lines[idx];
-    const i = line.indexOf(":");
-    if (i <= 0) continue;
-
-    const key = line.slice(0, i).trim();
-    const rawValue = line.slice(i + 1).trim();
-
-    const blockScalar = rawValue.match(/^([>|])([+-])?$/);
-    if (blockScalar) {
-      const block = [];
-      idx += 1;
-      while (idx < lines.length) {
-        const next = lines[idx];
-        if (!/^\s+/.test(next)) {
-          idx -= 1;
-          break;
-        }
-        block.push(next.replace(/^\s+/, ""));
-        idx += 1;
-      }
-      attrs[key] = block.join("\n").trim();
-      continue;
-    }
-
-    attrs[key] = rawValue.replace(/^['"]|['"]$/g, "");
-  }
-
-  return { attrs, body: md.slice(m[0].length) };
+  const parsed = splitSkillFrontmatter(md);
+  return { attrs: parsed.frontmatter, body: parsed.body, errorCode: parsed.errorCode };
 }
 
 function summarizeBody(body) {
@@ -63,6 +40,15 @@ function summarizeBody(body) {
     .filter(Boolean)
     .slice(0, 18)
     .join("\n");
+}
+
+function frontmatterBoolean(attrs, key, fallback) {
+  if (!attrs || attrs[key] === undefined || attrs[key] === null || attrs[key] === "") return fallback;
+  if (attrs[key] === true || attrs[key] === false) return attrs[key];
+  const normalized = String(attrs[key]).trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return fallback;
 }
 
 function copyDirectoryRecursive(srcDir, destDir) {
@@ -109,7 +95,8 @@ class SkillService {
   }
 
   loadSkills() {
-    const skills = [];
+    const userSkills = [];
+    const bundledKeys = new Set(getEmbeddedSkillCatalog().flatMap(skillIdentityKeys));
     const seenIds = new Set();
 
     for (const rootRel of this.resolveSkillDirs()) {
@@ -121,26 +108,35 @@ class SkillService {
         if (!e || String(e.name || "").startsWith(".")) continue;
         if (!e.isDirectory()) continue;
         if (isBundledSkillConflictCopySlug(e.name)) continue;
-        if (seenIds.has(e.name)) continue;
+        if (seenIds.has(e.name) || bundledKeys.has(String(e.name).toLowerCase())) continue;
         const file = path.join(root, e.name, "SKILL.md");
         if (!fs.existsSync(file)) continue;
 
         const raw = fs.readFileSync(file, "utf8");
         const parsed = parseFrontmatter(raw);
-        skills.push({
+        const skill = {
           id: e.name,
+          slug: e.name,
           name: parsed.attrs.name || e.name,
           description: parsed.attrs.description || "",
-          metadata: parsed.attrs,
+          userInvocable: frontmatterBoolean(parsed.attrs, "user-invocable", true),
+          disableModelInvocation: frontmatterBoolean(parsed.attrs, "disable-model-invocation", false),
+          metadata: parsed.attrs.metadata && typeof parsed.attrs.metadata === "object" && !Array.isArray(parsed.attrs.metadata)
+            ? parsed.attrs.metadata
+            : undefined,
+          completionPolicy: parseFlowNoteCompletionMetadata(parsed.attrs, { frontmatterError: parsed.errorCode }),
           content: raw,
           summary: summarizeBody(parsed.body),
           path: file,
-        });
+          source: "vault",
+        };
+        if (skillIdentityKeys(skill).some((key) => bundledKeys.has(key))) continue;
+        userSkills.push(skill);
         seenIds.add(e.name);
       }
     }
 
-    skills.sort((a, b) => a.name.localeCompare(b.name));
+    const skills = mergeAuthoritativeSkillCatalog(userSkills);
     this.cache = skills;
     return skills;
   }

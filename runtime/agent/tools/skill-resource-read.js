@@ -50,6 +50,15 @@ function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariab
     name: "skill_resource_read",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "skill",
+      targets: input && typeof input.path === "string"
+        ? [`${typeof input.skill === "string" ? `${input.skill}/` : ""}${input.path}`]
+        : [],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

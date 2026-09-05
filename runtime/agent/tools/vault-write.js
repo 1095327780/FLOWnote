@@ -7,6 +7,11 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const {
+  expectedCachedText,
+  verifyTextEffect,
+  throwIfToolAborted,
+} = require("../vault-effect-verifiers");
 const { resolveWritablePath } = require("./vault-path-aliases");
 
 const DESCRIPTION =
@@ -67,6 +72,15 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
     name: "vault_write",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "vault_mutation",
+      risk: input && input.mode === "overwrite" ? "high" : "medium",
+      concurrency: "serial",
+      presentation: "edit",
+      targets: input && typeof input.path === "string"
+        ? [resolveWritablePath(normalize(input.path))]
+        : [],
+    }),
     isReadOnly: () => false,
     isDestructive: (input) => input && input.mode === "overwrite",
     // Writes touch the filesystem and must be serialized to avoid races.
@@ -112,6 +126,16 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
       return `${mode} ${path}`;
     },
 
+    async verifyEffect(input, _outcome, ctx) {
+      const path = resolveWritablePath(normalize(input.path));
+      const cached = expectedCachedText(ctx, path);
+      if (cached !== null) return verifyTextEffect({ vault, path, expected: cached });
+      const mode = input.mode || "create";
+      return mode === "append"
+        ? verifyTextEffect({ vault, path, suffix: input.content })
+        : verifyTextEffect({ vault, path, expected: input.content });
+    },
+
     async *execute(input, ctx) {
       const mode = input.mode || "create";
       const normalized = resolveWritablePath(normalize(input.path));
@@ -134,6 +158,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
           };
           return;
         }
+        throwIfToolAborted(ctx);
         await vault.create(normalized, content);
         recordWrite(content);
         yield {
@@ -144,6 +169,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
       }
 
       if (mode === "overwrite") {
+        throwIfToolAborted(ctx);
         if (existing) {
           await vault.modify(existing, content);
         } else {
@@ -161,6 +187,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
       if (existing) {
         const current = await vault.cachedRead(existing);
         const joined = `${current || ""}${content}`;
+        throwIfToolAborted(ctx);
         await vault.modify(existing, joined);
         recordWrite(joined);
         yield {
@@ -169,6 +196,7 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         };
         return;
       }
+      throwIfToolAborted(ctx);
       await vault.create(normalized, content);
       recordWrite(content);
       yield {

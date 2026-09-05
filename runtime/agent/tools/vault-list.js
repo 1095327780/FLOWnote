@@ -158,6 +158,13 @@ function createVaultListTool({ vault, normalizePath } = {}) {
     name: "vault_list",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "list",
+      targets: [resolveWritablePath(normalize((input && input.path) || "")) || "/"],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

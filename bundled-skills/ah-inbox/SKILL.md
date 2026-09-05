@@ -1,6 +1,10 @@
 ---
 name: ah-inbox
 description: 想法批量整理助手。用于集中处理 ah-review 中未处理完或被延期的每日记录，执行批量扫描、去向决策与回写标记，确保残留记录进入清空闭环。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

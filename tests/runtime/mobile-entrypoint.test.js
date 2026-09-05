@@ -153,9 +153,29 @@ function loadMobilePluginFixture(options = {}) {
 test("mobile onload should use mixin entrypoint and register mobile surfaces", async () => {
   const fixture = loadMobilePluginFixture();
   try {
+    const templaterDataPath = ".obsidian/plugins/templater-obsidian/data.json";
+    let templaterData = JSON.stringify({
+      user_scripts_folder: "Meta/Scripts",
+    });
     const app = {
       vault: {
-        adapter: { basePath: "/tmp/vault" },
+        adapter: {
+          basePath: "/tmp/vault",
+          async exists(path) {
+            return path === templaterDataPath;
+          },
+          async read(path) {
+            if (path !== templaterDataPath) throw new Error(`missing: ${path}`);
+            return templaterData;
+          },
+          async write(path, data) {
+            if (path !== templaterDataPath) throw new Error(`unexpected write: ${path}`);
+            templaterData = data;
+          },
+          async list() {
+            return { files: [], folders: [] };
+          },
+        },
         configDir: ".obsidian",
       },
       workspace: {
@@ -195,6 +215,11 @@ test("mobile onload should use mixin entrypoint and register mobile surfaces", a
     assert.equal(plugin._ribbons.length >= 1, true);
     assert.equal(plugin._tabs.length, 1, "fallback settings tab must register when Stage 2 fails");
     assert.equal(fixture.noticeMessages.length, 0);
+    assert.equal(
+      JSON.parse(templaterData).user_scripts_folder,
+      "",
+      "legacy Templater config must be repaired before mobile Stage 2 can fail",
+    );
   } finally {
     fixture.restore();
   }

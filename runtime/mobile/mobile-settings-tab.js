@@ -60,6 +60,9 @@ class MobileSettingsTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    // The desktop settings tab already marks its root. Keep the mobile
+    // fallback on the same responsive form contract.
+    containerEl.addClass("oc-settings-root");
     const locale = typeof this.plugin.getEffectiveLocale === "function"
       ? this.plugin.getEffectiveLocale()
       : resolveEffectiveLocaleFromSettings(this.plugin.settings);

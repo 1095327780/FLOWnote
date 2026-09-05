@@ -1,13 +1,21 @@
 const { setIcon } = require("obsidian");
+const { canonicalToolName } = require("./tool-activity");
 
 const TOOL_ICON_MAP = {
-  read: "file-text",
-  write: "file-pen",
-  edit: "file-pen",
+  vault_read: "file-text",
+  vault_write: "file-pen",
+  vault_edit: "file-pen",
+  vault_move: "file-input",
+  vault_create_dir: "folder-plus",
+  vault_list: "folder-tree",
+  vault_search: "search",
+  vault_daily: "notebook-pen",
+  vault_property: "list-tree",
+  vault_backlinks: "link",
+  vault_tasks: "list-checks",
+  vault_tags: "tags",
+  vault_get_active_file: "file-check",
   bash: "terminal-square",
-  ls: "folder-tree",
-  glob: "search",
-  grep: "search-code",
   web_search: "globe",
   web_fetch: "globe",
   web_request: "send",
@@ -102,7 +110,7 @@ function showCopyFeedback(el, restore) {
 }
 
 function resolveToolIconName(toolName) {
-  const key = String(toolName || "").trim().toLowerCase();
+  const key = canonicalToolName(toolName);
   return TOOL_ICON_MAP[key] || "wrench";
 }
 

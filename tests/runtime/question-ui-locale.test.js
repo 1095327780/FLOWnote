@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { parseMethods } = require("../../runtime/view/question/parse-methods");
+const { inlinePanelMethods } = require("../../runtime/view/question/inline-panel-methods");
 const { InlineAskUserQuestionPanel } = require("../../runtime/inline-ask-user-question-panel");
 const { I18N_MESSAGES } = require("../../runtime/i18n-messages");
 
@@ -85,6 +86,61 @@ test("InlineAskUserQuestionPanel should not auto-submit multi-select on first cl
   assert.deepEqual([...panel.answers.get(0)].sort(), ["A", "B"]);
 });
 
+test("inline question tabs use roving focus while ordinary Tab remains native", () => {
+  const panel = new InlineAskUserQuestionPanel({}, {}, () => {}, null, {
+    immediateSelect: false,
+  });
+  panel.questions = [{}, {}];
+
+  const switched = [];
+  panel.switchTab = (index) => switched.push(index);
+  let prevented = 0;
+  let stopped = 0;
+  panel.handleTabKeyDown({
+    key: "ArrowRight",
+    preventDefault() { prevented += 1; },
+    stopPropagation() { stopped += 1; },
+  }, 2);
+  assert.deepEqual(switched, [0], "ArrowRight should wrap from the submit tab to the first tab");
+  assert.equal(prevented, 1);
+  assert.equal(stopped, 1);
+
+  prevented = 0;
+  stopped = 0;
+  const handled = panel.handleNavigationKey({
+    key: "Tab",
+    preventDefault() { prevented += 1; },
+    stopPropagation() { stopped += 1; },
+  }, 1);
+  assert.equal(handled, false);
+  assert.equal(prevented, 0, "Tab should remain available to leave the tab list naturally");
+  assert.equal(stopped, 0);
+});
+
+test("switching an inline question tab focuses the newly active tab", () => {
+  const panel = new InlineAskUserQuestionPanel({}, {}, () => {}, null, {
+    immediateSelect: false,
+  });
+  panel.questions = [{}, {}];
+  panel.activeTabIndex = 0;
+  let rootFocusCount = 0;
+  let activeTabFocusCount = 0;
+  panel.rootEl = { focus() { rootFocusCount += 1; } };
+  panel.renderTabBar = () => {
+    panel.tabElements = [
+      { focus() {} },
+      { focus() { activeTabFocusCount += 1; } },
+      { focus() {} },
+    ];
+  };
+  panel.renderTabContent = () => {};
+
+  panel.switchTab(1);
+
+  assert.equal(activeTabFocusCount, 1);
+  assert.equal(rootFocusCount, 0);
+});
+
 test("i18n messages should include localized home view copy", () => {
   assert.equal(
     I18N_MESSAGES["zh-CN"] && I18N_MESSAGES["zh-CN"].view && I18N_MESSAGES["zh-CN"].view.welcome.greeting,
@@ -104,6 +160,7 @@ test("i18n messages should include localized home view copy", () => {
   assert.equal(I18N_MESSAGES.en.settings.agent.providerLabels["openai-compat-custom"], "Custom OpenAI-compatible");
   assert.equal(I18N_MESSAGES.ru.settings.providerAuth.heading, "Управление авторизацией провайдеров (OAuth / API Key)");
   assert.equal(I18N_MESSAGES.ru.settings.agent.providerLabels["openai-compat-custom"], "Собственный OpenAI-compatible");
+  assert.doesNotMatch(I18N_MESSAGES.ru.settings.agent.regionDesc, /\b(?:International|endpoint)\b/i);
   assert.equal(I18N_MESSAGES.ru.mobile.capture.title, "Быстрая запись");
   assert.equal(I18N_MESSAGES.ru.modals.permission.title, "AI хочет внести изменение");
 });
@@ -178,4 +235,107 @@ test("runtime translation calls should have zh/en/ru message coverage", () => {
 
     assert.deepEqual(missing, [], `${locale} should cover every runtime translation call`);
   }
+});
+
+test("inline question panel uses localized accessible controls without forced smooth motion", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../runtime/inline-ask-user-question-panel.js"), "utf8");
+  assert.match(source, /createEl\("button"/);
+  assert.match(source, /aria-checked|aria-selected/);
+  assert.match(source, /role:\s*["']tablist["']/);
+  assert.match(source, /tabindex:\s*idx === this\.activeTabIndex \? ["']0["'] : ["']-1["']/);
+  assert.match(source, /["']aria-labelledby["']/);
+  assert.match(source, /this\.copy\("submit"/);
+  assert.doesNotMatch(source, /Claude has a question/);
+  assert.doesNotMatch(source, /behavior:\s*["']smooth["']/);
+});
+
+test("inline question review answers are native controls instead of click-only divs", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../runtime/inline-ask-user-question-panel.js"), "utf8");
+  const reviewStart = source.indexOf("\n  renderSubmitTab() {");
+  const reviewEnd = source.indexOf("\n  getAnswerText(idx) {", reviewStart);
+  const reviewSource = source.slice(reviewStart, reviewEnd);
+
+  assert.match(reviewSource, /reviewEl\.createEl\("button",\s*\{\s*cls:\s*"claudian-ask-review-pair"/);
+  assert.doesNotMatch(reviewSource, /reviewEl\.createDiv\(\{\s*cls:\s*"claudian-ask-review-pair"/);
+});
+
+test("desktop ask-user modal blocks submit until every question has an answer", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../runtime/modals.js"), "utf8");
+  const modalStart = source.indexOf("class AskUserQuestionModal");
+  const modalEnd = source.indexOf("class PromptAppendModal", modalStart);
+  const modalSource = source.slice(modalStart, modalEnd);
+
+  assert.match(modalSource, /isQuestionAnswered\(index\)/);
+  assert.match(modalSource, /okBtn\.disabled\s*=\s*questions\.length === 0/);
+  assert.match(modalSource, /questions\.some\(\(_q, index\) => !this\.isQuestionAnswered\(index\)\)\) return/);
+  assert.match(modalSource, /st\.selectedLabels\.size > 0/);
+  assert.match(modalSource, /st\.otherChecked && st\.otherText\.trim\(\)\.length > 0/);
+});
+
+test("closing the inline question restores focus to the composer outside teardown", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../runtime/view/question/inline-panel-methods.js"), "utf8");
+  assert.match(source, /focusComposerAfterInlineQuestion/);
+  assert.match(source, /requestAnimationFrame/);
+  assert.match(source, /clearInlineQuestionWidget\(silent = true, options = \{\}\)/);
+});
+
+test("inline question focus restoration runs only when explicitly requested", () => {
+  const originalRaf = global.requestAnimationFrame;
+  let focusCount = 0;
+  global.requestAnimationFrame = (callback) => {
+    callback();
+    return 1;
+  };
+  const composer = {
+    hidden: true,
+    removeClass() { this.hidden = false; },
+    hasClass() { return this.hidden; },
+  };
+  const context = {
+    ...inlinePanelMethods,
+    inlineQuestionWidget: null,
+    inlineQuestionKey: "question-1",
+    elements: {
+      composer,
+      input: { isConnected: true, focus() { focusCount += 1; } },
+      inlineQuestionHost: { removeClass() {}, empty() {} },
+    },
+  };
+  try {
+    inlinePanelMethods.clearInlineQuestionWidget.call(context, true);
+    assert.equal(focusCount, 0);
+    composer.hidden = true;
+    inlinePanelMethods.clearInlineQuestionWidget.call(context, true, { restoreFocus: true });
+    assert.equal(focusCount, 1);
+  } finally {
+    global.requestAnimationFrame = originalRaf;
+  }
+});
+
+test("mobile stylesheet keeps Obsidian's explicit dark theme authoritative and supports reduced motion", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../../styles.css"), "utf8");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.doesNotMatch(css, /@media \(prefers-color-scheme: light\)/);
+  assert.doesNotMatch(css, /SYSTEM LIGHT MODE OVERRIDE \(OS-level signal, theme-agnostic\)/);
+  assert.doesNotMatch(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*,\s*\*::before/);
+  assert.match(css, /\.is-mobile \.oc-header-actions \.oc-icon-btn,[\s\S]{0,500}width:\s*36px;[\s\S]{0,120}height:\s*36px/);
+  assert.match(css, /\.is-mobile \.oc-panel-switch-btn\s*\{[\s\S]{0,250}min-height:\s*34px/);
+  assert.match(css, /\.is-mobile \.oc-context-link-btn\s*\{[\s\S]{0,250}min-height:\s*34px/);
+  assert.match(css, /\.is-mobile \.oc-send-btn\s*\{[\s\S]{0,300}min-height:\s*38px/);
+  assert.match(css, /\.is-mobile \.oc-skill-editor-modal[\s\S]{0,1000}min-width:\s*0/);
+  assert.match(css, /\.is-mobile \.oc-template-editor-modal[\s\S]{0,1000}min-width:\s*0/);
+  assert.match(css, /\.is-mobile \.oc-composer textarea,[\s\S]{0,500}min-height:\s*38px/);
+  assert.doesNotMatch(css, /Mobile interaction contract: controls remain discoverable and thumb-sized/);
+  assert.match(css, /\.is-mobile \.oc-session-rename-input,[\s\S]{0,500}font-size:\s*16px;[\s\S]{0,200}min-height:\s*44px/);
+  assert.match(css, /\.is-mobile \.oc-model-modal-actions button,[\s\S]{0,500}min-height:\s*44px/);
+  assert.match(css, /\.is-mobile \.oc-ask-option label[\s\S]{0,160}min-height:\s*44px/);
+});
+
+test("session switching is a native button sibling to rename and delete controls", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../runtime/view/layout/sidebar-methods.js"), "utf8");
+  assert.match(source, /createEl\("button",\s*\{\s*cls:\s*"oc-session-item-switch"/);
+  assert.match(source, /switchAttrs\["aria-current"\]/);
+  assert.doesNotMatch(source, /itemAttrs\s*=\s*\{[^}]*role:\s*"button"/);
+  assert.doesNotMatch(source, /item\.addEventListener\("keydown"/);
+  assert.match(source, /aria-current/);
 });

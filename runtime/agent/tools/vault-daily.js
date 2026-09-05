@@ -10,6 +10,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { verifyTextEffect, verifyPathExists, throwIfToolAborted } = require("../vault-effect-verifiers");
 
 const DESCRIPTION =
   "Work with the user's Obsidian daily note. Modes: " +
@@ -158,11 +159,31 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
   }
   const normalize = typeof normalizePath === "function" ? normalizePath : defaultNormalizePath;
   const nowFn = typeof now === "function" ? now : () => new Date();
+  // Keep the exact postcondition outside the model-visible tool result. The
+  // same parsed input object is passed from execute() to verifyEffect()
+  // immediately afterwards, so a WeakMap provides a per-invocation handoff
+  // without persisting the user's complete daily note in execution metadata.
+  const pendingExpectedText = new WeakMap();
 
   return buildTool({
     name: "vault_daily",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => {
+      const mode = (input && input.mode) || "read";
+      const requestedDate = input && input.date ? parseISODate(input.date) : null;
+      const date = requestedDate || nowFn();
+      const cfg = readDailyNotesConfig(app);
+      const path = normalize(buildDailyPath(cfg.folder, cfg.format, date));
+      const mutation = mode !== "read";
+      return {
+        effect: mutation ? "vault_mutation" : "observation",
+        risk: mutation ? "medium" : "low",
+        concurrency: mutation ? "serial" : "parallel",
+        presentation: "note",
+        targets: [path],
+      };
+    },
     isReadOnly: (input) => !input || input.mode === undefined || input.mode === "read",
     isDestructive: () => false,
     isConcurrencySafe: (input) => !input || input.mode === undefined || input.mode === "read",
@@ -203,7 +224,22 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
       return `${mode} ${date}`;
     },
 
-    async *execute(input, _ctx) {
+    async verifyEffect(input) {
+      const mode = (input && input.mode) || "read";
+      const d = input && input.date ? parseISODate(input.date) : nowFn();
+      const cfg = readDailyNotesConfig(app);
+      const path = normalize(buildDailyPath(cfg.folder, cfg.format, d));
+      if ((mode === "append" || mode === "create") && input && typeof input === "object") {
+        const expected = pendingExpectedText.get(input);
+        pendingExpectedText.delete(input);
+        if (expected && expected.path === path) {
+          return verifyTextEffect({ vault, path, expected: expected.content });
+        }
+      }
+      return verifyPathExists(vault, path);
+    },
+
+    async *execute(input, ctx) {
       const mode = (input && input.mode) || "read";
       const d = input && input.date ? parseISODate(input.date) : nowFn();
       const cfg = readDailyNotesConfig(app);
@@ -238,6 +274,8 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
         if (existing) {
           const current = await vault.cachedRead(existing);
           const joined = `${current || ""}${current && !String(current).endsWith("\n") ? "\n" : ""}${content}`;
+          pendingExpectedText.set(input, { path, content: joined });
+          throwIfToolAborted(ctx);
           await vault.modify(existing, joined);
           yield {
             type: "result",
@@ -248,6 +286,8 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
         // Auto-create with append semantics — same behavior as the CLI.
         const tplBody = cfg.template ? await readTemplate(vault, cfg.template) : "";
         const seed = tplBody ? `${tplBody}${tplBody.endsWith("\n") ? "" : "\n"}${content}` : content;
+        pendingExpectedText.set(input, { path, content: seed });
+        throwIfToolAborted(ctx);
         await vault.create(path, seed);
         yield {
           type: "result",
@@ -269,6 +309,8 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
       const userBody = typeof input.content === "string" ? input.content : "";
       const tplBody = cfg.template && !userBody ? await readTemplate(vault, cfg.template) : "";
       const seed = userBody || tplBody;
+      pendingExpectedText.set(input, { path, content: seed });
+      throwIfToolAborted(ctx);
       await vault.create(path, seed);
       yield {
         type: "result",

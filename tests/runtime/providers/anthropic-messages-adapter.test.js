@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const Module = require("node:module");
 
 const {
   createAnthropicMessagesProvider,
@@ -284,6 +285,59 @@ test("createMessage on non-2xx yields a single error event and stops", async () 
   assert.equal(events.length, 1);
   assert.equal(events[0].type, "error");
   assert.ok(events[0].error.type.startsWith("http_"));
+});
+
+test("createMessage preserves AbortError and never falls back to a buffered second request", async () => {
+  const adapterPath = require.resolve("../../../runtime/providers/anthropic-messages-adapter");
+  const streamingFetchPath = require.resolve("../../../runtime/providers/streaming-fetch");
+  const originalAdapter = require.cache[adapterPath];
+  const streamingModule = require(streamingFetchPath);
+  const originalStreamingFetch = streamingModule.streamingFetch;
+  const originalLoad = Module._load;
+  let streamingCalls = 0;
+  let bufferedCalls = 0;
+
+  streamingModule.streamingFetch = async () => {
+    streamingCalls += 1;
+    const error = new Error("request cancelled");
+    error.name = "AbortError";
+    throw error;
+  };
+  Module._load = function loadWithBufferedFallbackSpy(request, parent, isMain) {
+    if (request === "obsidian") {
+      return {
+        requestUrl: async () => {
+          bufferedCalls += 1;
+          return okSseResponse(SSE_FIXTURE);
+        },
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  delete require.cache[adapterPath];
+
+  try {
+    const { createAnthropicMessagesProvider: createFreshProvider } = require(adapterPath);
+    const provider = createFreshProvider({
+      spec: PROVIDERS.deepseek,
+      userConfig: deepseekUserConfig(),
+    });
+    await assert.rejects(
+      collect(provider.createMessage({
+        model: "deepseek-v4-flash",
+        messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+        maxTokens: 16,
+      })),
+      (error) => error && error.name === "AbortError",
+    );
+    assert.equal(streamingCalls, 1);
+    assert.equal(bufferedCalls, 0);
+  } finally {
+    Module._load = originalLoad;
+    streamingModule.streamingFetch = originalStreamingFetch;
+    delete require.cache[adapterPath];
+    if (originalAdapter) require.cache[adapterPath] = originalAdapter;
+  }
 });
 
 test("createMessage non-streaming mode synthesizes the full event sequence", async () => {

@@ -104,6 +104,19 @@ function validateQuestion(q, idx) {
   return null;
 }
 
+function normalizeAnswer(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => typeof item === "string" ? item.trim() : "")
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized ? [normalized] : [];
+  }
+  return [];
+}
+
 /**
  * @returns {import('../tool-registry').ToolDef}
  */
@@ -112,6 +125,13 @@ function createAskUserTool() {
     name: "ask_user",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: {
+      effect: "none",
+      risk: "low",
+      concurrency: "serial",
+      presentation: "question",
+      targets: [],
+    },
     // Doesn't touch the filesystem or vault — read-only from a side-effect
     // standpoint — but DOES require the UI to be available. We mark it
     // not-concurrency-safe so multiple ask_user calls can't interleave.
@@ -169,7 +189,9 @@ function createAskUserTool() {
         yield {
           type: "result",
           content: "ask_user: user dismissed the question without answering.",
-          isError: true,
+          isError: false,
+          code: "user_input_dismissed",
+          control: { type: "suspend", reason: "user_input_dismissed" },
         };
         return;
       }
@@ -179,8 +201,10 @@ function createAskUserTool() {
       if (response.dismissed) {
         yield {
           type: "result",
-          content: "ask_user: user dismissed the question. Proceed without their answer or stop.",
-          isError: true,
+          content: "ask_user: user dismissed the question. The workflow is paused until the user continues.",
+          isError: false,
+          code: "user_input_dismissed",
+          control: { type: "suspend", reason: "user_input_dismissed" },
         };
         return;
       }
@@ -189,14 +213,17 @@ function createAskUserTool() {
       // Build a human-friendly textual summary the model can quote back.
       const lines = [];
       for (const q of input.questions) {
-        const a = answers[q.question];
-        if (Array.isArray(a)) {
-          lines.push(`Q: ${q.question}\nA: ${a.join(" | ")}`);
-        } else if (typeof a === "string" && a.length > 0) {
-          lines.push(`Q: ${q.question}\nA: ${a}`);
-        } else {
-          lines.push(`Q: ${q.question}\nA: (no answer)`);
+        const normalized = normalizeAnswer(answers[q.question]);
+        if (normalized.length === 0) {
+          yield {
+            type: "result",
+            content: `ask_user: no answer was provided for question: ${q.question}`,
+            isError: true,
+            code: "user_input_invalid",
+          };
+          return;
         }
+        lines.push(`Q: ${q.question}\nA: ${normalized.join(" | ")}`);
       }
       yield { type: "result", content: lines.join("\n\n") };
     },
@@ -205,5 +232,6 @@ function createAskUserTool() {
 
 module.exports = {
   createAskUserTool,
+  normalizeAnswer,
   validateQuestion,
 };

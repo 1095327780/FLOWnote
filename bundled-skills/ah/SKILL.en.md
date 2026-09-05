@@ -1,6 +1,10 @@
 ---
 name: ah
 description: Unified FLOWnote skill router. Use when the user is unsure which workflow to run, wants a menu, or describes an intent that should be routed to a specific skill.
+metadata:
+  flownote:
+    completion:
+      mode: answer
 ---
 
 > For Obsidian read, search, and write actions, prefer the built-in Obsidian tools exposed by FLOWnote.

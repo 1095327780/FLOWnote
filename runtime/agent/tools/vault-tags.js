@@ -92,6 +92,13 @@ function createVaultTagsTool({ app } = {}) {
     name: "vault_tags",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: {
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "list",
+      targets: ["/"],
+    },
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

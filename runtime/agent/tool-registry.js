@@ -18,18 +18,74 @@ const TOOL_DEFAULTS = Object.freeze({
   userFacingName:    (_input) => "",
 });
 
+const CAPABILITY_VALUES = Object.freeze({
+  effect: new Set(["none", "observation", "vault_mutation", "network_mutation", "external_side_effect"]),
+  risk: new Set(["low", "medium", "high"]),
+  concurrency: new Set(["parallel", "serial"]),
+  presentation: new Set(["read", "list", "search", "edit", "note", "skill", "question", "web", "execute", "other"]),
+});
+
+function normalizeCapabilities(value, toolName) {
+  const label = `buildTool(${toolName}): capabilities`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must resolve to an object`);
+  }
+  for (const field of ["effect", "risk", "concurrency", "presentation"]) {
+    if (!CAPABILITY_VALUES[field].has(value[field])) {
+      throw new Error(`${label}.${field} is invalid`);
+    }
+  }
+  if (!Array.isArray(value.targets) || value.targets.some((target) => typeof target !== "string")) {
+    throw new Error(`${label}.targets must be a string array`);
+  }
+  const targets = Object.freeze(Array.from(new Set(
+    value.targets.map((target) => target.trim()).filter(Boolean),
+  )));
+  return Object.freeze({
+    effect: value.effect,
+    risk: value.risk,
+    concurrency: value.concurrency,
+    presentation: value.presentation,
+    targets,
+  });
+}
+
+/**
+ * Resolve and normalize a tool's declared capabilities for one invocation.
+ * The returned value is a deeply immutable, JSON-only snapshot.
+ *
+ * @param {ToolDef} tool
+ * @param {any} input
+ * @returns {{effect: string, risk: string, concurrency: string, presentation: string, targets: string[]}}
+ */
+function resolveToolCapabilities(tool, input) {
+  if (!tool || typeof tool !== "object" || !tool.name) {
+    throw new Error("resolveToolCapabilities: tool with name required");
+  }
+  const source = tool.capabilities;
+  let value;
+  try {
+    value = typeof source === "function" ? source(input) : source;
+  } catch (error) {
+    const detail = error && error.message ? error.message : String(error);
+    throw new Error(`buildTool(${tool.name}): capabilities resolver failed: ${detail}`);
+  }
+  return normalizeCapabilities(value, tool.name);
+}
+
 /**
  * @typedef {Object} ToolDef
  * @property {string} name
  * @property {string} description
  * @property {Object} inputSchema
+ * @property {Object|((input: any) => Object)} capabilities
  * @property {(input: any, ctx: any) => boolean} [isEnabled]
  * @property {(input: any) => boolean}    [isReadOnly]
  * @property {(input: any) => boolean}    [isDestructive]
  * @property {(input: any) => boolean}    [isConcurrencySafe]
  * @property {(input: any, ctx: any) => Promise<{ behavior: 'allow'|'deny'|'ask', reason?: string, summary?: string, choices?: string[] }>} [checkPermissions]
  * @property {(input: any, ctx: any) => Promise<{ ok: boolean, error?: string }>} [validate]
- * @property {(input: any, ctx: any) => AsyncIterable<{ type: 'progress'|'result', message?: string, data?: any, content?: any, isError?: boolean }>} execute
+ * @property {(input: any, ctx: any) => AsyncIterable<{ type: 'progress'|'result', message?: string, data?: any, content?: any, isError?: boolean, code?: string, control?: {type:'suspend',reason:string} }>} execute
  * @property {(input: any) => string}     [userFacingName]
  */
 
@@ -57,7 +113,16 @@ function buildTool(def) {
   if (typeof def.execute !== "function") {
     throw new Error(`buildTool(${def.name}): execute must be a function`);
   }
-  return { ...TOOL_DEFAULTS, ...def };
+  if (
+    !def.capabilities ||
+    (typeof def.capabilities !== "object" && typeof def.capabilities !== "function")
+  ) {
+    throw new Error(`buildTool(${def.name}): capabilities is required`);
+  }
+  const built = { ...TOOL_DEFAULTS, ...def };
+  const normalized = resolveToolCapabilities(built, undefined);
+  if (typeof def.capabilities !== "function") built.capabilities = normalized;
+  return built;
 }
 
 /**
@@ -141,5 +206,6 @@ class ToolRegistry {
 module.exports = {
   TOOL_DEFAULTS,
   buildTool,
+  resolveToolCapabilities,
   ToolRegistry,
 };

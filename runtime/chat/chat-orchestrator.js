@@ -2,6 +2,7 @@ const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const { runDirectAgentTurn } = require("./direct-agent-runner");
 const { resolvePermissionRequestDecision } = require("../agent/permission-policy");
+const { reduceExecutionEvents } = require("../agent/execution-ledger");
 
 function tr(view, key, fallback, params = {}) {
   return tFromContext(view, key, fallback, params);
@@ -44,6 +45,24 @@ function getSessionTitle(view, sessionId) {
   return String((found && found.title) || "").trim();
 }
 
+function getSessionMessages(view, sessionId) {
+  const store = view && view.plugin && view.plugin.sessionStore;
+  if (!store) return [];
+  if (typeof store.getSessionMessages === "function") {
+    const messages = store.getSessionMessages(sessionId);
+    return Array.isArray(messages) ? messages : [];
+  }
+  const st = typeof store.state === "function" ? store.state() : null;
+  const messages = st && st.messagesBySession ? st.messagesBySession[sessionId] : null;
+  return Array.isArray(messages) ? messages : [];
+}
+
+function isSessionActive(view, sessionId) {
+  const store = view && view.plugin && view.plugin.sessionStore;
+  const st = store && typeof store.state === "function" ? store.state() : null;
+  return Boolean(st && String(st.activeSessionId || "") === String(sessionId || ""));
+}
+
 async function ensureCompatibleSessionForAgentMode(view, sessionId, agentMode) {
   if (agentMode !== "opencode-legacy" || !isLocalSessionId(sessionId)) return sessionId;
   const title = getSessionTitle(view, sessionId);
@@ -55,7 +74,14 @@ async function ensureCompatibleSessionForAgentMode(view, sessionId, agentMode) {
   return nextSessionId;
 }
 
-function mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedContextFiles = []) {
+function mountPendingDraft(
+  view,
+  sessionId,
+  userText,
+  hideUserMessage,
+  linkedContextFiles = [],
+  protectedMessageIds = [],
+) {
   const userMessage = { id: createMessageId("msg"), role: "user", text: userText, createdAt: Date.now() };
   if (Array.isArray(linkedContextFiles) && linkedContextFiles.length) {
     userMessage.linkedContextFiles = linkedContextFiles.slice();
@@ -68,19 +94,18 @@ function mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedCon
     reasoning: "",
     meta: "",
     blocks: [],
+    stats: null,
     createdAt: Date.now(),
     pending: true,
     error: "",
   };
 
   if (!hideUserMessage) {
-    view.plugin.sessionStore.appendMessage(sessionId, userMessage);
+    view.plugin.sessionStore.appendMessage(sessionId, userMessage, { protectedMessageIds });
   }
-  view.plugin.sessionStore.appendMessage(sessionId, draft);
+  view.plugin.sessionStore.appendMessage(sessionId, draft, { protectedMessageIds });
 
-  if (typeof view.setForceBottomWindow === "function") {
-    view.setForceBottomWindow(12000);
-  }
+  if (typeof view.setForceBottomWindow === "function") view.setForceBottomWindow(0);
   view.autoScrollEnabled = true;
   if (typeof view.renderMessages === "function") {
     view.renderMessages({ forceBottom: true });
@@ -95,22 +120,29 @@ function mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedCon
   return { draftId };
 }
 
-function renderDraftBlocks(view, draftId) {
+function renderDraftBlocks(view, sessionId, draftId) {
+  if (!isSessionActive(view, sessionId)) return;
   const messages = view.elements.messages;
   if (!messages) return;
 
   const target = view.findMessageRow(draftId);
   if (!target) return;
 
-  const currentDraft = view.plugin
-    .sessionStore
-    .getActiveMessages()
+  const currentDraft = getSessionMessages(view, sessionId)
     .find((msg) => msg && msg.id === draftId);
   if (!currentDraft) return;
 
   view.renderAssistantBlocks(target, currentDraft);
   view.removeStandaloneReasoningContainer(target);
   view.reorderAssistantMessageLayout(target);
+}
+
+function mutateMessageViewport(view, callback) {
+  if (view && typeof view.mutateMessagesPreservingViewport === "function") {
+    view.mutateMessagesPreservingViewport(callback);
+    return;
+  }
+  callback();
 }
 
 function isQuestionToolBlock(block) {
@@ -131,7 +163,12 @@ function hasQuestionToolBlock(blocks) {
   return list.some((block) => isQuestionToolBlock(block));
 }
 
-function createTransportHandlers(view, sessionId, draftId) {
+function executionSnapshotIsTerminal(events) {
+  const state = reduceExecutionEvents(events);
+  return Object.values(state.runs).some((run) => Boolean(run && run.terminal));
+}
+
+function createTransportHandlers(view, sessionId, draftId, signal) {
   const queueFrame = (flush, state) => {
     if (!state || typeof state !== "object") return;
     if (state.scheduled) return;
@@ -149,23 +186,22 @@ function createTransportHandlers(view, sessionId, draftId) {
   const reasoningState = { latest: "", scheduled: 0 };
   const blockState = { latest: [], scheduled: 0 };
   const questionRefreshState = { lastAt: 0 };
+  let deferredTerminalExecution = null;
 
   const flushToken = () => {
-    const currentDraft = view.plugin
-      .sessionStore
-      .getActiveMessages()
+    const currentDraft = getSessionMessages(view, sessionId)
       .find((msg) => msg && msg.id === draftId);
     if (!currentDraft || !currentDraft.pending) return;
     const partial = String(tokenState.latest || "");
     view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, partial);
-    const refreshedDraft = view.plugin
-      .sessionStore
-      .getActiveMessages()
+    const refreshedDraft = getSessionMessages(view, sessionId)
       .find((msg) => msg && msg.id === draftId);
     if (!refreshedDraft || !refreshedDraft.pending) return;
     const displayedText = currentDraft && typeof currentDraft.text === "string"
       ? String((refreshedDraft && refreshedDraft.text) || "")
       : partial;
+
+    if (!isSessionActive(view, sessionId)) return;
 
     if (displayedText.trim()) {
       view.setRuntimeStatus(tr(view, "view.runtime.generating", "Generating response..."), "working");
@@ -173,42 +209,42 @@ function createTransportHandlers(view, sessionId, draftId) {
 
     const messages = view.elements.messages;
     if (!messages) return;
-    const target = view.findMessageRow(draftId);
-    if (target) {
-      const body = target.querySelector(".oc-message-content");
-      if (body) {
-        const hasStreamTextBlocks = Array.isArray(refreshedDraft.blocks)
-          && refreshedDraft.blocks.some((block) => String((block && block.type) || "").trim().toLowerCase() === "stream-text");
-        if (hasStreamTextBlocks) {
-          body.empty();
-        } else if (displayedText.trim() && typeof view.renderMarkdownSafely === "function") {
-          view.renderMarkdownSafely(body, displayedText, () => {
-            if (typeof view.enhanceCodeBlocks === "function") view.enhanceCodeBlocks(body);
-          });
-        } else {
-          body.textContent = displayedText;
+    mutateMessageViewport(view, () => {
+      const target = view.findMessageRow(draftId);
+      if (target) {
+        const body = target.querySelector(".oc-message-content");
+        if (body) {
+          const hasStreamTextBlocks = Array.isArray(refreshedDraft.blocks)
+            && refreshedDraft.blocks.some((block) => String((block && block.type) || "").trim().toLowerCase() === "stream-text");
+          if (hasStreamTextBlocks) {
+            body.empty();
+          } else {
+            // Rich Markdown rendering is asynchronous. Re-running it for every
+            // token lets fast streams overtake earlier renders and makes the
+            // response appear all at once. Keep the pending node stable and
+            // synchronous; terminal rendering upgrades it to Markdown once.
+            body.textContent = displayedText;
+          }
         }
       }
-    }
+    });
     view.scheduleScrollMessagesToBottom();
   };
 
   const flushReasoning = () => {
-    const currentDraft = view.plugin
-      .sessionStore
-      .getActiveMessages()
+    const currentDraft = getSessionMessages(view, sessionId)
       .find((msg) => msg && msg.id === draftId);
     if (!currentDraft || !currentDraft.pending) return;
     const partialReasoning = String(reasoningState.latest || "");
     view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, partialReasoning);
-    const refreshedDraft = view.plugin
-      .sessionStore
-      .getActiveMessages()
+    const refreshedDraft = getSessionMessages(view, sessionId)
       .find((msg) => msg && msg.id === draftId);
     if (!refreshedDraft || !refreshedDraft.pending) return;
     const displayedReasoning = currentDraft && typeof currentDraft.reasoning === "string"
       ? String((refreshedDraft && refreshedDraft.reasoning) || "")
       : partialReasoning;
+
+    if (!isSessionActive(view, sessionId)) return;
 
     if (displayedReasoning.trim()) {
       view.setRuntimeStatus(tr(view, "view.runtime.reasoning", "Model is reasoning..."), "working");
@@ -219,24 +255,25 @@ function createTransportHandlers(view, sessionId, draftId) {
     const target = view.findMessageRow(draftId);
     if (!target) return;
 
-    const hasReasoningBlocks = view.hasReasoningBlock(refreshedDraft && refreshedDraft.blocks);
-    if (hasReasoningBlocks && refreshedDraft) {
-      view.removeStandaloneReasoningContainer(target);
-    } else {
-      const reasoningBody = view.ensureReasoningContainer(target, true);
-      if (reasoningBody) reasoningBody.textContent = displayedReasoning || "...";
-    }
+    mutateMessageViewport(view, () => {
+      const hasReasoningBlocks = view.hasReasoningBlock(refreshedDraft && refreshedDraft.blocks);
+      if (hasReasoningBlocks && refreshedDraft) {
+        view.removeStandaloneReasoningContainer(target);
+      } else {
+        const reasoningBody = view.ensureReasoningContainer(target, true);
+        if (reasoningBody) reasoningBody.textContent = displayedReasoning || "...";
+      }
+    });
     view.scheduleScrollMessagesToBottom();
   };
 
   const flushBlocks = () => {
-    const currentDraft = view.plugin
-      .sessionStore
-      .getActiveMessages()
+    const currentDraft = getSessionMessages(view, sessionId)
       .find((msg) => msg && msg.id === draftId);
     if (!currentDraft || !currentDraft.pending) return;
     const blocks = Array.isArray(blockState.latest) ? blockState.latest : [];
     view.plugin.sessionStore.updateAssistantDraft(sessionId, draftId, undefined, undefined, undefined, blocks);
+    if (!isSessionActive(view, sessionId)) return;
     const runtimeStatus = view.runtimeStatusFromBlocks(blocks);
     if (runtimeStatus && runtimeStatus.text) {
       view.setRuntimeStatus(runtimeStatus.text, runtimeStatus.tone);
@@ -254,8 +291,10 @@ function createTransportHandlers(view, sessionId, draftId) {
       }).catch(() => {});
     }
 
-    renderDraftBlocks(view, draftId);
-    view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
+    mutateMessageViewport(view, () => {
+      renderDraftBlocks(view, sessionId, draftId);
+      view.renderInlineQuestionPanel(getSessionMessages(view, sessionId));
+    });
     view.scheduleScrollMessagesToBottom();
   };
 
@@ -284,7 +323,7 @@ function createTransportHandlers(view, sessionId, draftId) {
         return "always";
       }
       view.setRuntimeStatus(tr(view, "view.permission.waiting", "Waiting for permission confirmation..."), "info");
-      const decision = await view.showPermissionRequestModal(permission || {});
+      const decision = await view.showPermissionRequestModal(permission || {}, signal);
       if (!decision) return "reject";
       if (decision === "always" || decision === "once" || decision === "reject") {
         return decision;
@@ -297,7 +336,7 @@ function createTransportHandlers(view, sessionId, draftId) {
       // and resolves with { answers } or { dismissed: true }.
       view.setRuntimeStatus(tr(view, "view.ask.waiting", "Waiting for your answer..."), "info");
       try {
-        return await view.showAskUserModal(payload || { questions: [] });
+        return await view.showAskUserModal(payload || { questions: [] }, signal);
       } finally {
         view.setRuntimeStatus(null);
       }
@@ -313,8 +352,9 @@ function createTransportHandlers(view, sessionId, draftId) {
           count: Array.isArray(request.questions) ? request.questions.length : 0,
         })}`);
       }
+      if (!isSessionActive(view, sessionId)) return;
       view.setRuntimeStatus(tr(view, "view.question.answerInPanel", "Please answer in the panel below."), "info");
-      view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
+      view.renderInlineQuestionPanel(getSessionMessages(view, sessionId));
     },
 
     onQuestionResolved: (info) => {
@@ -323,7 +363,10 @@ function createTransportHandlers(view, sessionId, draftId) {
       if (requestIdFromEvent) {
         view.removePendingQuestionRequest(sessionIdFromEvent || sessionId, requestIdFromEvent);
       }
-      view.renderInlineQuestionPanel(view.plugin.sessionStore.getActiveMessages());
+      const affectedSessionId = sessionIdFromEvent || sessionId;
+      if (isSessionActive(view, affectedSessionId)) {
+        view.renderInlineQuestionPanel(getSessionMessages(view, affectedSessionId));
+      }
     },
 
     onPromptAppend: (appendText) => {
@@ -338,10 +381,34 @@ function createTransportHandlers(view, sessionId, draftId) {
     onToast: (toast) => {
       view.handleToastEvent(toast || {});
     },
+
+    onExecutionSnapshot: async (events) => {
+      // A terminal journal is not written into shared runtime state yet: any
+      // unrelated settings/view save could otherwise persist it before the
+      // runner has assembled matching text and blocks. The prompt owner folds
+      // this snapshot into finalizeAssistantDraft as one memory transaction.
+      if (executionSnapshotIsTerminal(events)) {
+        deferredTerminalExecution = {
+          version: 1,
+          events: JSON.parse(JSON.stringify(events)),
+        };
+        return;
+      }
+      view.plugin.sessionStore.setAssistantExecution(sessionId, draftId, events);
+      await view.plugin.persistState();
+    },
+
+    getDeferredTerminalExecution: () => (
+      deferredTerminalExecution
+        ? JSON.parse(JSON.stringify(deferredTerminalExecution))
+        : null
+    ),
   };
 }
 
 function finalizeAssistantDraft(view, sessionId, draftId, response) {
+  const legacyFailed = !response.status && /error|failed|失败|status=\d{3}/i.test(String(response.meta || ""));
+  const status = String(response.status || (legacyFailed ? "failed" : "completed"));
   view.plugin.sessionStore.finalizeAssistantDraft(
     sessionId,
     draftId,
@@ -351,12 +418,15 @@ function finalizeAssistantDraft(view, sessionId, draftId, response) {
       reasoning: response.reasoning || "",
       meta: response.meta || "",
       blocks: Array.isArray(response.blocks) ? response.blocks : [],
+      stats: response.stats || null,
+      execution: response.execution || null,
+      status,
     },
-    /error|failed|失败|status=\d{3}/i.test(String(response.meta || "")) ? String(response.meta || "") : "",
+    status === "failed" ? String(response.meta || "Agent runtime failed.") : "",
   );
 }
 
-async function handlePromptFailure(view, sessionId, draftId, error) {
+async function handlePromptFailure(view, sessionId, draftId, error, deferredTerminalExecution = null) {
   const msg = error instanceof Error ? error.message : String(error);
   const isUserAbort = view.isAbortLikeError(msg);
   const isSilentAbort = view.silentAbortBudget > 0 && isUserAbort;
@@ -366,6 +436,7 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
       view.silentAbortBudget = Math.max(0, Number(view.silentAbortBudget || 0) - 1);
     }
     const existing = (view.plugin.sessionStore.state().messagesBySession[sessionId] || []).find((x) => x && x.id === draftId);
+    const execution = deferredTerminalExecution || (existing && existing.execution) || null;
     view.plugin.sessionStore.finalizeAssistantDraft(
       sessionId,
       draftId,
@@ -374,6 +445,8 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
         reasoning: existing && typeof existing.reasoning === "string" ? existing.reasoning : "",
         meta: existing && typeof existing.meta === "string" ? existing.meta : "",
         blocks: existing && Array.isArray(existing.blocks) ? existing.blocks : [],
+        execution,
+        status: "cancelled",
       },
       "",
     );
@@ -401,50 +474,99 @@ async function handlePromptFailure(view, sessionId, draftId, error) {
     }
   }
 
-  view.setRuntimeStatus(tr(view, "view.request.failed", "Request failed: {message}", { message: msg }), "error");
+  const existing = (view.plugin.sessionStore.state().messagesBySession[sessionId] || [])
+    .find((row) => row && row.id === draftId);
+  const execution = deferredTerminalExecution || (existing && existing.execution) || null;
+  const verifiedPaths = verifiedMutationPaths(execution);
+  const failureCopy = verifiedPaths.length > 0
+    ? tr(
+        view,
+        "view.request.failedPartial",
+        "The workflow stopped, but {count} verified file change(s) were preserved. Check the items below before retrying.",
+        { count: verifiedPaths.length },
+      )
+    : tr(view, "view.request.failed", "Request failed: {message}", { message: msg });
+  view.setRuntimeStatus(failureCopy, "error");
   view.plugin.sessionStore.finalizeAssistantDraft(
     sessionId,
     draftId,
-    tr(view, "view.request.failed", "Request failed: {message}", { message: msg }),
+    {
+      text: String((existing && existing.text) || failureCopy),
+      reasoning: String((existing && existing.reasoning) || ""),
+      meta: String((existing && existing.meta) || ""),
+      blocks: existing && Array.isArray(existing.blocks) ? existing.blocks : [],
+      execution,
+      status: "failed",
+    },
     msg,
   );
   new Notice(msg);
   return { shouldRerenderModelPicker };
 }
 
-async function finalizePromptCycle(view, shouldRerenderModelPicker, requestAbort) {
-  if (requestAbort && view.currentAbort !== requestAbort) {
-    return;
+function verifiedMutationPaths(execution) {
+  const events = execution && execution.version === 1 && Array.isArray(execution.events)
+    ? execution.events
+    : null;
+  if (!events) return [];
+  try {
+    const state = reduceExecutionEvents(events);
+    return Array.from(new Set(Object.values(state.runs).flatMap((run) => (
+      Object.values(run.tools || {}).flatMap((tool) => {
+        const receipt = tool && tool.effect && tool.effect.status === "verified"
+          ? tool.effect.receipt
+          : null;
+        if (!receipt || receipt.kind === "observation") return [];
+        return Array.isArray(receipt.paths) ? receipt.paths.map(String) : [];
+      })
+    ))));
+  } catch (_error) {
+    return [];
   }
+}
+
+async function finalizePromptCycle(view, shouldRerenderModelPicker, requestAbort, sessionId, draftId) {
+  const isCurrentRequest = !requestAbort || view.currentAbort === requestAbort;
+  // Draft terminal state must be durable even if a newer UI request has
+  // already taken ownership of the busy indicator.
+  await view.plugin.persistState();
+  if (!isCurrentRequest) return;
   view.currentAbort = null;
   view.setBusy(false);
-  await view.plugin.persistState();
 
-  if (typeof view.setForceBottomWindow === "function") {
-    view.setForceBottomWindow(6000);
-  }
-  view.autoScrollEnabled = true;
+  if (typeof view.setForceBottomWindow === "function") view.setForceBottomWindow(0);
 
   if (shouldRerenderModelPicker) {
     view.render();
     return;
   }
 
-  if (typeof view.renderMessages === "function") {
-    view.renderMessages({ forceBottom: true });
+  const activeSession = isSessionActive(view, sessionId);
+  let refreshedMessage = false;
+  if (activeSession && typeof view.refreshMessageItem === "function") {
+    refreshedMessage = Boolean(view.refreshMessageItem(draftId));
+  }
+  if (activeSession && !refreshedMessage && typeof view.renderMessages === "function") {
+    view.renderMessages();
   }
   if (typeof view.refreshHistoryMenu === "function") {
     view.refreshHistoryMenu();
   }
   if (typeof view.scheduleScrollMessagesToBottom === "function") {
-    view.scheduleScrollMessagesToBottom(true);
+    view.scheduleScrollMessagesToBottom();
   }
 }
 
 async function runSendPrompt(view, userText, options = {}) {
+  if (view.currentAbort) {
+    new Notice(tr(view, "view.request.alreadyRunning", "A FLOWnote workflow is already running."));
+    return;
+  }
   const requestOptions = options && typeof options === "object" ? options : {};
   const forceSessionId = typeof requestOptions.sessionId === "string" ? requestOptions.sessionId.trim() : "";
   const hideUserMessage = Boolean(requestOptions.hideUserMessage);
+  const continuationMessageId = String(requestOptions.continuationMessageId || "").trim();
+  const continuationRunId = String(requestOptions.continuationRunId || "").trim();
 
   const modelSlash = view.parseModelSlashCommand(userText);
   if (modelSlash) {
@@ -477,7 +599,15 @@ async function runSendPrompt(view, userText, options = {}) {
   sessionId = await ensureCompatibleSessionForAgentMode(view, sessionId, agentMode);
 
   const linkedContextFiles = collectUserLinkedContextFiles(view, hideUserMessage);
-  const { draftId } = mountPendingDraft(view, sessionId, userText, hideUserMessage, linkedContextFiles);
+  const protectedMessageIds = continuationMessageId ? [continuationMessageId] : [];
+  const { draftId } = mountPendingDraft(
+    view,
+    sessionId,
+    userText,
+    hideUserMessage,
+    linkedContextFiles,
+    protectedMessageIds,
+  );
   if (!hideUserMessage) {
     if (typeof view.clearLinkedContextFiles === "function") {
       view.clearLinkedContextFiles({ closePicker: true });
@@ -494,12 +624,17 @@ async function runSendPrompt(view, userText, options = {}) {
   view.setBusy(true);
   view.setRuntimeStatus(tr(view, "view.runtime.waitingResponse", "Waiting for FLOWnote response..."), "working");
   let shouldRerenderModelPicker = false;
+  let handlers = null;
 
   try {
-    const skillCommand = skillMatch && typeof skillMatch.command === "string"
+    const matchedSkillCommand = skillMatch && typeof skillMatch.command === "string"
       ? String(skillMatch.command).trim()
       : "";
     const skillForTurn = skillMatch && skillMatch.skill ? skillMatch.skill : null;
+    const skillIdentity = String(
+      skillForTurn && (skillForTurn.id || skillForTurn.slug || skillForTurn.name) || "",
+    ).replace(/^\/+/, "").trim();
+    const skillCommand = matchedSkillCommand || (skillIdentity ? `/${skillIdentity}` : "");
     const directPreloadedSkill = agentMode === "direct" && skillForTurn
       ? {
           skill: String(
@@ -509,8 +644,11 @@ async function runSendPrompt(view, userText, options = {}) {
             || skillCommand
             || "",
           ).replace(/^\/+/, "").trim(),
-          args: String(skillMatch.promptText || "").trim(),
+          args: resolveExplicitSlashArguments(userText, skillCommand, skillMatch.promptText),
           command: skillCommand,
+          completionPolicy: skillForTurn.completionPolicy && typeof skillForTurn.completionPolicy === "object"
+            ? skillForTurn.completionPolicy
+            : undefined,
         }
       : null;
     const useNativeSkillCommand = Boolean(skillForTurn && skillCommand && agentMode !== "direct");
@@ -551,22 +689,28 @@ async function runSendPrompt(view, userText, options = {}) {
       }
     }
 
-    const handlers = createTransportHandlers(view, sessionId, draftId);
+    handlers = createTransportHandlers(view, sessionId, draftId, requestAbort.signal);
 
     let response;
     if (agentMode === "direct") {
-      // Diagnostic: surface linked-context propagation so we can see in
-      // the dev console whether file drag-drop made it into the prompt.
-      if (typeof view.plugin.log === "function") {
+      // The persisted diagnostic trace contains counts only: linked note
+      // paths and prompt content belong to the user's private vault.
+      if (typeof view.plugin.traceDiagnostic === "function") {
         const linkedCount = Array.isArray(linkedContextFiles) ? linkedContextFiles.length : 0;
-        const promptPreview = String(prompt || "").slice(0, 400).replace(/\n/g, " ⏎ ");
-        view.plugin.log(`[direct-agent] runSendPrompt linkedFiles=${linkedCount} paths=${JSON.stringify(linkedContextFiles)} promptLen=${String(prompt || "").length} promptHead="${promptPreview}"`);
+        void view.plugin.traceDiagnostic("agent.prompt_prepared", {
+          linkedFileCount: linkedCount,
+          hasLinkedFiles: linkedCount > 0,
+          promptLength: String(prompt || "").length,
+        });
       }
       response = await runDirectAgentTurn({
         view,
         sessionId,
         draftId,
         userText: prompt,
+        intentText: String(userText || ""),
+        continuationMessageId,
+        continuationRunId,
         preloadedSkillCommand: directPreloadedSkill,
         handlers,
         signal: requestAbort.signal,
@@ -580,13 +724,36 @@ async function runSendPrompt(view, userText, options = {}) {
       });
     }
 
+    const deferredTerminalExecution = handlers && typeof handlers.getDeferredTerminalExecution === "function"
+      ? handlers.getDeferredTerminalExecution()
+      : null;
+    if (deferredTerminalExecution && !(response && response.execution)) {
+      response = { ...(response || {}), execution: deferredTerminalExecution };
+    }
     finalizeAssistantDraft(view, sessionId, draftId, response);
   } catch (error) {
-    const out = await handlePromptFailure(view, sessionId, draftId, error);
+    const deferredTerminalExecution = handlers && typeof handlers.getDeferredTerminalExecution === "function"
+      ? handlers.getDeferredTerminalExecution()
+      : null;
+    const out = await handlePromptFailure(view, sessionId, draftId, error, deferredTerminalExecution);
     shouldRerenderModelPicker = Boolean(out && out.shouldRerenderModelPicker);
   } finally {
-    await finalizePromptCycle(view, shouldRerenderModelPicker, requestAbort);
+    await finalizePromptCycle(view, shouldRerenderModelPicker, requestAbort, sessionId, draftId);
   }
+}
+
+function resolveExplicitSlashArguments(userText, command, fallback) {
+  const input = String(userText || "").trim();
+  const normalizedCommand = String(command || "").trim();
+  if (normalizedCommand) {
+    const lowerInput = input.toLowerCase();
+    const lowerCommand = normalizedCommand.toLowerCase();
+    if (lowerInput === lowerCommand) return "";
+    if (lowerInput.startsWith(`${lowerCommand} `)) {
+      return input.slice(normalizedCommand.length).trim();
+    }
+  }
+  return String(fallback || "").trim();
 }
 
 module.exports = {

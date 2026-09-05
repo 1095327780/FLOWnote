@@ -109,6 +109,13 @@ function createVaultBacklinksTool({ app, normalizePath } = {}) {
     name: "vault_backlinks",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "search",
+      targets: input && typeof input.path === "string" ? [normalize(input.path)] : [],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

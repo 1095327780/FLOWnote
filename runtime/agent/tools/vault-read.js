@@ -66,6 +66,15 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
     name: "vault_read",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "read",
+      targets: input && typeof input.path === "string"
+        ? [resolveReadablePath(vault, normalize(input.path))]
+        : [],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

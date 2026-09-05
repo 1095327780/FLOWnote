@@ -9,6 +9,7 @@
 // the model can't accidentally clobber the whole frontmatter block.
 
 const { buildTool } = require("../tool-registry");
+const { verifyFrontmatterEffect, throwIfToolAborted } = require("../vault-effect-verifiers");
 
 const DESCRIPTION =
   "Read, set, or delete a YAML frontmatter property on a note. " +
@@ -81,6 +82,17 @@ function createVaultPropertyTool({ app, normalizePath } = {}) {
     name: "vault_property",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => {
+      const op = (input && input.op) || "get";
+      const mutation = op !== "get";
+      return {
+        effect: mutation ? "vault_mutation" : "observation",
+        risk: op === "delete" ? "high" : mutation ? "medium" : "low",
+        concurrency: mutation ? "serial" : "parallel",
+        presentation: mutation ? "edit" : "note",
+        targets: input && typeof input.path === "string" ? [normalize(input.path)] : [],
+      };
+    },
     isReadOnly: (input) => !input || !input.op || input.op === "get",
     isDestructive: () => false,
     isConcurrencySafe: (input) => !input || !input.op || input.op === "get",
@@ -126,6 +138,17 @@ function createVaultPropertyTool({ app, normalizePath } = {}) {
       return `${op} ${input && input.name ? input.name : "?"}`;
     },
 
+    async verifyEffect(input) {
+      const op = input.op || "get";
+      return verifyFrontmatterEffect({
+        app,
+        path: normalize(input.path),
+        name: input.name,
+        op,
+        value: op === "set" ? coerceValue(input.value) : undefined,
+      });
+    },
+
     async *execute(input, _ctx) {
       const path = normalize(input.path);
       const file = app.vault.getFileByPath(path);
@@ -158,6 +181,7 @@ function createVaultPropertyTool({ app, normalizePath } = {}) {
       if (op === "set") {
         const coerced = coerceValue(input.value);
         yield { type: "progress", message: `set ${name} → ${path}` };
+        throwIfToolAborted(_ctx);
         await app.fileManager.processFrontMatter(file, (fm) => {
           fm[name] = coerced;
         });
@@ -170,6 +194,7 @@ function createVaultPropertyTool({ app, normalizePath } = {}) {
 
       // op === "delete"
       yield { type: "progress", message: `delete ${name} → ${path}` };
+      throwIfToolAborted(_ctx);
       let existed = false;
       await app.fileManager.processFrontMatter(file, (fm) => {
         existed = Object.prototype.hasOwnProperty.call(fm, name);

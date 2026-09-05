@@ -317,6 +317,10 @@ function* translateOpenAIChunk(chunk, state) {
     yield { type: "message_start", message: { id: chunk.id || "openai-msg" } };
   }
   const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+  if (choices.length === 0 && chunk.usage && typeof chunk.usage === "object") {
+    yield { type: "message_delta", delta: {}, usage: chunk.usage };
+    return;
+  }
   for (const choice of choices) {
     if (choice.finish_reason) {
       // Close any open blocks before emitting message_delta.
@@ -454,6 +458,12 @@ function responseToChunks(response) {
   })();
 }
 
+function isRequestCancellation(error, signal) {
+  if (signal && signal.aborted) return true;
+  if (!error || typeof error !== "object") return false;
+  return error.name === "AbortError" || error.code === "ABORT_ERR" || error.code === "ERR_CANCELED";
+}
+
 /**
  * Factory: OpenAI-chat Provider.
  *
@@ -481,19 +491,29 @@ function createOpenAIChatProvider({ spec, userConfig, requestImpl }) {
     const url = buildEndpointUrl(baseUrl);
     const headers = buildHeaders(spec, userConfig);
     const wantsStream = userConfig.stream !== false;
-    const body = JSON.stringify({ ...buildRequestBody(input, spec), stream: wantsStream });
+    const requestPayload = { ...buildRequestBody(input, spec), stream: wantsStream };
+    const unsupportedParams = spec && spec.quirks && Array.isArray(spec.quirks.unsupportedParams)
+      ? spec.quirks.unsupportedParams
+      : [];
+    if (wantsStream && !unsupportedParams.includes("stream_options")) {
+      requestPayload.stream_options = { include_usage: true };
+    }
+    const body = JSON.stringify(requestPayload);
 
     // Streaming path: go through fetch() so we can read the body as a
     // ReadableStream. requestUrl buffers the entire response which kills
     // live token output. fetch is subject to CORS but most OpenAI-shaped
-    // APIs (OpenAI, DeepSeek, Moonshot, Zhipu, Groq, …) expose CORS
-    // headers. If fetch fails we fall back to the buffered path so the
-    // chat still completes — just without live streaming.
+    // APIs (OpenAI, DeepSeek, Moonshot, Zhipu, Groq, …) expose CORS.
+    // Request-establishment failures can fall back to buffered requestUrl;
+    // body failures propagate without issuing another model request.
     let response;
     if (wantsStream && !doRequest) {
       try {
         response = await streamingFetch({ url, method: "POST", headers, body, signal: input && input.signal });
       } catch (e) {
+        // A cancellation is terminal for this user turn. Falling back here
+        // would issue a second buffered request after the user pressed cancel.
+        if (isRequestCancellation(e, input && input.signal)) throw e;
         response = await getRequest()({ url, method: "POST", headers, body });
       }
     } else {

@@ -174,6 +174,13 @@ function createWebFetchTool({ requestUrl, maxBytes, timeoutMs } = {}) {
     name: "web_fetch",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "web",
+      targets: input && typeof input.url === "string" ? [input.url] : [],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

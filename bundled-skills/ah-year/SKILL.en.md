@@ -1,6 +1,10 @@
 ---
 name: ah-year
-description: Use for yearly review: synthesize monthly reviews, projects, knowledge assets, and long-term direction.
+description: "Use for yearly review: synthesize monthly reviews, projects, knowledge assets, and long-term direction."
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Yearly Review
@@ -20,4 +24,3 @@ Goal: extract the year's pattern and set direction for the next year.
 - Prefer evidence from actual notes.
 - Separate facts, interpretation, and decisions.
 - Use configured note paths over examples.
-

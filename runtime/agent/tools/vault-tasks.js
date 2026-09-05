@@ -96,6 +96,13 @@ function createVaultTasksTool({ app, normalizePath } = {}) {
     name: "vault_tasks",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "list",
+      targets: [normalize((input && input.path) || "") || "/"],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

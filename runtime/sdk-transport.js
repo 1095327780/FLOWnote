@@ -34,6 +34,9 @@ const {
 } = require("./transports/shared/command-utils");
 const { createTransportEventReducer } = require("./transports/shared/event-reducer");
 const {
+  reconcileTerminalAssistantTimeline,
+} = require("./transports/shared/assistant-activity-timeline");
+const {
   pollAssistantPayload,
   ensureRenderablePayload,
 } = require("./transports/shared/finalizer");
@@ -820,6 +823,7 @@ class SdkTransport {
           text: payload.text || "",
           reasoning: payload.reasoning || "",
           meta: payload.meta || "",
+          stats: payload.stats && typeof payload.stats === "object" ? payload.stats : null,
           blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
           completed: true,
         };
@@ -841,6 +845,7 @@ class SdkTransport {
           text: payload.text || "",
           reasoning: payload.reasoning || "",
           meta: payload.meta || "",
+          stats: payload.stats && typeof payload.stats === "object" ? payload.stats : null,
           blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
           completed: true,
         };
@@ -887,6 +892,7 @@ class SdkTransport {
         meta: ensuredPayload.meta || "",
         blocks: Array.isArray(ensuredPayload.blocks) ? ensuredPayload.blocks : [],
       };
+      finalized = reconcileTerminalAssistantTimeline(streamed, finalized);
 
       if (!usedRealStreaming && this.settings.enableStreaming && !polledWithCallbacks) {
         if (finalized.reasoning && options.onReasoning) options.onReasoning(finalized.reasoning);
@@ -912,6 +918,7 @@ class SdkTransport {
         text: finalized.text || "",
         reasoning: finalized.reasoning || "",
         meta: finalized.meta || "",
+        stats: finalized.stats && typeof finalized.stats === "object" ? finalized.stats : null,
         blocks: Array.isArray(finalized.blocks) ? finalized.blocks : [],
       };
     } finally {

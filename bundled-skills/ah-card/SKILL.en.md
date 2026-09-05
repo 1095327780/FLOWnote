@@ -1,6 +1,10 @@
 ---
 name: ah-card
 description: Use to turn a source note, highlight, or captured idea into an atomic permanent note with links and a strong assertion title.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Permanent Note Creation
@@ -29,4 +33,3 @@ Goal: create one atomic, reusable knowledge card.
 - Do not copy long source passages.
 - Use the user's actual vault content for links.
 - If configured note paths differ from examples, use the configured paths.
-

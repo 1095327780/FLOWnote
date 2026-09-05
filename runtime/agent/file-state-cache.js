@@ -95,9 +95,67 @@ class FileStateCache {
     return out;
   }
 
+  /**
+   * Compact durable state for a continuation checkpoint. Full contents are
+   * deliberately excluded: resume re-reads the live vault and hydrates only
+   * entries whose fingerprint still matches, preventing stale edits.
+   */
+  snapshot() {
+    return {
+      version: 1,
+      entries: Array.from(this._map.entries()).map(([path, entry]) => ({
+        path,
+        fingerprint: contentFingerprint(entry.content),
+        writtenInTurn: entry.writtenInTurn === true,
+      })),
+    };
+  }
+
+  /**
+   * Rebuild read-before-edit state from live file contents. Drifted, deleted,
+   * or unreadable files remain absent so the model must read them again.
+   * @param {Object} snapshot
+   * @param {(path:string) => Promise<string>} readCurrent
+   */
+  async restoreSnapshot(snapshot, readCurrent) {
+    const restoredPaths = [];
+    const driftedPaths = [];
+    const entries = snapshot && snapshot.version === 1 && Array.isArray(snapshot.entries)
+      ? snapshot.entries
+      : [];
+    if (typeof readCurrent !== "function") return { restoredPaths, driftedPaths };
+    for (const entry of entries) {
+      const path = String((entry && entry.path) || "").trim();
+      if (!path || typeof entry.fingerprint !== "string") continue;
+      try {
+        const content = await readCurrent(path);
+        if (typeof content !== "string" || contentFingerprint(content) !== entry.fingerprint) {
+          driftedPaths.push(path);
+          continue;
+        }
+        if (entry.writtenInTurn === true) this.recordWrite(path, content);
+        else this.recordRead(path, content);
+        restoredPaths.push(path);
+      } catch (_error) {
+        driftedPaths.push(path);
+      }
+    }
+    return { restoredPaths, driftedPaths };
+  }
+
   size() {
     return this._map.size;
   }
 }
 
-module.exports = { FileStateCache };
+function contentFingerprint(content) {
+  const value = String(content || "");
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+module.exports = { FileStateCache, contentFingerprint };

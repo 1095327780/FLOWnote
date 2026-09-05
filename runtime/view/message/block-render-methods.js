@@ -2,7 +2,20 @@ const { normalizeMarkdownForDisplay } = require("../../assistant-payload-utils")
 const { MARKDOWN_RENDER_STATE } = require("./markdown-methods");
 const { domUtils } = require("./dom-utils");
 const { blockUtilsMethods, blockUtilsInternal } = require("./block-utils");
+const {
+  normalizeToolActivity,
+  toolActivityKey,
+  blockActivityKey,
+  blockRenderSignature,
+} = require("./tool-activity");
+const { responseStatsItems } = require("../../chat/direct-response-stats");
 const { tFromContext } = require("../../i18n-runtime");
+const { syncProcessSummary } = require("./process-summary");
+const { placeActivitySlot } = require("./timeline-dom-order");
+const {
+  isLiveStreamTextBlock,
+  syncLiveStreamTextSlot,
+} = require("./live-stream-text");
 
 const {
   setNodeText,
@@ -35,7 +48,6 @@ const PATCH_MAX_MATRIX_CELLS = 120000;
 const PATCH_MAX_RENDERED_LINES = 320;
 const PATCH_DIFF_CACHE_MAX_ENTRIES = 32;
 const PATCH_DIFF_CACHE_MAX_ITEMS_PER_MESSAGE = 24;
-const FILE_MUTATION_TOOL_NAMES = new Set(["write", "edit", "multiedit"]);
 
 function clampRenderText(value, maxLen = 12000) {
   const raw = String(value || "");
@@ -502,11 +514,12 @@ function collectPatchSummaryPaths(view, items) {
   return out;
 }
 
-function renderPatchPath(container, text, pathInfo, view) {
+function renderPatchPath(container, text, pathInfo, view, options = {}) {
   const label = String(text || "");
   const info = pathInfo && typeof pathInfo === "object" ? pathInfo : {};
-  if (!info.isLinkable) {
-    container.createSpan({ cls: "oc-patch-file-path", text: label });
+  if (options.interactive === false || !info.isLinkable) {
+    const path = container.createSpan({ cls: "oc-patch-file-path", text: label });
+    if (info.rawPath || label) path.setAttr("title", info.rawPath || label);
     return;
   }
   const anchor = container.createEl("a", {
@@ -687,16 +700,6 @@ function renderReasoningPart(container, block, messagePending) {
   details.open = Boolean(messagePending && (status === "running" || status === "pending"));
 }
 
-function pickToolInputForRender(block) {
-  if (!block || typeof block !== "object") return null;
-  if (block.toolInput && typeof block.toolInput === "object") return block.toolInput;
-  if (block.raw && block.raw.state && block.raw.state.input && typeof block.raw.state.input === "object") {
-    return block.raw.state.input;
-  }
-  if (block.raw && block.raw.input && typeof block.raw.input === "object") return block.raw.input;
-  return null;
-}
-
 function extractQuotedPathFromText(text) {
   const raw = String(text || "");
   if (!raw) return "";
@@ -712,20 +715,9 @@ function extractQuotedPathFromText(text) {
   return "";
 }
 
-function inferToolFilePath(block, toolName, summaryText, detailText) {
-  const normalizedTool = String(toolName || "").trim().toLowerCase();
-  const input = pickToolInputForRender(block);
-  const fromInput = normalizePatchPath(
-    input && (
-      input.filePath
-      || input.file_path
-      || input.path
-      || input.target_path
-      || input.targetPath
-      || input.filename
-      || input.file
-    ),
-  );
+function inferToolFilePath(activity, summaryText, detailText) {
+  const normalizedTool = String((activity && activity.toolName) || "").trim().toLowerCase();
+  const fromInput = normalizePatchPath(activity && activity.path);
   if (fromInput) return fromInput;
 
   if (!["read", "write", "edit", "multiedit", "todowrite"].includes(normalizedTool)) return "";
@@ -745,17 +737,7 @@ function stripToolPathFromSummary(summaryText, filePath) {
     .replace(/\s{2,}/g, " ")
     .replace(/[·•\-:\s]+$/, "")
     .trim();
-  return stripped || summary;
-}
-
-function pickToolOutputForRender(block) {
-  if (!block || typeof block !== "object") return "";
-  if (typeof block.toolOutput === "string" && block.toolOutput.trim()) return block.toolOutput;
-  const raw = block.raw && typeof block.raw === "object" ? block.raw : {};
-  const state = raw.state && typeof raw.state === "object" ? raw.state : {};
-  if (typeof state.output === "string" && state.output.trim()) return state.output;
-  if (typeof raw.output === "string" && raw.output.trim()) return raw.output;
-  return "";
+  return stripped;
 }
 
 function inferMutationActionFromText(toolName, text) {
@@ -766,18 +748,6 @@ function inferMutationActionFromText(toolName, text) {
   if (/\b(created|create|added|add)\b/i.test(raw)) return "added";
   if (normalizedTool === "write") return "modified";
   return "modified";
-}
-
-function isMutationToolCall(block, toolName, filePath, detailText, summaryText) {
-  const normalizedTool = String(toolName || "").trim().toLowerCase();
-  if (!filePath) return false;
-  if (FILE_MUTATION_TOOL_NAMES.has(normalizedTool)) return true;
-  const combined = [
-    String(summaryText || ""),
-    String(detailText || ""),
-    String(pickToolOutputForRender(block) || ""),
-  ].join("\n");
-  return /\b(updated|modified|created|wrote|deleted|removed|patched|renamed)\b/i.test(combined);
 }
 
 function findMatchingDiffEntryForPath(view, diffEntries, pathValue) {
@@ -821,17 +791,18 @@ function collectToolLocalDiffEntries(block, view) {
   return normalized;
 }
 
-function renderToolPart(container, block, messagePending, message) {
+function renderToolPart(container, block, messagePending, message, blockIndex = 0) {
   const status = this.resolveDisplayBlockStatus(block, messagePending);
   const rawToolName = this.toolDisplayName(block) || tFromContext(this, "view.block.tool", "tool");
-  const normalizedToolName = String((block && block.tool) || rawToolName || "tool").trim().toLowerCase();
+  const activity = normalizeToolActivity({ ...block, tool: (block && block.tool) || rawToolName, status });
+  const normalizedToolName = activity.toolName;
   // Localize the displayed tool name (e.g. `vault_read` → `读取笔记` / `Read note`).
   // Falls back to the raw id if no translation exists.
   const localizedToolName = normalizedToolName
     ? tFromContext(this, `view.tools.${normalizedToolName}`, rawToolName)
     : rawToolName;
   const toolName = localizedToolName;
-  let summaryText = inferToolSummary(block, normalizedToolName || toolName);
+  let summaryText = activity.target || inferToolSummary(block, normalizedToolName || toolName);
   const questionItems = normalizedToolName === "question"
     ? this.extractQuestionItemsFromBlock(block)
     : [];
@@ -840,22 +811,24 @@ function renderToolPart(container, block, messagePending, message) {
     const suffix = questionItems.length > 1 ? ` (+${questionItems.length - 1})` : "";
     summaryText = truncateSummaryText(`${firstQuestion}${suffix}`);
   }
-  const detailText = clampRenderText(String((block && block.detail) || "").trim(), 12000);
+  const detailText = clampRenderText(activity.detail, 12000);
 
   const details = container.createEl("details", { cls: "oc-tool-call" });
   details.addClass(`is-${status}`);
+  if (activity.isMutation) details.addClass(activity.verified ? "is-verified" : "is-unverified");
   details.setAttr("data-part-type", "tool");
   details.setAttr("data-tool-name", normalizedToolName || "tool");
-  details.open = messagePending ? (status === "running" || status === "error") : status === "error";
+  details.setAttr("data-activity-id", toolActivityKey(block, blockIndex));
+  details.open = status === "error";
 
   const header = details.createEl("summary", { cls: "oc-tool-header" });
   const iconEl = header.createSpan({ cls: "oc-tool-icon" });
-  safeSetIcon(iconEl, resolveToolIconName(normalizedToolName || toolName));
+  safeSetIcon(iconEl, activity.icon || resolveToolIconName(normalizedToolName || toolName));
 
   header.createSpan({ cls: "oc-tool-name", text: toolName });
 
   const summaryEl = header.createSpan({ cls: "oc-tool-summary" });
-  const linkedFilePathRaw = inferToolFilePath(block, normalizedToolName, summaryText, detailText);
+  const linkedFilePathRaw = inferToolFilePath(activity, summaryText, detailText);
   const linkedFilePath = pathContainsDotPrefixedFolder(this, linkedFilePathRaw) ? "" : linkedFilePathRaw;
   const linkedPathInfo = linkedFilePath
     ? resolvePatchPathInfo(this, linkedFilePath, linkedFilePath)
@@ -868,14 +841,27 @@ function renderToolPart(container, block, messagePending, message) {
       header.createSpan({ cls: "oc-patch-summary-divider", text: "·" });
     }
     const pathWrap = header.createSpan({ cls: "oc-patch-summary-path oc-tool-summary-path" });
-    renderPatchPath(pathWrap, linkedPathInfo.displayPath, linkedPathInfo, this);
+    renderPatchPath(pathWrap, linkedPathInfo.displayPath, linkedPathInfo, this, { interactive: false });
   }
 
-  const statusEl = header.createSpan({ cls: "oc-tool-status" });
+  if (activity.durationLabel) header.createSpan({ cls: "oc-tool-duration", text: activity.durationLabel });
+  const expandEl = header.createSpan({ cls: "oc-tool-expand-indicator" });
+  safeSetIcon(expandEl, "chevron-right");
+  const statusEl = header.createSpan({ cls: "oc-tool-status", attr: {
+    title: this.blockStatusLabel(status),
+    "aria-label": this.blockStatusLabel(status),
+  } });
   applyToolStatusIcon(statusEl, status);
 
   const content = details.createDiv({ cls: "oc-tool-content" });
-  const shouldRenderMutationCard = isMutationToolCall(block, normalizedToolName, linkedFilePath, detailText, summaryText);
+  const shouldRenderMutationCard = activity.isMutation && Boolean(linkedFilePath);
+
+  // A <summary> is already an interactive disclosure control. Keep the file
+  // name there as text and expose the file link as its own control below.
+  if (!shouldRenderMutationCard && linkedPathInfo && linkedPathInfo.displayPath) {
+    const linkedFile = content.createDiv({ cls: "oc-tool-linked-file" });
+    renderPatchPath(linkedFile, linkedPathInfo.displayPath, linkedPathInfo, this);
+  }
 
   if (shouldRenderMutationCard) {
     details.addClass("oc-tool-patch");
@@ -983,7 +969,8 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   details.addClass(`is-${status}`);
   details.setAttr("data-part-type", "patch");
   details.setAttr("data-tool-name", "patch");
-  details.open = messagePending ? (status === "running" || status === "error") : status === "error";
+  details.setAttr("data-activity-id", blockActivityKey(block, blockIndex));
+  details.open = status === "error";
 
   const header = details.createEl("summary", { cls: "oc-tool-header" });
   const iconEl = header.createSpan({ cls: "oc-tool-icon" });
@@ -994,14 +981,17 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
     header.createSpan({ cls: "oc-patch-summary-divider", text: "·" });
     const summaryPathWrap = header.createSpan({ cls: "oc-patch-summary-path" });
     const primaryPath = summaryPaths.find((item) => item && item.pathInfo && item.pathInfo.isLinkable) || summaryPaths[0];
-    renderPatchPath(summaryPathWrap, primaryPath.label, primaryPath.pathInfo, this);
+    renderPatchPath(summaryPathWrap, primaryPath.label, primaryPath.pathInfo, this, { interactive: false });
     if (summaryPaths.length > 1) {
       header.createSpan({ cls: "oc-patch-summary-more", text: `+${summaryPaths.length - 1}` });
     }
   }
   const expandEl = header.createSpan({ cls: "oc-patch-expand-indicator" });
   safeSetIcon(expandEl, "chevron-right");
-  const statusEl = header.createSpan({ cls: "oc-tool-status" });
+  const statusEl = header.createSpan({ cls: "oc-tool-status", attr: {
+    title: this.blockStatusLabel(status),
+    "aria-label": this.blockStatusLabel(status),
+  } });
   applyToolStatusIcon(statusEl, status);
 
   const content = details.createDiv({ cls: "oc-tool-content oc-tool-patch-content" });
@@ -1064,10 +1054,16 @@ function renderGenericPart(container, block, messagePending) {
 function renderStreamTextPart(container, block, messagePending) {
   const card = container.createDiv({ cls: "oc-stream-text-part" });
   const status = this.resolveDisplayBlockStatus(block, messagePending);
+  const phase = String(block && block.phase || "").trim().toLowerCase();
   card.addClass(`is-${status}`);
+  if (phase === "process" || phase === "final") card.addClass(`is-${phase}`);
   card.setAttr("data-part-type", "stream-text");
 
   const body = card.createDiv({ cls: "oc-stream-text-content" });
+  if (isLiveStreamTextBlock(block, messagePending)) {
+    syncLiveStreamTextSlot(container, block, status);
+    return;
+  }
   const markdown = normalizeMarkdownForDisplay(
     clampRenderText(
       typeof block.detail === "string" && block.detail
@@ -1092,46 +1088,97 @@ function renderAssistantBlocks(row, message) {
     .filter((block) => {
       const type = String((block && block.type) || "").trim().toLowerCase();
       if (type !== "stream-text") return true;
-      return messagePending;
+      const phase = String((block && block.phase) || "").trim().toLowerCase();
+      return messagePending || phase === "process" || phase === "final";
     });
   const container = this.ensureBlocksContainer(row);
-  container.empty();
   if (!blocks.length) {
+    container.empty();
     container.toggleClass("is-empty", true);
     return;
   }
   container.toggleClass("is-empty", false);
+  const presentation = this.classifyAssistantTimelineBlocks(blocks);
+  const processIndexes = new Set(presentation.processIndexes);
+  syncProcessSummary(this, container, presentation, messagePending);
 
+  const existing = new Map();
+  for (const child of Array.from(container.children || [])) {
+    if (!child.classList || !child.classList.contains("oc-part-slot")) continue;
+    const key = String((child.dataset && child.dataset.activityKey) || "");
+    if (key) existing.set(key, child);
+  }
+  const retained = new Set();
+  let previousSlot = null;
   blocks.forEach((block, blockIndex) => {
     const type = String((block && block.type) || "").trim().toLowerCase();
+    const key = blockActivityKey(block, blockIndex);
+    const signature = blockRenderSignature(block, messagePending);
+    const previous = existing.get(key);
+    if (
+      previous
+      && isLiveStreamTextBlock(block, messagePending)
+      && syncLiveStreamTextSlot(previous, block, this.resolveDisplayBlockStatus(block, messagePending))
+    ) {
+      previous.__flownoteRenderSignature = signature;
+      previous.classList.toggle("is-process-activity", processIndexes.has(blockIndex));
+      previous.classList.toggle("is-final-activity", !processIndexes.has(blockIndex));
+      retained.add(previous);
+      placeActivitySlot(container, previous, previousSlot);
+      previousSlot = previous;
+      return;
+    }
+    if (previous && previous.__flownoteRenderSignature === signature) {
+      previous.classList.toggle("is-process-activity", processIndexes.has(blockIndex));
+      previous.classList.toggle("is-final-activity", !processIndexes.has(blockIndex));
+      retained.add(previous);
+      placeActivitySlot(container, previous, previousSlot);
+      previousSlot = previous;
+      return;
+    }
+    const preserveOpen = Boolean(previous && previous.querySelector("details[open]"));
+    const slot = document.createElement("div");
+    slot.className = "oc-part-slot";
+    slot.dataset.activityKey = key;
+    slot.__flownoteRenderSignature = signature;
+    slot.classList.toggle("is-process-activity", processIndexes.has(blockIndex));
+    slot.classList.toggle("is-final-activity", !processIndexes.has(blockIndex));
     if (type === "reasoning") {
-      this.renderReasoningPart(container, block, messagePending);
-      return;
+      this.renderReasoningPart(slot, block, messagePending);
+    } else if (type === "tool") {
+      this.renderToolPart(slot, block, messagePending, message, blockIndex);
+    } else if (type === "patch") {
+      this.renderPatchPart(slot, block, messagePending, message, blockIndex);
+    } else if (type === "stream-text") {
+      this.renderStreamTextPart(slot, block, messagePending);
+    } else {
+      this.renderGenericPart(slot, block, messagePending);
     }
-    if (type === "tool") {
-      this.renderToolPart(container, block, messagePending, message);
-      return;
+    if (preserveOpen) {
+      const details = slot.querySelector("details");
+      if (details) details.open = true;
     }
-    if (type === "patch") {
-      this.renderPatchPart(container, block, messagePending, message, blockIndex);
-      return;
-    }
-    if (type === "stream-text") {
-      this.renderStreamTextPart(container, block, messagePending);
-      return;
-    }
-
-    this.renderGenericPart(container, block, messagePending);
+    if (previous) previous.replaceWith(slot);
+    placeActivitySlot(container, slot, previousSlot);
+    previousSlot = slot;
+    retained.add(slot);
   });
+  for (const child of Array.from(container.children || [])) {
+    if (child.classList && child.classList.contains("oc-part-slot") && !retained.has(child)) child.remove();
+  }
 }
 
 function renderAssistantMeta(row, message) {
-  const metaText = clampRenderText(typeof message.meta === "string" ? message.meta.trim() : "", 8000);
-  if (!metaText) return;
-  const pre = row.createEl("pre", { cls: "oc-message-meta", text: metaText });
-  if (/error|failed|失败|status=\d{3}/i.test(metaText)) {
-    pre.addClass("is-error");
-  }
+  const locale = this && this.plugin && typeof this.plugin.getEffectiveLocale === "function"
+    ? this.plugin.getEffectiveLocale()
+    : "en";
+  const items = responseStatsItems(message && message.stats, locale);
+  if (!items.length) return;
+  const footer = row.createDiv({ cls: "oc-message-meta", attr: { "aria-label": items.join(" · ") } });
+  items.forEach((item, index) => {
+    if (index > 0) footer.createSpan({ cls: "oc-message-meta-separator", text: "·" });
+    footer.createSpan({ cls: "oc-message-meta-item", text: item });
+  });
 }
 
 

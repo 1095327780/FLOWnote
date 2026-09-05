@@ -1,6 +1,10 @@
 ---
 name: ah-review
 description: Use when 需要在晚间做每日复盘，回顾今日聚焦与任务完成情况，处理当日记录，并在时间不足或未完成时将残留标准化移交到 ah-inbox。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

@@ -1,6 +1,10 @@
 ---
 name: ah-archive
 description: 项目归档引导。用于项目完成、用户明确提出“归档/结项/项目收尾”、或在周月回顾中识别到待归档项目时，执行完成度核查、复盘总结、待提炼内容标记、项目目录迁移（移动非删除）、领域页链接同步与归档结果汇报。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。
@@ -83,8 +87,7 @@ description: 项目归档引导。用于项目完成、用户明确提出“归�
 
 ## 渐进加载（按需读取）
 
-- 详细流程与分支话术：`references/workflow-details.md`
-- 更新模板（项目主页/YAML/领域页/汇报）：`references/update-templates.md`
+- 详细流程、更新顺序与分支话术：`references/workflow-details.md`
 - 路径与移动规则（含多领域项目）：`references/path-rules.md`
 
 ## 相关技能

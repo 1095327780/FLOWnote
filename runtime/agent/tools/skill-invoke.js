@@ -55,10 +55,17 @@ function createSkillInvokeTool({ skillRegistry, skillTemplateVariables } = {}) {
   if (!skillRegistry || typeof skillRegistry.get !== "function") {
     throw new Error("createSkillInvokeTool: skillRegistry required");
   }
-  return buildTool({
+  const tool = buildTool({
     name: "skill_invoke",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: (input) => ({
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "skill",
+      targets: input && typeof input.skill === "string" ? [input.skill] : [],
+    }),
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 
@@ -120,9 +127,21 @@ function createSkillInvokeTool({ skillRegistry, skillTemplateVariables } = {}) {
         (argsStr ? `Arguments: ${argsStr}\n` : "") +
         (resourceHint ? `${resourceHint}\n` : "") +
         `\n${CLAUDE_CODE_COMPATIBILITY_HINT}\n\n--- skill body ---\n`;
-      yield { type: "result", content: header + body };
+      yield {
+        type: "result",
+        content: header + body,
+        // The host loop consumes this structured fact; it never infers a
+        // policy from markdown prose returned to the model.
+        data: { skillInvocation: { name: skill.name, allowedTools: skill.allowedTools || [] } },
+      };
     },
   });
+  tool.resolveSkillAllowedTools = (input) => {
+    const name = input && typeof input.skill === "string" ? input.skill.trim() : "";
+    const skill = name ? skillRegistry.get(name) : null;
+    return skill ? skill.allowedTools || [] : null;
+  };
+  return tool;
 }
 
 function formatResourceHint(skill) {

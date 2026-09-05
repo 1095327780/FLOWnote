@@ -1,6 +1,10 @@
 ---
 name: ah-project
 description: Use when 需要启动新项目并自动完成编号检查、项目目录与主页创建，以及领域页项目关联更新时。
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 > 执行 Obsidian 的读取、检索、写入等动作时，优先调用官方技能：`obsidian-cli`。

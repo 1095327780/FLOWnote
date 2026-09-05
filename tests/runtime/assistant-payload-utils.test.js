@@ -33,6 +33,37 @@ test("extractAssistantPayloadFromEnvelope should collect text and reasoning", ()
   assert.equal(payload.blocks[0].type, "reasoning");
 });
 
+test("extractAssistantPayloadFromEnvelope returns compact real bridge stats", () => {
+  const payload = extractAssistantPayloadFromEnvelope({
+    info: {
+      role: "assistant",
+      providerID: "deepseek",
+      modelID: "deepseek-v4-flash",
+    },
+    parts: [
+      { id: "tool-1", callID: "call-1", type: "tool", tool: "read", state: { status: "completed" } },
+      { id: "step-1", type: "step-finish", tokens: { input: 1200, output: 300, reasoning: 80 } },
+      { id: "tool-2", callID: "call-2", type: "tool", tool: "write", state: { status: "completed" } },
+      { id: "step-2", type: "step-finish", tokens: { input: 1600, output: 400, reasoning: 120 } },
+      { type: "text", text: "完成。" },
+    ],
+  });
+
+  assert.deepEqual(payload.stats, {
+    providerLabel: "deepseek",
+    modelId: "deepseek-v4-flash",
+    modelLabel: "deepseek-v4-flash",
+    toolCount: 2,
+    usage: {
+      inputTokens: 2800,
+      outputTokens: 700,
+      totalTokens: 3500,
+      cachedInputTokens: 0,
+      reasoningTokens: 200,
+    },
+  });
+});
+
 test("chooseRicherResponse should keep terminal content over in-progress payload", () => {
   const terminal = {
     messageId: "m1",

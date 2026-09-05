@@ -167,6 +167,16 @@ test("listSkills returns parsed skills sorted by name", async () => {
   assert.equal(out[0].description, "日记技能");
 });
 
+test("listSkills preserves standard skill invocation flags", async () => {
+  const adapter = makeAdapter({
+    ".flownote/skills/model-only/SKILL.md":
+      `---\nname: model-only\ndescription: hidden from slash\nuser-invocable: false\ndisable-model-invocation: true\n---\nbody`,
+  });
+  const [skill] = await listSkills(makePlugin(adapter));
+  assert.equal(skill.userInvocable, false);
+  assert.equal(skill.disableModelInvocation, true);
+});
+
 test("listSkills skips folders without SKILL.md", async () => {
   const adapter = makeAdapter({
     ".flownote/skills/ah-card/SKILL.md": `---\nname: A\ndescription: D\n---\nbody`,

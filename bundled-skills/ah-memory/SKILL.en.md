@@ -1,6 +1,10 @@
 ---
 name: ah-memory
 description: Use to maintain FLOWnote's cross-skill memory files, including pending tasks, deferred items, and status buffers.
+metadata:
+  flownote:
+    completion:
+      mode: effect
 ---
 
 # Memory Maintenance

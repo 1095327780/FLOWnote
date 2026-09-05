@@ -3,6 +3,8 @@ const {
   isPlaceholderSessionTitle,
   deriveSessionTitleFromPrompt,
 } = require("./domain/session-title");
+const { reduceExecutionEvents, recoverInterruptedRun } = require("./agent/execution-ledger");
+const { mergeDurableToolBlocks } = require("./chat/execution-block-projection");
 
 class SessionStore {
   constructor(plugin) {
@@ -115,6 +117,9 @@ class SessionStore {
         const linkedContextFiles = role === "user"
           ? SessionStore.normalizeLinkedContextFiles(row.linkedContextFiles)
           : [];
+        const execution = role === "assistant" && row.execution && Array.isArray(row.execution.events)
+          ? { version: 1, events: row.execution.events }
+          : null;
         return {
           id: String(row.id || `${role}-${Date.now()}-${index}`),
           messageId: String(row.messageId || row.messageID || row.id || "").trim(),
@@ -124,6 +129,13 @@ class SessionStore {
           reasoning: role === "assistant" ? String(row.reasoning || "") : "",
           meta: role === "assistant" ? String(row.meta || "") : "",
           blocks: role === "assistant" && Array.isArray(row.blocks) ? row.blocks : [],
+          stats: role === "assistant" && row.stats && typeof row.stats === "object"
+            ? JSON.parse(JSON.stringify(row.stats))
+            : null,
+          execution,
+          continuationClaimedBy: role === "assistant" ? String(row.continuationClaimedBy || "") : "",
+          continuationConsumedBy: role === "assistant" ? String(row.continuationConsumedBy || "") : "",
+          status: role === "assistant" ? String(row.status || (row.error ? "failed" : "completed")) : "completed",
           pending: false,
           error: String(row.error || ""),
           createdAt: createdAt || Date.now(),
@@ -155,7 +167,7 @@ class SessionStore {
     return true;
   }
 
-  appendMessage(sessionId, message) {
+  appendMessage(sessionId, message, options = {}) {
     const st = this.state();
     const list = st.messagesBySession[sessionId] || [];
     const nextMessage = message && typeof message === "object"
@@ -165,7 +177,28 @@ class SessionStore {
       nextMessage.linkedContextFiles = SessionStore.normalizeLinkedContextFiles(nextMessage.linkedContextFiles);
     }
     list.push(nextMessage);
-    st.messagesBySession[sessionId] = list.slice(-200);
+    const protectedIds = new Set(
+      (Array.isArray(options.protectedMessageIds) ? options.protectedMessageIds : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    );
+    if (list.length <= 200 || protectedIds.size === 0) {
+      st.messagesBySession[sessionId] = list.slice(-200);
+    } else {
+      // A targeted continuation may sit at the retention boundary. Keep that
+      // exact suspended message long enough for the direct runner to claim it,
+      // while retaining the newest messages (including this append).
+      const protectedIndexes = list
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item && protectedIds.has(String(item.id || "")))
+        .map(({ index }) => index)
+        .slice(-199);
+      const selected = new Set(protectedIndexes);
+      for (let index = list.length - 1; index >= 0 && selected.size < 200; index -= 1) {
+        selected.add(index);
+      }
+      st.messagesBySession[sessionId] = list.filter((_item, index) => selected.has(index));
+    }
 
     const session = st.sessions.find((s) => s.id === sessionId);
     if (session) {
@@ -181,166 +214,19 @@ class SessionStore {
     }
   }
 
-  static blockStatusRank(status) {
-    const value = String(status || "").trim().toLowerCase();
-    if (value === "error") return 4;
-    if (value === "completed") return 3;
-    if (value === "running") return 2;
-    if (value === "pending") return 1;
-    return 0;
-  }
-
-  static blockMergeKey(block, index) {
-    if (!block || typeof block !== "object") return `invalid:${index}`;
-    const id = String(block.id || "").trim();
-    if (id) return `id:${id}`;
-    const type = String(block.type || "").trim();
-    const title = String(block.title || "").trim();
-    const summary = String(block.summary || "").trim();
-    return `fallback:${type}::${title}::${summary}::${index}`;
-  }
-
-  static mergeReasoningText(existingReasoning, incomingReasoning) {
-    const existing = String(existingReasoning || "");
-    const incoming = String(incomingReasoning || "");
-    const existingTrimmed = existing.trim();
-    const incomingTrimmed = incoming.trim();
-
-    if (!incomingTrimmed) return existing;
-    if (!existingTrimmed) return incoming;
-    if (incoming === existing) return existing;
-    if (incoming.includes(existing)) return incoming;
-    if (existing.includes(incoming)) return existing;
-    if (incomingTrimmed.startsWith(existingTrimmed) || incomingTrimmed.endsWith(existingTrimmed)) return incoming;
-    if (existingTrimmed.startsWith(incomingTrimmed) || existingTrimmed.endsWith(incomingTrimmed)) return existing;
-
-    const overlapSuffixPrefix = (leftText, rightText) => {
-      const left = String(leftText || "");
-      const right = String(rightText || "");
-      const max = Math.min(left.length, right.length, 2048);
-      for (let len = max; len >= 16; len -= 1) {
-        if (left.slice(left.length - len) === right.slice(0, len)) return len;
-      }
-      return 0;
-    };
-
-    const overlap = overlapSuffixPrefix(existing, incoming);
-    if (overlap > 0) return `${existing}${incoming.slice(overlap)}`;
-    const reverseOverlap = overlapSuffixPrefix(incoming, existing);
-    if (reverseOverlap > 0) return `${incoming}${existing.slice(reverseOverlap)}`;
-
-    return incoming.length >= existing.length ? incoming : `${existing}\n\n${incoming}`;
-  }
-
-  static mergeDraftText(existingText, incomingText) {
-    const existing = String(existingText || "");
-    const incoming = String(incomingText || "");
-    const existingTrimmed = existing.trim();
-    const incomingTrimmed = incoming.trim();
-
-    if (!incomingTrimmed) return existing;
-    if (!existingTrimmed) return incoming;
-    if (incoming === existing) return existing;
-    if (incoming.includes(existing)) return incoming;
-    if (existing.includes(incoming)) return existing;
-    if (incomingTrimmed.startsWith(existingTrimmed) || incomingTrimmed.endsWith(existingTrimmed)) return incoming;
-    if (existingTrimmed.startsWith(incomingTrimmed) || existingTrimmed.endsWith(incomingTrimmed)) return existing;
-
-    const overlapSuffixPrefix = (leftText, rightText) => {
-      const left = String(leftText || "");
-      const right = String(rightText || "");
-      const max = Math.min(left.length, right.length, 4096);
-      for (let len = max; len >= 8; len -= 1) {
-        if (left.slice(left.length - len) === right.slice(0, len)) return len;
-      }
-      return 0;
-    };
-
-    const overlap = overlapSuffixPrefix(existing, incoming);
-    if (overlap > 0) return `${existing}${incoming.slice(overlap)}`;
-    const reverseOverlap = overlapSuffixPrefix(incoming, existing);
-    if (reverseOverlap > 0) return `${incoming}${existing.slice(reverseOverlap)}`;
-
-    let sharedPrefixLen = 0;
-    const prefixMax = Math.min(existing.length, incoming.length, 512);
-    while (sharedPrefixLen < prefixMax && existing[sharedPrefixLen] === incoming[sharedPrefixLen]) {
-      sharedPrefixLen += 1;
-    }
-    if (sharedPrefixLen >= 24) {
-      return incoming.length >= existing.length ? incoming : existing;
-    }
-
-    const needsSpace = /[A-Za-z0-9]$/.test(existing) && /^[A-Za-z0-9]/.test(incoming);
-    return needsSpace ? `${existing} ${incoming}` : `${existing}${incoming}`;
-  }
-
-  mergeBlocks(previousBlocks, nextBlocks) {
-    const prev = Array.isArray(previousBlocks) ? previousBlocks : [];
-    const next = Array.isArray(nextBlocks) ? nextBlocks : [];
-    if (!next.length) return prev;
-
-    const merged = prev.slice();
-    const indexByKey = new Map();
-    merged.forEach((block, idx) => {
-      indexByKey.set(SessionStore.blockMergeKey(block, idx), idx);
-    });
-
-    next.forEach((block, idx) => {
-      if (!block || typeof block !== "object") return;
-      const key = SessionStore.blockMergeKey(block, idx);
-      if (!indexByKey.has(key)) {
-        indexByKey.set(key, merged.length);
-        merged.push(block);
-        return;
-      }
-
-      const existingIndex = Number(indexByKey.get(key));
-      const existing = merged[existingIndex];
-      const existingRank = SessionStore.blockStatusRank(existing && existing.status);
-      const nextRank = SessionStore.blockStatusRank(block.status);
-      const existingDetailLen = String(existing && existing.detail ? existing.detail : "").length;
-      const nextDetailLen = String(block.detail || "").length;
-      const shouldReplace = nextRank > existingRank || (nextRank === existingRank && nextDetailLen >= existingDetailLen);
-      if (shouldReplace) {
-        merged[existingIndex] = block;
-      }
-    });
-
-    return merged;
-  }
-
   updateAssistantDraft(sessionId, draftId, text, reasoning, meta, blocks) {
     const list = this.state().messagesBySession[sessionId] || [];
     const t = list.find((x) => x.id === draftId);
     if (!t) return;
-    if (typeof text === "string") {
-      const nextText = String(text || "");
-      const hasExistingText = String(t.text || "").trim().length > 0;
-      // Avoid replacing already visible streamed content with transient partial chunks.
-      if (nextText.trim().length > 0) {
-        t.text = SessionStore.mergeDraftText(t.text, nextText);
-      } else if (!hasExistingText) {
-        t.text = "";
-      }
-    }
-    if (typeof reasoning === "string") {
-      const nextReasoning = String(reasoning || "");
-      const hasExistingReasoning = String(t.reasoning || "").trim().length > 0;
-      // Avoid wiping already streamed reasoning when transport emits transient empty snapshots.
-      if (nextReasoning.trim().length > 0) {
-        t.reasoning = SessionStore.mergeReasoningText(t.reasoning, nextReasoning);
-      } else if (!hasExistingReasoning) {
-        t.reasoning = "";
-      }
-    }
+    if (typeof text === "string") t.text = text;
+    if (typeof reasoning === "string") t.reasoning = reasoning;
     if (typeof meta === "string") t.meta = meta;
-    if (Array.isArray(blocks)) t.blocks = this.mergeBlocks(t.blocks, blocks);
+    if (Array.isArray(blocks)) t.blocks = blocks;
   }
 
   finalizeAssistantDraft(sessionId, draftId, text, error) {
     const list = this.state().messagesBySession[sessionId] || [];
     const t = list.find((x) => x.id === draftId);
-    if (t && !t.pending) return;
     const payload =
       text && typeof text === "object"
         ? text
@@ -355,43 +241,159 @@ class SessionStore {
       if (messageId) {
         t.messageId = messageId;
       }
-      {
-        const nextText = String(payload.text || "");
-        const hasExistingText = String(t.text || "").trim().length > 0;
-        // Keep streamed interim text visible when final payload is partial or delayed.
-        if (nextText.trim().length > 0) {
-          t.text = SessionStore.mergeDraftText(t.text, nextText);
-        } else if (!hasExistingText) {
-          t.text = "";
-        }
+      t.text = String(payload.text || "");
+      t.reasoning = String(payload.reasoning || "");
+      t.meta = String(payload.meta || "");
+      if (payload.stats && typeof payload.stats === "object") {
+        t.stats = JSON.parse(JSON.stringify(payload.stats));
       }
-      {
-        const nextReasoning = String(payload.reasoning || "");
-        const hasExistingReasoning = String(t.reasoning || "").trim().length > 0;
-        // Keep streamed reasoning if final payload omits it, and merge when snapshots are partial.
-        if (nextReasoning.trim().length > 0) {
-          t.reasoning = SessionStore.mergeReasoningText(t.reasoning, nextReasoning);
-        } else if (!hasExistingReasoning) {
-          t.reasoning = "";
-        }
+      const payloadBlocks = Array.isArray(payload.blocks) ? payload.blocks : [];
+      if (payload.execution && Array.isArray(payload.execution.events)) {
+        t.execution = { version: 1, events: payload.execution.events };
+        t.blocks = mergeDurableToolBlocks(payloadBlocks, payload.execution.events);
+      } else {
+        t.blocks = payloadBlocks;
       }
-      {
-        const nextMeta = String(payload.meta || "");
-        const hasNextMeta = nextMeta.trim().length > 0;
-        const hasExistingMeta = String(t.meta || "").trim().length > 0;
-        if (hasNextMeta || !hasExistingMeta) {
-          t.meta = nextMeta;
-        }
-      }
-      t.blocks = this.mergeBlocks(t.blocks, Array.isArray(payload.blocks) ? payload.blocks : []);
+      t.status = String(payload.status || (error ? "failed" : "completed"));
       t.error = error || "";
       t.pending = false;
+      this.markContinuationOwnerDisposition(sessionId, draftId, t.status);
     }
+  }
+
+  setAssistantExecution(sessionId, draftId, events) {
+    const list = this.state().messagesBySession[sessionId] || [];
+    const message = list.find((item) => item && item.id === draftId);
+    if (!message || message.role !== "assistant" || !Array.isArray(events)) return false;
+    const state = reduceExecutionEvents(events);
+    const runs = Object.values(state.runs);
+    const run = runs.length ? runs[runs.length - 1] : null;
+    message.execution = { version: 1, events: JSON.parse(JSON.stringify(events)) };
+    message.blocks = mergeDurableToolBlocks(message.blocks, events);
+    message.status = run ? run.status : "pending";
+    message.pending = message.status === "running";
+    this.markContinuationOwnerDisposition(sessionId, draftId, message.status);
+    return true;
+  }
+
+  markContinuationOwnerDisposition(sessionId, draftId, status) {
+    const normalizedStatus = String(status || "").trim();
+    if (!["completed", "suspended", "blocked"].includes(normalizedStatus)) return;
+    const ownerId = String(draftId || "").trim();
+    if (!ownerId) return;
+    const list = this.state().messagesBySession[sessionId] || [];
+    for (const source of list) {
+      if (!source || String(source.continuationClaimedBy || "") !== ownerId) continue;
+      source.continuationConsumedBy = ownerId;
+    }
+  }
+
+  getContinuationClaimState(sessionId, messageId) {
+    const list = this.state().messagesBySession[sessionId] || [];
+    const message = list.find((item) => item && item.id === messageId && item.role === "assistant");
+    if (!message || String(message.status || "") !== "suspended") {
+      return { status: "stale", ownerDraftId: "" };
+    }
+    const consumedBy = String(message.continuationConsumedBy || "").trim();
+    if (consumedBy) return { status: "consumed", ownerDraftId: consumedBy };
+    const existing = String(message.continuationClaimedBy || "").trim();
+    if (!existing) return { status: "available", ownerDraftId: "" };
+    const owner = list.find((item) => item && item.id === existing && item.role === "assistant");
+    if (!owner) return { status: "reclaimable", ownerDraftId: existing };
+    const ownerStatus = String(owner.status || (owner.pending ? "running" : "")).trim();
+    if (owner.pending || ownerStatus === "running" || ownerStatus === "pending") {
+      return { status: "active", ownerDraftId: existing };
+    }
+    if (["completed", "suspended", "blocked"].includes(ownerStatus)) {
+      return { status: "consumed", ownerDraftId: existing };
+    }
+    return { status: "reclaimable", ownerDraftId: existing };
+  }
+
+  claimContinuation(sessionId, messageId, draftId, continuationRunId = "") {
+    const list = this.state().messagesBySession[sessionId] || [];
+    const message = list.find((item) => item && item.id === messageId && item.role === "assistant");
+    const claim = String(draftId || "").trim();
+    if (!message || !claim || String(message.status || "") !== "suspended") {
+      return { status: "stale", ownerDraftId: "" };
+    }
+    const expectedRunId = String(continuationRunId || "").trim();
+    if (expectedRunId) {
+      try {
+        const events = message.execution && message.execution.version === 1
+          ? message.execution.events
+          : null;
+        const state = Array.isArray(events) ? reduceExecutionEvents(events) : null;
+        const run = state && state.runs ? state.runs[expectedRunId] : null;
+        if (!run || run.status !== "suspended") {
+          return { status: "stale", ownerDraftId: "", runId: expectedRunId };
+        }
+      } catch (_error) {
+        return { status: "stale", ownerDraftId: "", runId: expectedRunId };
+      }
+    }
+    const existing = String(message.continuationClaimedBy || "").trim();
+    if (existing === claim) return { status: "claimed", ownerDraftId: claim, reclaimed: false };
+    const current = this.getContinuationClaimState(sessionId, messageId);
+    if (current.status === "active" || current.status === "consumed") return current;
+    message.continuationClaimedBy = claim;
+    delete message.continuationConsumedBy;
+    return { status: "claimed", ownerDraftId: claim, reclaimed: Boolean(existing) };
+  }
+
+  releaseContinuation(sessionId, messageId, draftId) {
+    const list = this.state().messagesBySession[sessionId] || [];
+    const message = list.find((item) => item && item.id === messageId && item.role === "assistant");
+    const claim = String(draftId || "").trim();
+    if (!message || !claim || String(message.continuationClaimedBy || "") !== claim) return false;
+    message.continuationClaimedBy = "";
+    delete message.continuationConsumedBy;
+    return true;
+  }
+
+  recoverInterruptedExecutions(time = Date.now()) {
+    let recoveredCount = 0;
+    const st = this.state();
+    for (const messages of Object.values(st.messagesBySession || {})) {
+      for (const message of Array.isArray(messages) ? messages : []) {
+        const events = message && message.execution && message.execution.events;
+        if (!Array.isArray(events) || !events.length) {
+          if (message && message.role === "assistant" && message.pending) {
+            message.status = "interrupted";
+            message.pending = false;
+            recoveredCount += 1;
+          }
+          continue;
+        }
+        try {
+          const state = reduceExecutionEvents(events);
+          const hasOpenRun = Object.values(state.runs).some((run) => !run.terminal);
+          if (!hasOpenRun) continue;
+          const recovered = recoverInterruptedRun(events, {
+            time: Math.max(Number(time) || 0, state.lastTime),
+          });
+          message.execution = { version: 1, events: recovered.events };
+          message.status = "interrupted";
+          message.pending = false;
+          recoveredCount += 1;
+        } catch (error) {
+          message.status = "failed";
+          message.pending = false;
+          message.executionError = error instanceof Error ? error.message : String(error);
+        }
+      }
+    }
+    return recoveredCount;
   }
 
   getActiveMessages() {
     const st = this.state();
     return st.messagesBySession[st.activeSessionId] || [];
+  }
+
+  getSessionMessages(sessionId) {
+    const st = this.state();
+    return st.messagesBySession[String(sessionId || "")] || [];
   }
 }
 

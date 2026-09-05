@@ -17,6 +17,7 @@ const { layoutRendererMethods } = require("./view/layout-renderer");
 const { messageRendererMethods } = require("./view/message-renderer");
 const { questionFlowMethods } = require("./view/question-flow");
 const { runtimeStatusMethods } = require("./view/runtime-status");
+const { resolveMobileKeyboardState } = require("./mobile/keyboard-state");
 
 const VIEW_TYPE = "flownote-view";
 const FLOWNOTE_ICON_ID = "flownote-journal-glow";
@@ -113,11 +114,11 @@ class FLOWnoteAssistantView extends ItemView {
 
   /**
    * Mobile keyboard tracking. iOS / Android soft keyboards shrink the
-   * visual viewport instead of resizing the window — without this hook
-   * the composer disappears behind the keyboard. We listen on
-   * `window.visualViewport` and expose the keyboard height as a CSS var
-   * `--oc-kb-offset` on the view's root, plus toggle `.is-kb-open` so
-   * styles can shift the layout (e.g. shrink the message area).
+   * visual viewport independently from the layout viewport. Obsidian owns
+   * the leaf/composer placement; FLOWnote only tracks whether the keyboard
+   * is open so its closed-keyboard navbar/safe-area padding can be removed.
+   * It must never translate the composer or measure overlap itself, because
+   * that would apply a second layout correction after the host has resized.
    *
    * Pattern adapted from runtime/mobile/capture-modal.js (the only piece
    * of UX that was already battle-tested on the actual iOS keyboard).
@@ -129,8 +130,16 @@ class FLOWnoteAssistantView extends ItemView {
     const root = this.root || this.contentEl;
     if (!root) return;
     const vv = typeof window !== "undefined" && window.visualViewport ? window.visualViewport : null;
+    const hostCandidates = Array.from(new Set([
+      root,
+      root.parentElement,
+      this.containerEl,
+    ].filter((candidate) => candidate && typeof candidate === "object")));
     let baselineBottom = 0;
     let rafId = 0;
+    let resizeObserver = null;
+    const hostBaselines = new Map();
+    const timerIds = new Set();
     const disposers = [];
 
     // "Is the on-screen keyboard logically up?" is best derived from focus
@@ -144,6 +153,15 @@ class FLOWnoteAssistantView extends ItemView {
     const isEditorFocused = () => {
       const el = typeof document !== "undefined" ? document.activeElement : null;
       if (!el) return false;
+      if (typeof root.contains !== "function") return false;
+      if (!root.contains(el)) return false;
+      const composer = this.elements && this.elements.composer;
+      const inlineQuestionHost = this.elements && this.elements.inlineQuestionHost;
+      const inComposer = composer && typeof composer.contains === "function" && composer.contains(el);
+      const inInlineQuestion = inlineQuestionHost
+        && typeof inlineQuestionHost.contains === "function"
+        && inlineQuestionHost.contains(el);
+      if (!inComposer && !inInlineQuestion) return false;
       const tag = String(el.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea") return true;
       if (el.isContentEditable) return true;
@@ -154,26 +172,53 @@ class FLOWnoteAssistantView extends ItemView {
       if (vv) return Number(vv.height || 0) + Number(vv.offsetTop || 0);
       return Number(window.innerHeight || 0);
     };
-    const apply = (kbHeight) => {
-      // Hard rule: keyboard cannot be up if nothing is focused. This is
-      // the primary fix for "keyboard dismissed → composer overlaps the
-      // Obsidian navbar". Even if the viewport math suggests a residual
-      // offset (e.g. while the toolbar is still re-animating in), we
-      // force-clear the state when no editable is focused.
-      const focused = isEditorFocused();
-      const offset = focused ? Math.max(0, Math.round(Number(kbHeight) || 0)) : 0;
-      root.style.setProperty("--oc-kb-offset", `${offset}px`);
-      root.toggleClass("is-kb-open", offset > 0);
+    const readHostHeight = (host) => Math.max(0, Number(host && host.clientHeight ? host.clientHeight : 0));
+    const resetHostBaselines = () => {
+      for (const host of hostCandidates) hostBaselines.set(host, readHostHeight(host));
+    };
+    const getHostSignal = (allowBaselineGrowth) => {
+      let best = { hostBaselineHeight: 0, hostHeight: 0, shrink: 0 };
+      for (const host of hostCandidates) {
+        const hostHeight = readHostHeight(host);
+        let hostBaselineHeight = Number(hostBaselines.get(host) || 0);
+        if (!hostBaselineHeight || (allowBaselineGrowth && hostHeight > hostBaselineHeight)) {
+          hostBaselineHeight = hostHeight;
+          hostBaselines.set(host, hostBaselineHeight);
+        }
+        const shrink = Math.max(0, hostBaselineHeight - hostHeight);
+        if (shrink > best.shrink || best.hostBaselineHeight === 0) {
+          best = { hostBaselineHeight, hostHeight, shrink };
+        }
+      }
+      return best;
     };
     const recalc = () => {
       const current = getViewportBottom();
-      if (!baselineBottom || current > baselineBottom) baselineBottom = current;
-      apply(Math.max(0, baselineBottom - current));
+      const focused = isEditorFocused();
+      const { hostBaselineHeight, hostHeight } = getHostSignal(!focused);
+      const layoutBottom = Math.max(
+        Number(window.innerHeight || 0),
+        Number(typeof document !== "undefined" && document.documentElement ? document.documentElement.clientHeight : 0),
+        current,
+      );
+      if (!baselineBottom || layoutBottom > baselineBottom) baselineBottom = layoutBottom;
+      const { open } = resolveMobileKeyboardState({
+        editableFocused: focused,
+        viewportBaselineBottom: baselineBottom,
+        viewportBottom: current,
+        hostBaselineHeight,
+        hostHeight,
+      });
+      root.toggleClass("is-kb-open", open);
     };
     const schedule = (delay = 0) => {
       if (rafId) cancelAnimationFrame(rafId);
       if (delay > 0) {
-        window.setTimeout(() => { rafId = requestAnimationFrame(recalc); }, delay);
+        const timerId = window.setTimeout(() => {
+          timerIds.delete(timerId);
+          rafId = requestAnimationFrame(recalc);
+        }, delay);
+        timerIds.add(timerId);
       } else {
         rafId = requestAnimationFrame(recalc);
       }
@@ -184,6 +229,7 @@ class FLOWnoteAssistantView extends ItemView {
     };
 
     baselineBottom = getViewportBottom();
+    resetHostBaselines();
     schedule();
     schedule(80);
     schedule(220);
@@ -196,6 +242,18 @@ class FLOWnoteAssistantView extends ItemView {
       baselineBottom = Math.max(baselineBottom, getViewportBottom());
       schedule();
     });
+    bind(window, "orientationchange", () => {
+      if (!isEditorFocused()) {
+        baselineBottom = getViewportBottom();
+        resetHostBaselines();
+      }
+      schedule(0);
+      schedule(160);
+    });
+    if (hostCandidates.length > 0 && typeof ResizeObserver === "function") {
+      resizeObserver = new ResizeObserver(() => schedule());
+      for (const host of hostCandidates) resizeObserver.observe(host);
+    }
     // Focus changes inside the composer (textarea / picker search input)
     // are the most reliable signal for "keyboard about to appear / leave".
     // On focusout we run a few staggered recalcs so the viewport math
@@ -209,8 +267,10 @@ class FLOWnoteAssistantView extends ItemView {
 
     this._mobileKeyboardCleanup = () => {
       if (rafId) cancelAnimationFrame(rafId);
+      for (const timerId of timerIds) window.clearTimeout(timerId);
+      timerIds.clear();
       for (const dispose of disposers) dispose();
-      root.style.removeProperty("--oc-kb-offset");
+      if (resizeObserver) resizeObserver.disconnect();
       root.removeClass("is-kb-open");
     };
   }
@@ -226,27 +286,47 @@ class FLOWnoteAssistantView extends ItemView {
     });
   }
 
-  showPermissionRequestModal(permission) {
+  showPermissionRequestModal(permission, signal) {
     return new Promise((resolve) => {
+      let settled = false;
+      const finish = (answer) => {
+        if (settled) return;
+        settled = true;
+        if (signal && typeof signal.removeEventListener === "function") signal.removeEventListener("abort", onAbort);
+        resolve(answer || null);
+      };
       const modal = new PermissionRequestModal(
         this.app,
         permission,
-        (answer) => resolve(answer || null),
+        finish,
         stringifyForDisplay,
         typeof this.plugin.t === "function" ? this.plugin.t.bind(this.plugin) : null,
       );
+      const onAbort = () => modal.resolveAndClose(null);
+      if (signal && signal.aborted) return onAbort();
+      if (signal && typeof signal.addEventListener === "function") signal.addEventListener("abort", onAbort, { once: true });
       modal.open();
     });
   }
 
-  showAskUserModal(payload) {
+  showAskUserModal(payload, signal) {
     return new Promise((resolve) => {
+      let settled = false;
+      const finish = (answer) => {
+        if (settled) return;
+        settled = true;
+        if (signal && typeof signal.removeEventListener === "function") signal.removeEventListener("abort", onAbort);
+        resolve(answer || { dismissed: true });
+      };
       const modal = new AskUserQuestionModal(
         this.app,
         payload,
-        (answer) => resolve(answer || { dismissed: true }),
+        finish,
         typeof this.plugin.t === "function" ? this.plugin.t.bind(this.plugin) : null,
       );
+      const onAbort = () => modal.resolveAndClose({ dismissed: true, cancelled: true });
+      if (signal && signal.aborted) return onAbort();
+      if (signal && typeof signal.addEventListener === "function") signal.addEventListener("abort", onAbort, { once: true });
       modal.open();
     });
   }
@@ -288,8 +368,7 @@ class FLOWnoteAssistantView extends ItemView {
     const t = (key, fallback, params = {}) => tFromContext(this, key, fallback, params);
     if (this.currentAbort) {
       this.currentAbort.abort();
-      this.currentAbort = null;
-      this.setBusy(false);
+      if (this.elements.cancelBtn) this.elements.cancelBtn.disabled = true;
       new Notice(t("view.sendCanceled", "已取消发送"));
     }
   }

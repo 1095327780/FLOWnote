@@ -160,6 +160,12 @@ const I18N_MESSAGE_OVERRIDES = {
       runtime: {
         generating: "正在生成回复...",
         reasoning: "模型正在思考...",
+        reasoningDone: "思考完成，正在整理结果...",
+        toolRunning: "正在{statusText}{suffix}...",
+        toolDone: "工具已完成，正在整理结果...",
+        toolFailed: "{statusText}{suffix}执行失败",
+        recovering: "上一步未成功，正在尝试其他方式...",
+        retrying: "正在重试...",
         waitingResponse: "正在等待 FLOWnote 回复...",
       },
       permission: { waiting: "等待权限确认..." },
@@ -170,7 +176,15 @@ const I18N_MESSAGE_OVERRIDES = {
         waiting: "等待问题回答...",
       },
       promptAppend: { waiting: "等待补充输入..." },
-      request: { failed: "请求失败：{message}" },
+      request: {
+        failed: "请求失败：{message}",
+        failedPartial: "流程已停止，但已保留 {count} 项经过验证的文件更改。重试前请先检查下方记录。",
+      },
+      message: {
+        continue: "继续暂停的流程",
+        inspectChanges: "检查已保留的更改",
+        inspectUncertainChanges: "重试前核对操作结果",
+      },
       toastFallback: "FLOWnote 提示",
       sendCanceled: "已取消发送",
       model: {
@@ -266,7 +280,7 @@ const I18N_MESSAGE_OVERRIDES = {
         name: "技能名称",
         nameHint: "显示给 AI 看的名字，可以是中文。",
         description: "技能描述",
-        descriptionHint: "一两句话告诉 AI 这个技能干啥、什么时候用。AI 会在系统提示里看到这一段。",
+        descriptionHint: "用一两句话说明这个技能能做什么、何时应由 FLOWnote 使用。",
         whenToUse: "触发场景（可选）",
         whenToUseHint: "比 description 更具体的触发条件。比如「用户说『继续制卡』时」。",
         allowedTools: "允许使用的工具（可选）",
@@ -442,6 +456,12 @@ const I18N_MESSAGE_OVERRIDES = {
       runtime: {
         generating: "Generating response...",
         reasoning: "Model is reasoning...",
+        reasoningDone: "Reasoning complete, preparing the result...",
+        toolRunning: "Running {statusText}{suffix}...",
+        toolDone: "Tool finished, preparing the result...",
+        toolFailed: "{statusText}{suffix} failed",
+        recovering: "Trying another approach...",
+        retrying: "Retrying...",
         waitingResponse: "Waiting for FLOWnote response...",
       },
       permission: { waiting: "Waiting for permission confirmation..." },
@@ -452,7 +472,15 @@ const I18N_MESSAGE_OVERRIDES = {
         waiting: "Waiting for question answers...",
       },
       promptAppend: { waiting: "Waiting for additional input..." },
-      request: { failed: "Request failed: {message}" },
+      request: {
+        failed: "Request failed: {message}",
+        failedPartial: "The workflow stopped, but {count} verified file change(s) were preserved. Check the items below before retrying.",
+      },
+      message: {
+        continue: "Continue suspended workflow",
+        inspectChanges: "Inspect preserved changes",
+        inspectUncertainChanges: "Check operation result before retrying",
+      },
       toastFallback: "FLOWnote Notice",
       sendCanceled: "Send canceled",
       model: {

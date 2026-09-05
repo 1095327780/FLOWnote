@@ -203,9 +203,9 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
     // API rejects browser-origin requests by default — opt-in via the
     // `anthropic-dangerous-direct-browser-access` header. This is the
     // official "I know what I'm doing, this is a plugin not a public
-    // web app" escape hatch they document. CORS / network failures
-    // fall back to the buffered requestUrl path so the chat still
-    // completes (without live streaming).
+    // web app" escape hatch they document. Request-establishment failures
+    // can fall back to buffered requestUrl. Once a response body starts, its
+    // typed failure propagates without issuing another model request.
     let response;
     if (wantsStream && !doRequest) {
       const streamingHeaders = {
@@ -218,6 +218,9 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
           signal: input && input.signal,
         });
       } catch (e) {
+        // A cancellation is terminal for this user turn. Falling back here
+        // would issue a second buffered request after the user pressed cancel.
+        if (isRequestCancellation(e, input && input.signal)) throw e;
         response = await getRequest()({ url, method: "POST", headers, body });
       }
     } else {
@@ -425,6 +428,12 @@ function responseToChunks(response) {
     }
     if (text) yield text;
   })();
+}
+
+function isRequestCancellation(error, signal) {
+  if (signal && signal.aborted) return true;
+  if (!error || typeof error !== "object") return false;
+  return error.name === "AbortError" || error.code === "ABORT_ERR" || error.code === "ERR_CANCELED";
 }
 
 module.exports = {

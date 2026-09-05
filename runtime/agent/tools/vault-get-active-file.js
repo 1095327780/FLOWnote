@@ -33,6 +33,13 @@ function createVaultGetActiveFileTool({ app } = {}) {
     name: "vault_get_active_file",
     description: DESCRIPTION,
     inputSchema: INPUT_SCHEMA,
+    capabilities: {
+      effect: "observation",
+      risk: "low",
+      concurrency: "parallel",
+      presentation: "note",
+      targets: [],
+    },
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
 

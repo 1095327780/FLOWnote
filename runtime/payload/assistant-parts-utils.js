@@ -745,6 +745,55 @@ function looksLikeInternalPromptLeak(text) {
   return false;
 }
 
+function extractAssistantResponseStats(envelope) {
+  const source = envelope && typeof envelope === "object" ? envelope : {};
+  const info = source.info && typeof source.info === "object" ? source.info : {};
+  const parts = Array.isArray(source.parts) ? source.parts : [];
+  const providerLabel = String(info.providerID || info.providerId || "").trim();
+  const modelId = String(info.modelID || info.modelId || info.model || "").trim();
+  const toolIds = new Set();
+  const stepIds = new Set();
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+  };
+
+  parts.forEach((part, index) => {
+    if (!part || typeof part !== "object") return;
+    if (part.type === "tool") {
+      const id = String(part.callID || part.callId || part.id || `tool:${index}`).trim();
+      if (id) toolIds.add(id);
+      return;
+    }
+    if (part.type !== "step-finish") return;
+    const stepId = String(part.id || `step:${index}`).trim();
+    if (stepIds.has(stepId)) return;
+    stepIds.add(stepId);
+    const tokens = part.tokens && typeof part.tokens === "object" ? part.tokens : {};
+    const cache = tokens.cache && typeof tokens.cache === "object" ? tokens.cache : {};
+    const input = Math.max(0, Math.floor(Number(tokens.input || 0) || 0));
+    const output = Math.max(0, Math.floor(Number(tokens.output || 0) || 0));
+    const total = Math.max(0, Math.floor(Number(tokens.total || 0) || 0));
+    usage.inputTokens += input;
+    usage.outputTokens += output;
+    usage.totalTokens += total || input + output;
+    usage.cachedInputTokens += Math.max(0, Math.floor(Number(tokens.cached || cache.read || 0) || 0));
+    usage.reasoningTokens += Math.max(0, Math.floor(Number(tokens.reasoning || 0) || 0));
+  });
+
+  if (!providerLabel && !modelId && !toolIds.size && usage.totalTokens <= 0) return null;
+  return {
+    providerLabel,
+    modelId,
+    modelLabel: modelId,
+    toolCount: toolIds.size,
+    usage,
+  };
+}
+
 function extractAssistantPayloadFromEnvelope(envelope) {
   if (!envelope || typeof envelope !== "object") return { text: "", reasoning: "", meta: "", blocks: [] };
 
@@ -779,7 +828,8 @@ function extractAssistantPayloadFromEnvelope(envelope) {
     text = "";
   }
 
-  return { text, reasoning, meta, blocks };
+  const stats = extractAssistantResponseStats(envelope);
+  return { text, reasoning, meta, blocks, stats };
 }
 
 function formatSessionStatusText(status) {
@@ -833,6 +883,7 @@ module.exports = {
   extractAssistantParts,
   extractErrorText,
   looksLikeInternalPromptLeak,
+  extractAssistantResponseStats,
   extractAssistantPayloadFromEnvelope,
   formatSessionStatusText,
   normalizedRenderableText,
