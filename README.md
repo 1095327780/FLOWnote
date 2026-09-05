@@ -22,14 +22,7 @@
 
 ## v0.5.25 发布说明
 
-本次更新完善了对话呈现、续接与移动端使用体验。
-
-- **回复过程更清晰**：回复会逐步显示，中间文本、工具活动和最终答案按实际发生顺序呈现；完成后可收起过程内容，保持对话简洁。
-- **完成反馈更可信**：当前活动动画不再受历史失败记录干扰；任务结束后会反馈实际完成的修改内容。
-- **网络中断后可继续**：对话在网络暂时中断后支持继续，继续时会保留已经完成的写入结果。
-- **暂停任务与确认更准确**：长对话中的暂停任务可以继续；尚未回答的问题不能空提交，也不会被误当作已确认。
-- **触控与今日卡片更顺手**：较慢的触控操作后，页面不再容易突然跳到底部；今日卡片的操作按钮在窄屏下可完整显示，减少文字和按钮被截断的情况。
-- **移动端技能体验完善**：内置 Skills 的解析和交互流程进一步适配移动端，便于在手机上继续使用常用工作流。
+修复已知问题，提升 AI 调度稳定性。
 
 ## v0.5.12 发布说明
 
@@ -336,14 +329,7 @@ Language: [简体中文](#flownote) | **English** | [Русский](README.ru.m
 
 ## v0.5.25 Release Notes
 
-This update improves conversation presentation, recovery, and mobile use.
-
-- **Clearer reply progress**: Replies now stream progressively, with intermediate text, tool activity, and the final answer presented in the order they occur. Completed process details can be collapsed.
-- **More trustworthy completion feedback**: The current activity animation is no longer affected by historical failed activity, and completed tasks report the changes that were made.
-- **Continue after a network interruption**: Conversations can continue after a temporary network interruption while preserving completed writes when they resume.
-- **Accurate paused-task and confirmation handling**: A paused task in a long chat can continue. Unanswered questions cannot be submitted empty and are not treated as confirmed.
-- **Smoother touch and Today card actions**: Slower touch interactions are less likely to jump to the bottom, while Today card action buttons fit more reliably on narrow screens.
-- **Improved mobile Skills**: Built-in Skill parsing and interaction flows have been refined for mobile use.
+Fixed bugs and improved AI orchestration stability.
 
 ## v0.5.12 Release Notes
 
