@@ -2,6 +2,27 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { summarizeActiveAgent } = require("../../runtime/view/layout/agent-summary");
+const Module = require("node:module");
+
+function loadSummaryWithPlatform(platform) {
+  const originalLoad = Module._load;
+  const summaryPath = require.resolve("../../runtime/view/layout/agent-summary");
+  const agentModePath = require.resolve("../../runtime/agent/agent-mode");
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === "obsidian") return { Platform: platform };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  delete require.cache[summaryPath];
+  delete require.cache[agentModePath];
+  return {
+    summarizeActiveAgent: require(summaryPath).summarizeActiveAgent,
+    restore() {
+      Module._load = originalLoad;
+      delete require.cache[summaryPath];
+      delete require.cache[agentModePath];
+    },
+  };
+}
 
 function makePlugin({ mode, providerId, model, apiKey, uiLanguage = "zh-CN" } = {}) {
   return {
@@ -25,6 +46,23 @@ test("summarizeActiveAgent: opencode-legacy returns OpenCode label and skips API
   assert.equal(s.mode, "opencode-legacy");
   assert.equal(s.providerLabel, "OpenCode");
   assert.equal(s.configComplete, true);
+});
+
+test("summarizeActiveAgent: mobile legacy preference renders the built-in AI summary", () => {
+  const fixture = loadSummaryWithPlatform({ isMobile: true });
+  try {
+    const s = fixture.summarizeActiveAgent(makePlugin({
+      mode: "opencode-legacy",
+      providerId: "deepseek",
+      model: "deepseek-v4-flash",
+      apiKey: "sk-test",
+    }));
+    assert.equal(s.mode, "direct");
+    assert.match(s.providerLabel, /DeepSeek/i);
+    assert.equal(s.modelId, "deepseek-v4-flash");
+  } finally {
+    fixture.restore();
+  }
 });
 
 test("summarizeActiveAgent: direct mode with everything set is configComplete", () => {

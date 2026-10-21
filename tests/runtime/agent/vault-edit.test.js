@@ -2,6 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { createVaultEditTool, countOccurrences } = require("../../../runtime/agent/tools/vault-edit");
+const { FileStateCache } = require("../../../runtime/agent/file-state-cache");
+const { ToolRegistry } = require("../../../runtime/agent/tool-registry");
+const { runToolUse, createEffectReceipt } = require("../../../runtime/agent/agent-loop");
 
 function fakeVault(initial = {}) {
   const files = new Map(Object.entries(initial));
@@ -182,4 +185,74 @@ test("vault_edit normalizes backslashes/double slashes in path", async () => {
   );
   assert.ok(!r.isError);
   assert.equal(vault._files.get("a/b/c.md"), "bye");
+});
+
+test("vault_edit verifies the actual legacy memory path and its exact new content", async () => {
+  const path = "Meta/.ai-memory/STATUS.md";
+  const vault = fakeVault({ [path]: "before" });
+  const cache = new FileStateCache();
+  cache.recordRead(path, "before");
+  const ctx = { fileStateCache: cache };
+  const tool = createVaultEditTool({ vault });
+  const input = { path, old_string: "before", new_string: "after" };
+
+  assert.equal((await tool.validate(input, ctx)).ok, true);
+  const result = lastResult(await collectExecute(tool, input, ctx));
+  assert.equal(result.isError, undefined);
+  assert.equal(vault._files.get(path), "after");
+  assert.equal(vault._files.has("Meta/ai-memory/STATUS.md"), false);
+  assert.equal((await tool.verifyEffect(input, { data: result.data }, ctx)).verified, true);
+  assert.equal((await tool.verifyEffect(input, null, ctx)).verified, false);
+
+  vault._files.set("Meta/ai-memory/STATUS.md", "after");
+  vault._files.set(path, "drifted");
+  assert.equal((await tool.verifyEffect(input, { data: result.data }, ctx)).verified, false);
+});
+
+for (const canonicalExists of [false, true]) {
+  test(`vault_edit effect receipt targets the actual ${canonicalExists ? "canonical" : "legacy"} memory path`, async () => {
+    const legacy = "Meta/.ai-memory/STATUS.md";
+    const canonical = "Meta/ai-memory/STATUS.md";
+    const actual = canonicalExists ? canonical : legacy;
+    const vault = fakeVault(canonicalExists ? { [legacy]: "before", [canonical]: "before" } : { [legacy]: "before" });
+    const cache = new FileStateCache();
+    cache.recordRead(actual, "before");
+    const ctx = { fileStateCache: cache };
+    const registry = new ToolRegistry();
+    registry.register(createVaultEditTool({ vault }));
+    const toolUse = { id: "edit-memory", name: "vault_edit", input: { path: legacy, old_string: "before", new_string: "after" } };
+
+    const result = await runToolUse(toolUse, registry, ctx, async () => ({ behavior: "allow" }));
+    const receipt = await createEffectReceipt(toolUse, result, ctx);
+
+    assert.equal(result.isError, false);
+    assert.equal(result.verification.verified, true);
+    assert.deepEqual(result.capabilities.targets, [actual]);
+    assert.equal(receipt.verified, true);
+    assert.deepEqual(receipt.paths, [actual]);
+    assert.equal(vault._files.get(actual), "after");
+    if (canonicalExists) assert.equal(vault._files.get(legacy), "before");
+  });
+}
+
+test("vault_edit permission prompt names the legacy memory file it will actually change", async () => {
+  const legacy = "Meta/.ai-memory/STATUS.md";
+  const canonical = "Meta/ai-memory/STATUS.md";
+  const legacyOnly = createVaultEditTool({ vault: fakeVault({ [legacy]: "before" }) });
+  const input = { path: legacy, old_string: "before", new_string: "after" };
+  assert.equal((await legacyOnly.checkPermissions(input, {})).summary, `edit → ${legacy}`);
+
+  const both = createVaultEditTool({ vault: fakeVault({ [legacy]: "before", [canonical]: "before" }) });
+  assert.equal((await both.checkPermissions(input, {})).summary, `edit → ${canonical}`);
+});
+
+test("vault_edit read-before-edit refusal points at the readable legacy memory file", async () => {
+  const legacy = "Meta/.ai-memory/STATUS.md";
+  const tool = createVaultEditTool({ vault: fakeVault({ [legacy]: "before" }) });
+  const result = await tool.validate(
+    { path: legacy, old_string: "before", new_string: "after" },
+    { fileStateCache: new FileStateCache() },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.error, /vault_read on "Meta\/\.ai-memory\/STATUS\.md"/);
 });

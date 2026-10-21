@@ -7,10 +7,8 @@ const {
   runToolUse,
   createEffectReceipt,
 } = require("../../../runtime/agent/agent-loop");
-const {
-  WORKFLOW_FINISH_TOOL_NAME,
-  createExplicitSkillWorkflowContract,
-} = require("../../../runtime/agent/execution-contract");
+const { createExplicitSkillWorkflowContract } = require("../../../runtime/agent/execution-contract");
+const { createVaultChangeRecorder } = require("../../../runtime/agent/vault-change-recorder");
 const { buildTool, ToolRegistry } = require("../../../runtime/agent/tool-registry");
 const { createAskUserTool } = require("../../../runtime/agent/tools/ask-user");
 
@@ -152,20 +150,6 @@ function explicitWorkflowContract() {
     completionPolicy: {
       state: "declared",
       mode: "effect",
-      requiredEffects: [],
-      minReceipts: null,
-      errorCode: null,
-    },
-  });
-}
-
-function answerWorkflowContract() {
-  return createExplicitSkillWorkflowContract({
-    skillName: "answer-skill",
-    command: "/answer-skill",
-    completionPolicy: {
-      state: "declared",
-      mode: "answer",
       requiredEffects: [],
       minReceipts: null,
       errorCode: null,
@@ -548,461 +532,6 @@ test("runAgentLoop checkpoints a tool-only answer when the model returns no fina
   assert.equal(events.some((event) => event.type === "done"), false);
 });
 
-test("an effect skill cannot downgrade itself to answer-only completion", async () => {
-  const provider = mockProvider({
-    turns: [
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "finish-1", WORKFLOW_FINISH_TOOL_NAME),
-        ev.toolUseJson(0, '{"status":"completed","mode":"answer","reason":"Answered"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "finish-cancelled", WORKFLOW_FINISH_TOOL_NAME),
-        ev.toolUseJson(0, '{"status":"cancelled","reason":"Cannot perform the required effect"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-    ],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-  }));
-
-  assert.ok(provider._seen[0].input.tools.some((tool) => tool.name === WORKFLOW_FINISH_TOOL_NAME));
-  assert.equal(events.some((event) => event.type === "tool_start" || event.type === "tool_finish"), false);
-  const feedback = provider._seen[1].input.messages.at(-1).content[0];
-  assert.equal(feedback.tool_use_id, "finish-1");
-  assert.equal(feedback.is_error, true);
-  assert.match(feedback.content, /host requires effect/i);
-  assert.equal(events.find((event) => event.type === "workflow_finish").disposition, "cancelled");
-  assert.equal(events.some((event) => event.disposition === "completed"), false);
-  assert.equal(provider._calls(), 2);
-});
-
-test("a skill with a required interaction rejects a model-owned blocked terminal and records a real question", async () => {
-  const provider = mockProvider({ turns: [
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "write-skeleton", "vault_write"),
-      ev.toolUseJson(0, '{"path":"Daily.md","content":"skeleton"}'),
-      ev.blockStop(0),
-      ev.toolUseStart(1, "finish-with-prose", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(1, '{"status":"blocked","reason":"Waiting for user confirmation"}'),
-      ev.blockStop(1),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "ask-plan", "ask_user"),
-      ev.toolUseJson(0, '{"questions":[{"question":"Should yesterday plan change?"}]}'),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "finish-after-question", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(0, '{"status":"completed","mode":"effect","reason":"Confirmed and saved"}'),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-  ] });
-  const contract = createExplicitSkillWorkflowContract({
-    skillName: "ah-note",
-    command: "/ah-note",
-    completionPolicy: {
-      state: "declared",
-      mode: "effect",
-      requiredEffects: [],
-      requiredInteractions: ["ask_user"],
-      minReceipts: null,
-      errorCode: null,
-    },
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(
-      makeWritingTool("vault_write", async () => "Created Daily.md"),
-      makeQuestionTool("ask_user", async () => "User confirmed yesterday's plan"),
-    ),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-note" }] }],
-    executionContract: contract,
-    ctx: {
-      async verifyToolEffect({ toolUse }) {
-        return {
-          kind: "vault_mutation",
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: [toolUse.input.path],
-          verified: true,
-          outcome: "verified",
-        };
-      },
-    },
-  }));
-
-  const rejection = provider._seen[1].input.messages.at(-1).content
-    .find((block) => block.tool_use_id === "finish-with-prose");
-  assert.equal(rejection.is_error, true);
-  assert.match(rejection.content, /invalid workflow finish declaration/i);
-  assert.deepEqual(events.filter((event) => event.type === "interaction_receipt").map((event) => event.receipt.tool), ["ask_user"]);
-  assert.equal(events.find((event) => event.type === "workflow_finish").disposition, "completed");
-  assert.equal(provider._calls(), 3);
-});
-
-test("an empty ask_user response cannot satisfy a required interaction contract", async () => {
-  const provider = mockProvider({ turns: [
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "ask-empty", "ask_user"),
-      ev.toolUseJson(0, JSON.stringify({ questions: [{
-        question: "Apply this change?",
-        header: "Confirm",
-        options: [
-          { label: "Apply", description: "Apply the change." },
-          { label: "Cancel", description: "Do not apply the change." },
-        ],
-      }] })),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "finish-after-empty", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(0, '{"status":"completed","mode":"answer","reason":"Done"}'),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-  ] });
-  const contract = createExplicitSkillWorkflowContract({
-    skillName: "confirm-first",
-    command: "/confirm-first",
-    completionPolicy: {
-      state: "declared",
-      mode: "answer",
-      requiredEffects: [],
-      requiredInteractions: ["ask_user"],
-      minReceipts: null,
-      errorCode: null,
-    },
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(createAskUserTool()),
-    messages: [{ role: "user", content: [{ type: "text", text: "/confirm-first" }] }],
-    executionContract: contract,
-    maxTurns: 2,
-    ctx: {
-      askUserFn: async () => ({ answers: { "Apply this change?": "" } }),
-    },
-  }));
-
-  assert.equal(events.some((event) => event.type === "interaction_receipt"), false);
-  assert.equal(events.some((event) => event.type === "workflow_finish"), false);
-  assert.equal(events.at(-1).type, "suspended");
-  assert.match(JSON.stringify(provider._seen[1].input.messages), /no answer was provided/i);
-  assert.match(JSON.stringify(provider._seen[1].input.messages), /is_error/i);
-});
-
-test("an answer skill may complete without an effect receipt", async () => {
-  const provider = mockProvider({ turns: [[
-    ev.messageStart(),
-    ev.toolUseStart(0, "finish-answer", WORKFLOW_FINISH_TOOL_NAME),
-    ev.toolUseJson(0, '{"status":"completed","mode":"answer","reason":"Answered"}'),
-    ev.blockStop(0),
-    ev.messageDelta("tool_use"),
-    ev.messageStop(),
-  ]] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/answer-skill" }] }],
-    executionContract: answerWorkflowContract(),
-  }));
-
-  assert.deepEqual(events.find((event) => event.type === "workflow_finish"), {
-    type: "workflow_finish",
-    disposition: "completed",
-    declaration: { status: "completed", mode: "answer", reason: "Answered" },
-    verified: true,
-  });
-  assert.equal(events.find((event) => event.type === "done").verified, true);
-});
-
-test("a workflow verifies same-turn effects before accepting its finish declaration", async () => {
-  const provider = mockProvider({
-    turns: [[
-      ev.messageStart(),
-      ev.toolUseStart(0, "finish-effect", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(0, '{"status":"completed","mode":"effect","target_paths":["Cards/new.md"],"reason":"Card saved"}'),
-      ev.blockStop(0),
-      ev.toolUseStart(1, "write-card", "vault_write"),
-      ev.toolUseJson(1, '{"path":"Cards/new.md","content":"card"}'),
-      ev.blockStop(1),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ]],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(makeWritingTool("vault_write", async () => "Created card")),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-    ctx: {
-      async verifyToolEffect({ toolUse, result }) {
-        return {
-          kind: "vault_mutation",
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: [toolUse.input.path],
-          outcome: result.isError ? "failed" : "verified",
-          verified: !result.isError,
-        };
-      },
-    },
-  }));
-
-  assert.deepEqual(events.filter((event) => event.type === "tool_start").map((event) => event.tool), ["vault_write"]);
-  assert.equal(events.find((event) => event.type === "effect_receipt").receipt.verified, true);
-  assert.deepEqual(events.find((event) => event.type === "workflow_finish"), {
-    type: "workflow_finish",
-    disposition: "completed",
-    declaration: {
-      status: "completed",
-      mode: "effect",
-      targetPaths: ["Cards/new.md"],
-      reason: "Card saved",
-    },
-    verified: true,
-  });
-  assert.equal(events.find((event) => event.type === "done").disposition, "completed");
-  assert.equal(provider._calls(), 1);
-});
-
-test("a declared skill enforces its host minimum receipt count", async () => {
-  const provider = mockProvider({ turns: [
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "write-one", "vault_write"),
-      ev.toolUseJson(0, '{"path":"Cards/one.md","content":"one"}'),
-      ev.blockStop(0),
-      ev.toolUseStart(1, "finish-too-soon", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(1, '{"status":"completed","mode":"effect","reason":"Only one write"}'),
-      ev.blockStop(1),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "write-two", "vault_write"),
-      ev.toolUseJson(0, '{"path":"Cards/two.md","content":"two"}'),
-      ev.blockStop(0),
-      ev.toolUseStart(1, "finish-after-two", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(1, '{"status":"completed","mode":"effect","reason":"Two verified writes"}'),
-      ev.blockStop(1),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-  ] });
-  const contract = createExplicitSkillWorkflowContract({
-    skillName: "two-write-skill",
-    command: "/two-write-skill",
-    completionPolicy: {
-      state: "declared",
-      mode: "effect",
-      requiredEffects: ["vault_mutation"],
-      minReceipts: 2,
-      errorCode: null,
-    },
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(makeWritingTool("vault_write", async () => "created")),
-    messages: [{ role: "user", content: [{ type: "text", text: "/two-write-skill" }] }],
-    executionContract: contract,
-    ctx: {
-      async verifyToolEffect({ toolUse }) {
-        return {
-          kind: "vault_mutation",
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: [toolUse.input.path],
-          verified: true,
-          outcome: "verified",
-        };
-      },
-    },
-  }));
-
-  const firstFeedback = provider._seen[1].input.messages.at(-1).content
-    .find((block) => block.tool_use_id === "finish-too-soon");
-  assert.equal(firstFeedback.is_error, true);
-  assert.match(firstFeedback.content, /at least 2 verified receipts/i);
-  assert.equal(events.filter((event) => event.type === "effect_receipt").length, 2);
-  assert.equal(events.find((event) => event.type === "workflow_finish").verified, true);
-});
-
-test("a workflow effect may be satisfied by any verified side-effect receipt", async () => {
-  const provider = mockProvider({
-    turns: [[
-      ev.messageStart(),
-      ev.toolUseStart(0, "publish-card", "publish_card"),
-      ev.toolUseJson(0, '{"target":"remote:card"}'),
-      ev.blockStop(0),
-      ev.toolUseStart(1, "finish-publish", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(1, '{"status":"completed","mode":"effect","reason":"Published"}'),
-      ev.blockStop(1),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ]],
-  });
-  const publishTool = buildTool({
-    name: "publish_card",
-    description: "publish",
-    inputSchema: { type: "object" },
-    capabilities: (input) => ({
-      effect: "external_side_effect",
-      risk: "medium",
-      concurrency: "serial",
-      presentation: "execute",
-      targets: [input && input.target].filter(Boolean),
-    }),
-    async *execute() { yield { type: "result", content: "published" }; },
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(publishTool),
-    messages: [{ role: "user", content: [{ type: "text", text: "/publish" }] }],
-    executionContract: createExplicitSkillWorkflowContract({
-      skillName: "publish",
-      command: "/publish",
-      completionPolicy: {
-        state: "declared",
-        mode: "effect",
-        requiredEffects: ["external_side_effect"],
-        minReceipts: 1,
-        errorCode: null,
-      },
-    }),
-    ctx: {
-      toolPermissionMode: "auto",
-      async verifyToolEffect({ toolUse, result, effect }) {
-        return {
-          kind: effect.kind,
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: effect.targets,
-          outcome: result.isError ? "failed" : "verified",
-          verified: !result.isError,
-        };
-      },
-    },
-  }));
-
-  assert.equal(events.find((event) => event.type === "effect_receipt").receipt.kind, "external_side_effect");
-  assert.equal(events.find((event) => event.type === "workflow_finish").disposition, "completed");
-});
-
-test("a workflow accepts inspect completion only after a verified observation", async () => {
-  const provider = mockProvider({
-    turns: [[
-      ev.messageStart(),
-      ev.toolUseStart(0, "read-status", "vault_read"),
-      ev.toolUseJson(0, '{"path":"STATUS.md"}'),
-      ev.blockStop(0),
-      ev.toolUseStart(1, "finish-inspect", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(1, '{"status":"completed","mode":"inspect","reason":"Status inspected"}'),
-      ev.blockStop(1),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ]],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(makeReadOnlyTool("vault_read", async () => "status")),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: inspectWorkflowContract(),
-  }));
-
-  assert.equal(events.find((event) => event.type === "effect_receipt").receipt.kind, "observation");
-  assert.equal(events.find((event) => event.type === "workflow_finish").verified, true);
-  assert.equal(events.find((event) => event.type === "done").disposition, "completed");
-});
-
-test("an inspect skill cannot complete without a verified observation receipt and may explicitly cancel", async () => {
-  const provider = mockProvider({ turns: [
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "finish-inspect-empty", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(0, '{"status":"completed","mode":"inspect","reason":"Inspected"}'),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-    [
-      ev.messageStart(),
-      ev.toolUseStart(0, "finish-inspect-cancelled", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(0, '{"status":"cancelled","reason":"No observation available"}'),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ],
-  ] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/inspect-skill" }] }],
-    executionContract: inspectWorkflowContract(),
-  }));
-
-  assert.match(provider._seen[1].input.messages.at(-1).content[0].content, /verified observation receipt/i);
-  assert.equal(events.find((event) => event.type === "workflow_finish").disposition, "cancelled");
-});
-
-test("a standard skill without private metadata completes through the host protocol", async () => {
-  const provider = mockProvider({ turns: [[
-    ev.messageStart(),
-    ev.toolUseStart(0, "finish-legacy", WORKFLOW_FINISH_TOOL_NAME),
-    ev.toolUseJson(0, '{"status":"completed","mode":"answer","reason":"Legacy answer"}'),
-    ev.blockStop(0),
-    ev.messageDelta("tool_use"),
-    ev.messageStop(),
-  ]] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/third-party" }] }],
-    executionContract: createExplicitSkillWorkflowContract({
-      skillName: "third-party",
-      command: "/third-party",
-    }),
-  }));
-
-  assert.deepEqual(events.find((event) => event.type === "workflow_finish"), {
-    type: "workflow_finish",
-    disposition: "completed",
-    declaration: { status: "completed", mode: "answer", reason: "Legacy answer" },
-    verified: true,
-    verification: { state: "verified", policy: "standard_skill_protocol" },
-  });
-  const done = events.find((event) => event.type === "done");
-  assert.equal(done.disposition, "completed");
-  assert.equal(done.verified, true);
-  assert.deepEqual(done.verification, { state: "verified", policy: "standard_skill_protocol" });
-});
-
 test("a corrupted invalid workflow contract fails before the provider is called", async () => {
   const provider = mockProvider({ turns: [] });
   const events = await collect(runAgentLoop({
@@ -1031,295 +560,6 @@ test("a corrupted invalid workflow contract fails before the provider is called"
   });
 });
 
-test("an unverified workflow finish is returned to the model as an internal tool error", async () => {
-  const provider = mockProvider({
-    turns: [
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "finish-unverified", WORKFLOW_FINISH_TOOL_NAME),
-        ev.toolUseJson(0, '{"status":"completed","mode":"effect","reason":"Claimed write"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "finish-cancelled", WORKFLOW_FINISH_TOOL_NAME),
-        ev.toolUseJson(0, '{"status":"cancelled","reason":"No writable target"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-    ],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-  }));
-
-  const feedback = provider._seen[1].input.messages.at(-1).content;
-  assert.equal(feedback.length, 1);
-  assert.equal(feedback[0].type, "tool_result");
-  assert.equal(feedback[0].tool_use_id, "finish-unverified");
-  assert.equal(feedback[0].is_error, true);
-  assert.match(feedback[0].content, /verified effect receipt/i);
-  assert.equal(events.some((event) => event.type === "tool_start" || event.type === "tool_finish"), false);
-  assert.deepEqual(events.find((event) => event.type === "workflow_finish"), {
-    type: "workflow_finish",
-    disposition: "cancelled",
-    declaration: { status: "cancelled", mode: null, reason: "No writable target" },
-    verified: true,
-  });
-  assert.equal(events.find((event) => event.type === "done").disposition, "cancelled");
-});
-
-test("a workflow finish with mismatched target paths returns an internal tool error", async () => {
-  const provider = mockProvider({
-    turns: [
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "write-actual", "vault_write"),
-        ev.toolUseJson(0, '{"path":"Cards/actual.md","content":"card"}'),
-        ev.blockStop(0),
-        ev.toolUseStart(1, "finish-mismatch", WORKFLOW_FINISH_TOOL_NAME),
-        ev.toolUseJson(1, '{"status":"completed","mode":"effect","target_paths":["Cards/expected.md"],"reason":"Saved"}'),
-        ev.blockStop(1),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "finish-after-mismatch", WORKFLOW_FINISH_TOOL_NAME),
-        ev.toolUseJson(0, '{"status":"cancelled","reason":"Expected target was not changed"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-    ],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(makeWritingTool("vault_write", async () => "Created actual card")),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-    ctx: {
-      async verifyToolEffect({ toolUse, result }) {
-        return {
-          kind: "vault_mutation",
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: [toolUse.input.path],
-          outcome: result.isError ? "failed" : "verified",
-          verified: !result.isError,
-        };
-      },
-    },
-  }));
-
-  const feedback = provider._seen[1].input.messages.at(-1).content
-    .find((block) => block.tool_use_id === "finish-mismatch");
-  assert.equal(feedback.is_error, true);
-  assert.match(feedback.content, /Cards\/expected\.md/);
-  assert.equal(events.find((event) => event.type === "workflow_finish").disposition, "cancelled");
-  assert.equal(provider._calls(), 2);
-});
-
-test("a workflow retries once and fails closed when the model never declares a finish", async () => {
-  const noFinish = [
-    ev.messageStart(),
-    ev.textBlockStart(0),
-    ev.textDelta(0, "I am done."),
-    ev.blockStop(0),
-    ev.messageDelta("end_turn"),
-    ev.messageStop(),
-  ];
-  const provider = mockProvider({ turns: [noFinish, noFinish] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-    maxCompletionRetries: 1,
-  }));
-
-  assert.equal(events.filter((event) => event.type === "completion_retry").length, 1);
-  assert.match(
-    provider._seen[1].input.messages.at(-1).content[0].text,
-    new RegExp(WORKFLOW_FINISH_TOOL_NAME),
-  );
-  assert.equal(events.find((event) => event.type === "error").error.type, "completion_contract_failed");
-  assert.equal(events.some((event) => event.type === "done"), false);
-  assert.equal(provider._calls(), 2);
-});
-
-test("a cancelled workflow remains cancelled instead of being reported as completed", async () => {
-  const provider = mockProvider({
-    turns: [[
-      ev.messageStart(),
-      ev.toolUseStart(0, "finish-cancelled", WORKFLOW_FINISH_TOOL_NAME),
-      ev.toolUseJson(0, '{"status":"cancelled","reason":"User stopped the workflow"}'),
-      ev.blockStop(0),
-      ev.messageDelta("tool_use"),
-      ev.messageStop(),
-    ]],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-  }));
-
-  const finish = events.find((event) => event.type === "workflow_finish");
-  assert.equal(finish.disposition, "cancelled");
-  assert.equal(finish.declaration.status, "cancelled");
-  assert.equal(events.find((event) => event.type === "done").disposition, "cancelled");
-  assert.equal(events.some((event) => event.disposition === "completed"), false);
-});
-
-test("runAgentLoop retries an effect-required task until a verified receipt exists", async () => {
-  const provider = mockProvider({
-    turns: [
-      [
-        ev.messageStart(),
-        ev.textBlockStart(0),
-        ev.textDelta(0, "已经写入 new.md。"),
-        ev.blockStop(0),
-        ev.messageDelta("end_turn"),
-        ev.messageStop(),
-      ],
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "tu-write", "vault_write"),
-        ev.toolUseJson(0, '{"path":"new.md","content":"hello","mode":"create"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-      [
-        ev.messageStart(),
-        ev.textBlockStart(0),
-        ev.textDelta(0, "写入已验证。"),
-        ev.blockStop(0),
-        ev.messageDelta("end_turn"),
-        ev.messageStop(),
-      ],
-    ],
-  });
-  const registry = registryWith(makeWritingTool("vault_write", async () => "Created new.md"));
-  const events = await collect(runAgentLoop({
-    provider,
-    registry,
-    messages: [{ role: "user", content: [{ type: "text", text: "写入 new.md" }] }],
-    executionContract: {
-      id: "contract-1",
-      mode: "effect",
-      requiredEffects: [{ kind: "vault_mutation", targetPaths: ["new.md"] }],
-    },
-    ctx: {
-      async verifyToolEffect({ toolUse, result }) {
-        return {
-          kind: "vault_mutation",
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: [toolUse.input.path],
-          outcome: result.isError ? "failed" : "verified",
-          verified: !result.isError,
-        };
-      },
-    },
-  }));
-
-  assert.equal(events.filter((event) => event.type === "completion_retry").length, 1);
-  const receipt = events.find((event) => event.type === "effect_receipt");
-  assert.equal(receipt.receipt.verified, true);
-  assert.ok(events.some((event) => event.type === "done"));
-  assert.equal(provider._calls(), 3);
-});
-
-test("runAgentLoop fails closed after the effect completion retry budget is exhausted", async () => {
-  const falseDoneTurn = [
-    ev.messageStart(),
-    ev.textBlockStart(0),
-    ev.textDelta(0, "已经完成。"),
-    ev.blockStop(0),
-    ev.messageDelta("end_turn"),
-    ev.messageStop(),
-  ];
-  const provider = mockProvider({ turns: [falseDoneTurn, falseDoneTurn] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "修改文件" }] }],
-    executionContract: {
-      id: "contract-2",
-      mode: "effect",
-      requiredEffects: [{ kind: "vault_mutation", targetPaths: [] }],
-    },
-    maxCompletionRetries: 1,
-  }));
-
-  assert.equal(events.filter((event) => event.type === "completion_retry").length, 1);
-  const error = events.find((event) => event.type === "error");
-  assert.equal(error.error.type, "completion_contract_failed");
-  assert.equal(events.some((event) => event.type === "done"), false);
-  assert.equal(provider._calls(), 2);
-});
-
-test("runAgentLoop does not accept a successful tool result when its postcondition fails", async () => {
-  const falseDone = [
-    ev.messageStart(),
-    ev.textBlockStart(0),
-    ev.textDelta(0, "写入完成。"),
-    ev.blockStop(0),
-    ev.messageDelta("end_turn"),
-    ev.messageStop(),
-  ];
-  const provider = mockProvider({
-    turns: [
-      [
-        ev.messageStart(),
-        ev.toolUseStart(0, "tu-write-unverified", "vault_write"),
-        ev.toolUseJson(0, '{"path":"x.md","content":"expected"}'),
-        ev.blockStop(0),
-        ev.messageDelta("tool_use"),
-        ev.messageStop(),
-      ],
-      falseDone,
-      falseDone,
-    ],
-  });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(makeWritingTool("vault_write", async () => "Wrote x.md")),
-    messages: [{ role: "user", content: [{ type: "text", text: "写入 x.md" }] }],
-    executionContract: {
-      id: "contract-postcondition",
-      mode: "effect",
-      requiredEffects: [{ kind: "vault_mutation", targetPaths: ["x.md"] }],
-    },
-    ctx: {
-      async verifyToolEffect({ toolUse }) {
-        return {
-          kind: "vault_mutation",
-          toolUseId: toolUse.id,
-          tool: toolUse.name,
-          paths: ["x.md"],
-          verified: false,
-          outcome: "postcondition_failed",
-        };
-      },
-    },
-  }));
-
-  assert.equal(events.find((event) => event.type === "tool_finish").isError, false);
-  assert.equal(events.find((event) => event.type === "effect_receipt").receipt.verified, false);
-  assert.equal(events.find((event) => event.type === "error").error.type, "completion_contract_failed");
-  assert.equal(events.some((event) => event.type === "done"), false);
-});
-
 test("runAgentLoop permits a no-tool completion for an answer-only task contract", async () => {
   const provider = mockProvider({
     turns: [[
@@ -1340,32 +580,6 @@ test("runAgentLoop permits a no-tool completion for an answer-only task contract
 
   assert.ok(events.some((event) => event.type === "done"));
   assert.equal(events.some((event) => event.type === "completion_retry"), false);
-});
-
-test("runAgentLoop also requires a receipt for an inspection task", async () => {
-  const falseRead = [
-    ev.messageStart(),
-    ev.textBlockStart(0),
-    ev.textDelta(0, "我已经读取 x.md，内容为空。"),
-    ev.blockStop(0),
-    ev.messageDelta("end_turn"),
-    ev.messageStop(),
-  ];
-  const provider = mockProvider({ turns: [falseRead, falseRead] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: new ToolRegistry(),
-    messages: [{ role: "user", content: [{ type: "text", text: "读取 x.md" }] }],
-    executionContract: {
-      id: "contract-inspect",
-      mode: "inspect",
-      requiredEffects: [{ kind: "observation", targetPaths: ["x.md"] }],
-    },
-    maxCompletionRetries: 1,
-  }));
-
-  assert.equal(events.filter((event) => event.type === "completion_retry").length, 1);
-  assert.equal(events.find((event) => event.type === "error").error.type, "completion_contract_failed");
 });
 
 test("runAgentLoop completes an inspection after a successful observation receipt", async () => {
@@ -2247,44 +1461,6 @@ test("an interaction barrier defers a mutation even when the model placed the wr
   assert.match(JSON.stringify(provider._seen[1].input.messages), /waiting for user input/);
 });
 
-test("a dismissed interaction takes precedence over a same-turn workflow finish declaration", async () => {
-  const askTool = buildTool({
-    name: "ask_user",
-    description: "ask",
-    inputSchema: { type: "object" },
-    capabilities: { effect: "none", risk: "low", concurrency: "serial", presentation: "question", targets: [] },
-    async *execute() {
-      yield {
-        type: "result",
-        content: "dismissed",
-        code: "user_input_dismissed",
-        control: { type: "suspend", reason: "user_input_dismissed" },
-      };
-    },
-  });
-  const provider = mockProvider({ turns: [[
-    ev.messageStart(),
-    ev.toolUseStart(0, "finish-too-early", WORKFLOW_FINISH_TOOL_NAME),
-    ev.toolUseJson(0, '{"status":"completed","mode":"answer"}'),
-    ev.blockStop(0),
-    ev.toolUseStart(1, "ask-1", "ask_user"),
-    ev.toolUseJson(1, "{}"),
-    ev.blockStop(1),
-    ev.messageDelta("tool_use"),
-    ev.messageStop(),
-  ]] });
-  const events = await collect(runAgentLoop({
-    provider,
-    registry: registryWith(askTool),
-    messages: [{ role: "user", content: [{ type: "text", text: "/ah-card" }] }],
-    executionContract: explicitWorkflowContract(),
-  }));
-
-  assert.equal(events.some((event) => event.type === "workflow_finish"), false);
-  assert.equal(events.at(-1).type, "suspended");
-  assert.equal(events.at(-1).reason, "user_input_dismissed");
-});
-
 test("skill allowed-tools narrows the next API tool surface and rejects a forged out-of-policy call", async () => {
   let reads = 0;
   let writes = 0;
@@ -2323,8 +1499,7 @@ test("initial skill policy preserves host protocol tools and rejects unknown dec
   const invoke = makeReadOnlyTool("skill_invoke", async () => "loaded");
   const resource = makeReadOnlyTool("skill_resource_read", async () => "resource");
   const provider = mockProvider({ turns: [[
-    ev.messageStart(), ev.toolUseStart(0, "finish", WORKFLOW_FINISH_TOOL_NAME),
-    ev.toolUseJson(0, '{"status":"cancelled","reason":"test"}'), ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+    ev.messageStart(), ev.textBlockStart(0), ev.textDelta(0, "done"), ev.blockStop(0), ev.messageDelta("end_turn"), ev.messageStop(),
   ]] });
   const events = await collect(runAgentLoop({
     provider,
@@ -2334,7 +1509,7 @@ test("initial skill policy preserves host protocol tools and rejects unknown dec
     executionContract: explicitWorkflowContract(),
   }));
   assert.deepEqual(provider._seen[0].input.tools.map((tool) => tool.name).sort(), [
-    "flownote_finish_skill", "skill_invoke", "skill_resource_read", "vault_read",
+    "skill_invoke", "skill_resource_read", "vault_read",
   ]);
   assert.equal(events.at(-1).type, "done");
 
@@ -2402,24 +1577,189 @@ test("a dynamically invoked skill with an unknown allowed tool fails closed as a
   assert.match(rejected.content, /Unknown allowed tool/);
 });
 
-test("runAgentLoop budgets long history against the active model context before provider dispatch", async () => {
+for (const declared of [[], ["vault_write"]]) {
+  test(`an empty Skill policy intersection stays restricted after loading ${JSON.stringify(declared)}`, async () => {
+    let writes = 0;
+    const invoke = makeReadOnlyTool("skill_invoke", async () => "loaded");
+    invoke.resolveSkillAllowedTools = (input) => input.skill === "search" ? ["vault_search"] : declared;
+    const toolTurn = (id, name, input) => [
+      ev.messageStart(), ev.toolUseStart(0, id, name), ev.toolUseJson(0, JSON.stringify(input)),
+      ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+    ];
+    const provider = mockProvider({ turns: [
+      toolTurn("narrow", "skill_invoke", { skill: "search" }),
+      toolTurn("reload", "skill_invoke", { skill: "next" }),
+      toolTurn("forged-write", "vault_write", { path: "unsafe.md" }),
+    ] });
+    const events = await collect(runAgentLoop({
+      provider,
+      registry: registryWith(
+        invoke,
+        makeReadOnlyTool("vault_read", async () => "read"),
+        makeReadOnlyTool("vault_search", async () => "search"),
+        makeWritingTool("vault_write", async () => { writes += 1; return "written"; }),
+      ),
+      messages: [], allowedToolPolicy: ["vault_read"], maxTurns: 3,
+    }));
+    assert.equal(writes, 0);
+    assert.deepEqual(provider._seen[2].input.tools.map((tool) => tool.name), ["skill_invoke"]);
+    const rejected = events.find((event) => event.type === "tool_finish" && event.toolUseId === "forged-write");
+    assert.equal(rejected.outcome.code, "skill_tool_not_allowed");
+  });
+}
+
+test("resuming an empty Skill policy intersection never restores ordinary tool permissions", async () => {
+  let writes = 0;
+  const invoke = makeReadOnlyTool("skill_invoke", async () => "loaded");
+  invoke.resolveSkillAllowedTools = () => ["vault_search"];
+  const registry = registryWith(
+    invoke,
+    makeReadOnlyTool("vault_read", async () => "read"),
+    makeReadOnlyTool("vault_search", async () => "search"),
+    makeWritingTool("vault_write", async () => { writes += 1; return "written"; }),
+  );
+  const first = mockProvider({ turns: [[
+    ev.messageStart(), ev.toolUseStart(0, "narrow", "skill_invoke"), ev.toolUseJson(0, "{}"),
+    ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+  ]] });
+  const firstEvents = await collect(runAgentLoop({
+    provider: first, registry, messages: [], allowedToolPolicy: ["vault_read"], maxTurns: 1,
+  }));
+  const checkpoint = JSON.parse(JSON.stringify(firstEvents.at(-1).checkpoint));
+  assert.deepEqual(checkpoint.allowedToolPolicy, { version: 1, restricted: true, allowedTools: [] });
+  const resumed = mockProvider({ turns: [[
+    ev.messageStart(), ev.toolUseStart(0, "forged-write", "vault_write"),
+    ev.toolUseJson(0, '{"path":"unsafe.md"}'), ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+  ]] });
+  const events = await collect(runAgentLoop({
+    provider: resumed, registry, messages: checkpoint.messages, resumeState: checkpoint,
+    allowedToolPolicy: ["vault_write"], maxTurns: 1,
+  }));
+  assert.equal(writes, 0);
+  assert.deepEqual(resumed._seen[0].input.tools.map((tool) => tool.name), ["skill_invoke"]);
+  assert.equal(events.find((event) => event.type === "tool_finish").outcome.code, "skill_tool_not_allowed");
+});
+
+test("a non-empty Skill policy survives a JSON checkpoint round trip and keeps resume restricted", async () => {
+  const { validateContinuationCheckpoint } = require("../../../runtime/agent/continuation-checkpoint");
+  let writes = 0;
+  const registry = registryWith(
+    makeReadOnlyTool("vault_read", async () => "read"),
+    makeReadOnlyTool("vault_search", async () => "search"),
+    makeWritingTool("vault_write", async () => { writes += 1; return "written"; }),
+  );
+  const first = mockProvider({ turns: [[
+    ev.messageStart(), ev.toolUseStart(0, "read", "vault_read"), ev.toolUseJson(0, '{"path":"a.md"}'),
+    ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+  ]] });
+  const firstEvents = await collect(runAgentLoop({
+    provider: first, registry, messages: [], allowedToolPolicy: ["vault_read"], maxTurns: 1,
+  }));
+  const checkpoint = JSON.parse(JSON.stringify(firstEvents.at(-1).checkpoint));
+  assert.equal(validateContinuationCheckpoint(checkpoint).ok, true);
+  assert.deepEqual(checkpoint.allowedToolPolicy, { version: 1, restricted: true, allowedTools: ["vault_read"] });
+
+  const resumed = mockProvider({ turns: [[
+    ev.messageStart(), ev.toolUseStart(0, "forged-write", "vault_write"),
+    ev.toolUseJson(0, '{"path":"unsafe.md"}'), ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+  ]] });
+  // A resume request carries no explicit Skill, so the caller default is
+  // unrestricted. The saved checkpoint policy must still win.
+  const events = await collect(runAgentLoop({
+    provider: resumed, registry, messages: checkpoint.messages, resumeState: checkpoint, maxTurns: 1,
+  }));
+  assert.equal(writes, 0);
+  assert.deepEqual(resumed._seen[0].input.tools.map((tool) => tool.name), ["vault_read"]);
+  assert.equal(events.find((event) => event.type === "tool_finish").outcome.code, "skill_tool_not_allowed");
+  assert.equal(Object.hasOwn(require("../../../runtime/agent/skill-tool-policy"), "policyCheckpointValue"), false);
+});
+
+test("an undeclared empty allowed-tools list remains unrestricted", () => {
+  const { normalizeAllowedToolPolicy } = require("../../../runtime/agent/skill-tool-policy");
+  assert.deepEqual(normalizeAllowedToolPolicy([], new ToolRegistry()).policy, {
+    version: 1, restricted: false, allowedTools: [],
+  });
+});
+
+test("runAgentLoop refuses an oversized unique history before provider dispatch", async () => {
   const provider = mockProvider({ turns: [[
     ev.messageStart(), ev.textBlockStart(0), ev.textDelta(0, "done"), ev.blockStop(0), ev.messageDelta("end_turn"), ev.messageStop(),
   ]] });
   provider.spec.models = [{ id: "test", contextWindow: 5_000, maxOutput: 2_000 }];
   provider.countTokens = async (messages) => Math.ceil(JSON.stringify(messages).length / 4);
   const messages = [
-    { role: "user", content: [{ type: "text", text: "old".repeat(12_000) }] },
-    { role: "assistant", content: [{ type: "text", text: "old answer".repeat(4_000) }] },
+    { role: "user", content: [{ type: "text", text: "inspect notes" }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "old-read", name: "vault_read", input: { path: "old.md" } }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "old-read", content: "old".repeat(12_000) }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "recent-read-1", name: "vault_read", input: { path: "recent-1.md" } }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "recent-read-1", content: "short" }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "recent-read-2", name: "vault_read", input: { path: "recent-2.md" } }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "recent-read-2", content: "short" }] },
     { role: "user", content: [{ type: "text", text: "RECENT_CONTEXT" }] },
   ];
 
-  await collect(runAgentLoop({ provider, registry: new ToolRegistry(), messages, maxTokensPerTurn: 2_000 }));
+  const events = await collect(runAgentLoop({ provider, registry: new ToolRegistry(), messages, maxTokensPerTurn: 2_000 }));
+  assert.equal(provider._seen.length, 0);
+  assert.equal(events.at(-1).error.code, "CONTEXT_WINDOW_EXCEEDED");
+  assert.equal(messages[2].content[0].content, "old".repeat(12_000));
+});
 
-  const sent = provider._seen[0].input;
-  assert.match(JSON.stringify(sent.messages), /RECENT_CONTEXT/);
-  assert.ok(JSON.stringify(sent.messages).length < JSON.stringify(messages).length / 3);
-  assert.ok(sent.maxTokens >= 256 && sent.maxTokens <= 2_000);
+test("long workflows preserve unique evidence across a continuation without replaying tools", async () => {
+  const toolTurn = (index) => ([
+    ev.messageStart(), ev.toolUseStart(0, `read-${index}`, "vault_read"),
+    ev.toolUseJson(0, JSON.stringify({ path: `note-${index}.md` })),
+    ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+  ]);
+  const finalTurn = [
+    ev.messageStart(), ev.textBlockStart(0), ev.textDelta(0, "review complete"),
+    ev.blockStop(0), ev.messageDelta("end_turn"), ev.messageStop(),
+  ];
+  const firstProvider = mockProvider({ turns: Array.from({ length: 25 }, (_, index) => toolTurn(index)) });
+  firstProvider.spec.models = [{ id: "test", contextWindow: 1_000_000, maxOutput: 384_000 }];
+  const executed = [];
+  const registry = registryWith(makeReadOnlyTool("vault_read", async ({ path }) => {
+    executed.push(path);
+    return `${path}:` + "evidence ".repeat(1500);
+  }));
+  const instruction = "Review every note and preserve the user's original instruction.";
+  const first = await collect(runAgentLoop({
+    provider: firstProvider, registry,
+    messages: [{ role: "user", content: [{ type: "text", text: instruction }] }],
+    maxTokensPerTurn: 384_000, maxTurns: 25,
+  }));
+  const suspended = first.at(-1);
+  assert.equal(suspended.type, "suspended");
+  assert.equal(suspended.reason, "turn_boundary");
+  assert.equal(first.filter((event) => event.type === "context_usage").length, 25);
+  assert.equal(first.some((event) => event.type === "context_usage" && event.compacted), false);
+  assert.equal(first.some((event) => event.type === "context_usage" && event.overEconomicTarget), true);
+
+  const resumedProvider = mockProvider({ turns: [
+    ...Array.from({ length: 5 }, (_, index) => toolTurn(index + 25)), finalTurn,
+  ] });
+  resumedProvider.spec.models = firstProvider.spec.models;
+  const resumed = await collect(runAgentLoop({
+    provider: resumedProvider, registry,
+    messages: suspended.checkpoint.messages,
+    resumeState: { turns: suspended.checkpoint.turns },
+    maxTokensPerTurn: 384_000,
+  }));
+  assert.equal(resumed.at(-1).type, "done");
+  assert.deepEqual(executed, Array.from({ length: 30 }, (_, index) => `note-${index}.md`));
+  const usage = resumed.filter((event) => event.type === "context_usage");
+  assert.equal(usage.length, 6);
+  assert.ok(usage.every((event) => event.promptTokens < event.contextWindow - event.maxTokens));
+  assert.ok(usage.every((event) => event.contextWindow === 1_000_000 && event.maxTokens === 384_000));
+  assert.ok(usage.every((event) => !Object.hasOwn(event, "messages")));
+  const lastInput = resumedProvider._seen.at(-1).input.messages;
+  assert.equal(lastInput[0].content[0].text, instruction);
+  assert.doesNotMatch(JSON.stringify(lastInput), /FLOWNOTE_CONTEXT_PROJECTION/);
+  for (let index = 0; index < 30; index += 1) {
+    const result = lastInput.flatMap((message) => message.content || []).find((block) => block.tool_use_id === `read-${index}`);
+    assert.equal(result.content, `note-${index}.md:` + "evidence ".repeat(1500));
+  }
+  assert.match(JSON.stringify(lastInput), /note-29\.md/);
+  assert.equal(lastInput.at(-1).content[0].content.includes("evidence"), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -2447,4 +1787,155 @@ test("runAgentLoop throws when messages is not an array", async () => {
     () => runAgentLoop({ provider, registry: new ToolRegistry(), messages: undefined }).next(),
     /messages array required/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// End-of-turn host check and measured receipts
+// ---------------------------------------------------------------------------
+
+function textTurn(text) {
+  return [ev.messageStart(), ev.textBlockStart(0), ev.textDelta(0, text), ev.blockStop(0), ev.messageDelta("end_turn"), ev.messageStop()];
+}
+
+function toolTurn(id, name, input) {
+  return [
+    ev.messageStart(), ev.toolUseStart(0, id, name), ev.toolUseJson(0, JSON.stringify(input)),
+    ev.blockStop(0), ev.messageDelta("tool_use"), ev.messageStop(),
+  ];
+}
+
+test("a rejected stop check returns internal feedback to the model, which then acts", async () => {
+  let writes = 0;
+  const provider = mockProvider({ turns: [
+    textTurn("已写入 x.md。"),
+    toolTurn("w1", "vault_write", { path: "x.md", content: "hello" }),
+    textTurn("已写入 x.md。"),
+  ] });
+  const checks = [];
+  const events = await collect(runAgentLoop({
+    provider,
+    registry: registryWith(makeWritingTool("vault_write", async () => { writes += 1; return "Wrote x.md"; })),
+    messages: [{ role: "user", content: [{ type: "text", text: "写入 x.md" }] }],
+    stopCheck: async (turn) => {
+      checks.push(turn);
+      return checks.length === 1
+        ? { allow: false, feedback: "[FLOWNOTE_HOST_CHECK] no change was measured", issues: [{ type: "unbacked_claims" }] }
+        : { allow: true };
+    },
+  }));
+
+  assert.equal(writes, 1);
+  assert.equal(checks.length, 2);
+  assert.equal(checks[0].provider, provider);
+  assert.equal(checks[0].finalContent[0].text, "已写入 x.md。");
+  const retry = events.find((event) => event.type === "completion_retry");
+  assert.deepEqual(retry.issues, ["unbacked_claims"]);
+  const secondRequest = provider._seen[1].input.messages;
+  assert.equal(secondRequest.at(-2).content[0].text, "已写入 x.md。");
+  assert.match(secondRequest.at(-1).content[0].text, /FLOWNOTE_HOST_CHECK/);
+  assert.equal(events.at(-1).type, "done");
+});
+
+test("stop-check feedback is bounded and never turns an answer into an error", async () => {
+  const provider = mockProvider({ turns: [textTurn("done 1"), textTurn("done 2"), textTurn("done 3"), textTurn("unused")] });
+  let calls = 0;
+  const events = await collect(runAgentLoop({
+    provider,
+    registry: registryWith(),
+    messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+    stopCheck: async () => { calls += 1; return { allow: false, feedback: "fix it" }; },
+  }));
+  assert.equal(calls, 2);
+  assert.equal(provider._calls(), 3);
+  assert.equal(events.filter((event) => event.type === "completion_retry").length, 2);
+  assert.equal(events.at(-1).type, "done");
+  assert.equal(events.some((event) => event.type === "error"), false);
+});
+
+test("a failing stop check lets a finished answer stand", async () => {
+  const provider = mockProvider({ turns: [textTurn("answer")] });
+  const events = await collect(runAgentLoop({
+    provider,
+    registry: registryWith(),
+    messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+    stopCheck: async () => { throw new Error("audit offline"); },
+  }));
+  assert.equal(events.at(-1).type, "done");
+});
+
+function recordingVaultApp(initial) {
+  const files = new Map(Object.entries(initial));
+  return {
+    files,
+    app: {
+      vault: {
+        getAbstractFileByPath: (path) => (files.has(path) ? { path } : null),
+        getFileByPath: (path) => (files.has(path) ? { path } : null),
+        read: async (file) => files.get(file.path),
+        modify: async (file, content) => { files.set(file.path, content); },
+        create: async (path, content) => { files.set(path, content); return { path }; },
+      },
+    },
+  };
+}
+
+test("a successful mutation receipt names the measured path; a no-op success is not verified", async () => {
+  const { app, files } = recordingVaultApp({ "Meta/.ai-memory/STATUS.md": "old" });
+  const recorder = createVaultChangeRecorder({ vault: app.vault });
+  const tools = recorder.instrumentApp(app);
+  const verifiedTool = (name, run) => buildTool({
+    name,
+    description: name,
+    inputSchema: { type: "object" },
+    capabilities: () => ({ effect: "vault_mutation", risk: "medium", concurrency: "serial", presentation: "edit", targets: ["Meta/ai-memory/STATUS.md"] }),
+    isReadOnly: () => false,
+    checkPermissions: async () => ({ behavior: "allow" }),
+    verifyEffect: async () => ({ verified: true, outcome: "verified" }),
+    async *execute() {
+      await run();
+      yield { type: "result", content: "ok", effects: [{ kind: "vault_mutation", targets: ["Meta/ai-memory/STATUS.md"] }] };
+    },
+  });
+  const registry = registryWith(
+    verifiedTool("real_edit", () => tools.vault.modify({ path: "Meta/.ai-memory/STATUS.md" }, "new")),
+    verifiedTool("noop_edit", async () => {}),
+  );
+  const provider = mockProvider({ turns: [
+    toolTurn("e1", "real_edit", {}),
+    toolTurn("e2", "noop_edit", {}),
+    textTurn("done"),
+  ] });
+  const events = await collect(runAgentLoop({
+    provider, registry, messages: [], ctx: { changeRecorder: recorder },
+  }));
+  const receipts = events.filter((event) => event.type === "effect_receipt").map((event) => event.receipt);
+  assert.equal(files.get("Meta/.ai-memory/STATUS.md"), "new");
+  assert.equal(receipts[0].verified, true);
+  assert.deepEqual(receipts[0].paths, ["Meta/.ai-memory/STATUS.md"]);
+  assert.equal(receipts[1].verified, false);
+  assert.equal(receipts[1].outcome, "no_observed_change");
+});
+
+test("a mutation tool that declares parallel concurrency is still measured serially", async () => {
+  const { app } = recordingVaultApp({});
+  app.vault.getFolderByPath = () => null;
+  const recorder = createVaultChangeRecorder({ vault: app.vault });
+  const parallelMkdir = buildTool({
+    name: "mkdir_existing",
+    description: "mkdir",
+    inputSchema: { type: "object" },
+    capabilities: () => ({ effect: "vault_mutation", risk: "low", concurrency: "parallel", presentation: "edit", targets: ["Existing"] }),
+    isReadOnly: () => false,
+    isConcurrencySafe: () => true,
+    checkPermissions: async () => ({ behavior: "allow" }),
+    verifyEffect: async () => ({ verified: true, outcome: "verified" }),
+    async *execute() { yield { type: "result", content: "already exists" }; },
+  });
+  const provider = mockProvider({ turns: [toolTurn("m1", "mkdir_existing", {}), textTurn("done")] });
+  const events = await collect(runAgentLoop({
+    provider, registry: registryWith(parallelMkdir), messages: [], ctx: { changeRecorder: recorder },
+  }));
+  const receipt = events.find((event) => event.type === "effect_receipt").receipt;
+  assert.equal(receipt.verified, false);
+  assert.equal(receipt.outcome, "no_observed_change");
 });

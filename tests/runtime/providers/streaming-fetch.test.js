@@ -49,6 +49,99 @@ function nodeReadableFromReads(reads, hooks = {}) {
   };
 }
 
+test("Node stream decodes Chinese and emoji across Buffer and Uint8Array byte boundaries", async () => {
+  const expected = "中文😀结束";
+  const bytes = Buffer.from(expected, "utf8");
+  const cuts = [1, 2, 4, 6, 7, 9, 10, 12, bytes.length];
+  let start = 0;
+  const parts = cuts.map((end, index) => {
+    const bytesPart = bytes.subarray(start, end);
+    start = end;
+    return index % 2 === 0 ? Buffer.from(bytesPart) : new Uint8Array(bytesPart);
+  });
+  const readable = nodeReadableFromReads([
+    ...parts.map((value) => Promise.resolve({ done: false, value })),
+    Promise.resolve({ done: true }),
+  ]);
+
+  const chunks = [];
+  for await (const chunk of makeNodeStreamIterable(readable)) chunks.push(chunk);
+  assert.equal(chunks.join(""), expected);
+  assert.equal(chunks.some((chunk) => chunk.includes("\uFFFD")), false);
+  assert.equal(chunks.includes(""), false);
+});
+
+test("Node stream flushes a trailing incomplete UTF-8 sequence only at EOF", async () => {
+  const readable = nodeReadableFromReads([
+    Promise.resolve({ done: false, value: Buffer.from([0x41, 0xe4, 0xbd]) }),
+    Promise.resolve({ done: true }),
+  ]);
+  const iterator = makeNodeStreamIterable(readable);
+
+  assert.deepEqual(await iterator.next(), { done: false, value: "A" });
+  assert.deepEqual(await iterator.next(), { done: false, value: "\uFFFD" });
+  assert.deepEqual(await iterator.next(), { done: true, value: undefined });
+});
+
+test("Node stream keeps UTF-8 state when the global TextDecoder is unavailable", async () => {
+  const originalDecoder = globalThis.TextDecoder;
+  globalThis.TextDecoder = undefined;
+  try {
+    const bytes = Buffer.from("中文😀", "utf8");
+    const readable = nodeReadableFromReads([
+      Promise.resolve({ done: false, value: Buffer.from(bytes.subarray(0, 1)) }),
+      Promise.resolve({ done: false, value: new Uint8Array(bytes.subarray(1, 5)) }),
+      Promise.resolve({ done: false, value: Buffer.from(bytes.subarray(5)) }),
+      Promise.resolve({ done: true }),
+    ]);
+    let result = "";
+    for await (const chunk of makeNodeStreamIterable(readable)) result += chunk;
+    assert.equal(result, "中文😀");
+  } finally {
+    globalThis.TextDecoder = originalDecoder;
+  }
+});
+
+test("Node stream preserves body failure metadata after a split UTF-8 chunk", async () => {
+  const rawError = new Error("connection reset");
+  const readable = nodeReadableFromReads([
+    Promise.resolve({ done: false, value: Buffer.from([0xe4]) }),
+    () => Promise.reject(rawError),
+  ]);
+  const iterator = makeNodeStreamIterable(readable, null, { idleTimeoutMs: 100 });
+
+  await assert.rejects(iterator.next(), (error) => {
+    assert.ok(error instanceof ProviderStreamError);
+    assert.equal(error.code, "PROVIDER_STREAM_READ_FAILED");
+    assert.equal(error.transport, "node");
+    assert.equal(error.receivedChunks, 1);
+    assert.equal(error.cause, rawError);
+    return true;
+  });
+});
+
+test("Node stream cancellation still destroys the readable and raises AbortError", async () => {
+  const controller = new AbortController();
+  let destroyReason = null;
+  const readable = nodeReadableFromReads([pendingForever()], {
+    onDestroy(reason) { destroyReason = reason; },
+  });
+  const iterator = makeNodeStreamIterable(readable, null, {
+    idleTimeoutMs: 100,
+    signal: controller.signal,
+  });
+
+  const pending = iterator.next();
+  controller.abort();
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.name, "AbortError");
+    assert.equal(error.code, "ABORT_ERR");
+    assert.equal(error instanceof ProviderStreamError, false);
+    return true;
+  });
+  assert.equal(destroyReason && destroyReason.name, "AbortError");
+});
+
 test("browser stream wraps a mid-body reader failure with provider metadata", async () => {
   const rawError = new TypeError("Load failed");
   const stream = browserStreamFromReads([

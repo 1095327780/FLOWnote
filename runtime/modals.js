@@ -163,12 +163,14 @@ class PermissionRequestModal extends Modal {
       cls: "mod-cta",
       text: tr(this.t, "modals.permission.once", "本次允许"),
     });
+    rejectBtn.addEventListener("click", () => this.resolveAndClose("reject"));
+    onceBtn.addEventListener("click", () => this.resolveAndClose("once"));
+    // A possible repeat of an unconfirmed external change is confirmed one
+    // request at a time; it never offers a session-wide grant.
+    if (this.permission.requiresExplicitConfirmation === true) return;
     const alwaysBtn = actions.createEl("button", {
       text: tr(this.t, "modals.permission.always", "本次会话内一直允许"),
     });
-
-    rejectBtn.addEventListener("click", () => this.resolveAndClose("reject"));
-    onceBtn.addEventListener("click", () => this.resolveAndClose("once"));
     alwaysBtn.addEventListener("click", () => this.resolveAndClose("always"));
   }
 

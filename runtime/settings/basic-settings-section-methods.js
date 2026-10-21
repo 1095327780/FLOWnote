@@ -21,6 +21,7 @@ const {
   summarizeNotePathMigrationResult,
 } = require("../note-path-locale-migration");
 const { buildShortcutUrls } = require("../mobile/shortcut-url-utils");
+const { getEffectiveAgentMode } = require("../agent/agent-mode");
 
 const FLOWNOTE_QUICK_CAPTURE_SHORTCUT_URL = "https://www.icloud.com/shortcuts/12b0291f16ff46cfa0280e18b0859118";
 
@@ -125,7 +126,7 @@ class BasicSettingsSectionMethods {
 
     // Detect current mode so we can show only the relevant config.
     const agent = (this.plugin.settings && this.plugin.settings.agentProvider) || {};
-    const mode = agent.mode === "opencode-legacy" ? "opencode-legacy" : "direct";
+    const mode = getEffectiveAgentMode(agent);
 
     // ===== CORE GROUPS (always visible) =====
 

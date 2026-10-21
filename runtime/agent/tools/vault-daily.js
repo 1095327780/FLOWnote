@@ -10,6 +10,7 @@
 
 const { buildTool } = require("../tool-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { pageReadOutput } = require("./read-output-budget");
 const { verifyTextEffect, verifyPathExists, throwIfToolAborted } = require("../vault-effect-verifiers");
 
 const DESCRIPTION =
@@ -18,6 +19,8 @@ const DESCRIPTION =
   "`append` (adds text to the end, creating the note if missing), " +
   "`create` (creates the note from the configured template; fails if it already exists). " +
   "Pass `date` (YYYY-MM-DD) to target a different day; defaults to today. " +
+  "In read mode, the default returns as much content as available context allows; " +
+  "pass byte `offset` to continue a long note or `limit` to request fewer bytes. " +
   "Uses the daily-notes plugin's folder + filename format if it's enabled, " +
   "otherwise falls back to YYYY-MM-DD.md at the vault root. " +
   "Prefer this over vault_read/vault_write when the user means \"today's note\".";
@@ -40,6 +43,8 @@ const INPUT_SCHEMA = {
       type: "string",
       description: "Text to append (mode=append) or initial body (mode=create, overrides template).",
     },
+    offset: { type: "integer", minimum: 0, description: "Read mode: UTF-8 byte offset; use the next offset returned on truncation." },
+    limit: { type: "integer", minimum: 4, description: "Read mode: optional maximum content bytes, up to 65536." },
   },
   required: [],
 };
@@ -200,6 +205,15 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
       if (input && input.content !== undefined && typeof input.content !== "string") {
         return { ok: false, error: "content must be a string." };
       }
+      if (input && input.offset !== undefined && (!Number.isInteger(input.offset) || input.offset < 0)) {
+        return { ok: false, error: "offset must be a non-negative integer." };
+      }
+      if (input && input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 4 || input.limit > 65536)) {
+        return { ok: false, error: "limit must be an integer from 4 to 65536." };
+      }
+      if (input && (input.offset !== undefined || input.limit !== undefined) && input.mode && input.mode !== "read") {
+        return { ok: false, error: "offset and limit are only supported in read mode." };
+      }
       return { ok: true };
     },
 
@@ -256,7 +270,23 @@ function createVaultDailyTool({ app, normalizePath, now } = {}) {
           return;
         }
         const raw = await vault.cachedRead(existing);
-        yield { type: "result", content: typeof raw === "string" ? raw : String(raw || "") };
+        const fullText = typeof raw === "string" ? raw : String(raw || "");
+        let page;
+        try {
+          page = pageReadOutput(fullText, {
+            ctx,
+            byteOffset: (input && input.offset) || 0,
+            maxBytes: input && input.limit !== undefined ? input.limit : undefined,
+          });
+        } catch (error) {
+          yield { type: "result", content: `vault_daily: ${error.message}`, isError: true };
+          return;
+        }
+        const { text: pageText, ...pageMeta } = page;
+        const notice = page.truncated
+          ? `\n\n[vault_daily: content truncated; next byte offset ${page.nextOffset} of ${page.totalBytes}. Call vault_daily with mode=read, date=${formatDate(d, "YYYY-MM-DD")}, offset=${page.nextOffset}.]`
+          : "";
+        yield { type: "result", content: pageText + notice, data: { page: pageMeta } };
         return;
       }
 

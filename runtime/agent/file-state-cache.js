@@ -24,6 +24,7 @@
  * @property {string} content     full file content at the time we last touched it
  * @property {number} readAt      timestamp of the read/write that produced this entry (ms)
  * @property {boolean} writtenInTurn  true if the most recent update was a write (not a read)
+ * @property {Array<[number, number]>} visibleRanges UTF-16 ranges actually shown to the model
  */
 
 class FileStateCache {
@@ -37,29 +38,39 @@ class FileStateCache {
    * @param {string} path
    * @param {string} content
    */
-  recordRead(path, content) {
+  recordRead(path, content, { visibleRanges = [[0, content && content.length]] } = {}) {
     if (!path || typeof content !== "string") return;
+    const previous = this._map.get(path);
+    const ranges = normalizeVisibleRanges(visibleRanges, content.length);
     this._map.set(path, {
       content,
       readAt: Date.now(),
       writtenInTurn: false,
+      visibleRanges: previous && previous.content === content
+        ? normalizeVisibleRanges([...(previous.visibleRanges || []), ...ranges], content.length)
+        : ranges,
     });
   }
 
   /**
    * Record that the agent has written this file with the given content.
-   * Crucially, this satisfies read-before-edit too — after writing a
-   * file the agent has, by definition, seen its latest contents.
+   * With no visibility override, the model supplied the whole new content
+   * (vault_write create/overwrite). Host-derived edits must supply ranges.
    * @param {string} path
    * @param {string} content
    */
-  recordWrite(path, content) {
+  recordWrite(path, content, { visibleRanges = [[0, content && content.length]] } = {}) {
     if (!path || typeof content !== "string") return;
     this._map.set(path, {
       content,
       readAt: Date.now(),
       writtenInTurn: true,
+      visibleRanges: normalizeVisibleRanges(visibleRanges, content.length),
     });
+  }
+
+  recordHostWrite(path, content) {
+    this.recordWrite(path, content, { visibleRanges: [] });
   }
 
   /**
@@ -78,6 +89,27 @@ class FileStateCache {
    */
   has(path) {
     return this._map.has(String(path || ""));
+  }
+
+  matchesContent(path, content) {
+    const entry = this.get(path);
+    return !!entry && typeof content === "string" && entry.content === content;
+  }
+
+  isTextVisible(path, oldString, { allOccurrences = false } = {}) {
+    const entry = this.get(path);
+    if (!entry || typeof oldString !== "string" || !oldString) return false;
+    let found = false;
+    let index = 0;
+    while ((index = entry.content.indexOf(oldString, index)) !== -1) {
+      const visible = (entry.visibleRanges || []).some(([start, end]) => (
+        start <= index && index + oldString.length <= end
+      ));
+      if (allOccurrences && !visible) return false;
+      if (visible) found = true;
+      index += oldString.length;
+    }
+    return found;
   }
 
   /**
@@ -102,11 +134,12 @@ class FileStateCache {
    */
   snapshot() {
     return {
-      version: 1,
+      version: 2,
       entries: Array.from(this._map.entries()).map(([path, entry]) => ({
         path,
         fingerprint: contentFingerprint(entry.content),
         writtenInTurn: entry.writtenInTurn === true,
+        visibleRanges: entry.visibleRanges || [],
       })),
     };
   }
@@ -120,7 +153,7 @@ class FileStateCache {
   async restoreSnapshot(snapshot, readCurrent) {
     const restoredPaths = [];
     const driftedPaths = [];
-    const entries = snapshot && snapshot.version === 1 && Array.isArray(snapshot.entries)
+    const entries = snapshot && [1, 2].includes(snapshot.version) && Array.isArray(snapshot.entries)
       ? snapshot.entries
       : [];
     if (typeof readCurrent !== "function") return { restoredPaths, driftedPaths };
@@ -133,8 +166,12 @@ class FileStateCache {
           driftedPaths.push(path);
           continue;
         }
-        if (entry.writtenInTurn === true) this.recordWrite(path, content);
-        else this.recordRead(path, content);
+        if (entry.writtenInTurn === true) this.recordWrite(path, content, {
+          visibleRanges: snapshot.version === 2 && Array.isArray(entry.visibleRanges) ? entry.visibleRanges : [],
+        });
+        else this.recordRead(path, content, {
+          visibleRanges: snapshot.version === 2 && Array.isArray(entry.visibleRanges) ? entry.visibleRanges : [],
+        });
         restoredPaths.push(path);
       } catch (_error) {
         driftedPaths.push(path);
@@ -146,6 +183,22 @@ class FileStateCache {
   size() {
     return this._map.size;
   }
+}
+
+function normalizeVisibleRanges(ranges, length) {
+  if (!Array.isArray(ranges)) return [];
+  const sorted = ranges.filter((range) => Array.isArray(range) && range.length === 2
+    && Number.isInteger(range[0]) && Number.isInteger(range[1])
+    && range[0] >= 0 && range[1] <= length && range[0] < range[1])
+    .map((range) => [range[0], range[1]])
+    .sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push(range);
+  }
+  return merged;
 }
 
 function contentFingerprint(content) {

@@ -12,6 +12,8 @@
 //   - { type: 'tool_start',    tool, toolUseId, input } before execute
 //   - { type: 'tool_finish',   tool, toolUseId, isError, content }
 //   - { type: 'turn_complete', turnIndex, stopReason }
+//   - { type: 'context_usage', turnIndex, promptTokens, contextWindow,
+//       maxTokens, compacted, economicTargetTokens, overEconomicTarget }
 //   - { type: 'done',          turns }
 //   - { type: 'error',         error }
 //
@@ -23,14 +25,15 @@
 // boundary; reaching it produces a resumable suspension checkpoint.
 const DEFAULT_MAX_TURNS = null;
 const DEFAULT_MAX_REPEATED_TURNS = 4;
-const DEFAULT_MAX_COMPLETION_RETRIES = 1;
+const DEFAULT_MAX_COMPLETION_RETRIES = 2;
 const { resolveToolCapabilities } = require("./tool-registry");
+const { cardToolSurface, updateCardToolSurface } = require("./card-tool-surface");
 const {
   normalizeToolPermissionMode,
   resolvePermissionDecision,
 } = require("./permission-policy");
 const { createContinuationCheckpoint } = require("./continuation-checkpoint");
-const { prepareContextWindow } = require("./context-budget-manager");
+const { prepareContextWindow, allocateToolResultBudgets } = require("./context-budget-manager");
 const { normalizeEffectAttempts } = require("./effect-attempt-ledger");
 const { consumeStream, consumeStreamGenerator } = require("./provider-stream-consumer");
 const {
@@ -39,6 +42,7 @@ const {
   toolIsAllowed,
   visibleToolSpecs,
 } = require("./skill-tool-policy");
+const { describeChanges } = require("./vault-change-recorder");
 // 16384 fits comfortably within every supported provider's per-response
 // output cap (DeepSeek V4: 384K, Claude: 64K, GLM/Kimi/MiniMax all 8K+),
 // while being roomy enough for vault_write turns that have to emit the
@@ -83,6 +87,10 @@ function assistantContentHasText(content) {
  * @param {number|null}                               [args.maxRepeatedTurns]
  * @param {{effectReceipts?:Array,interactionReceipts?:Array,completionRetries?:number,turns?:number}} [args.resumeState]
  * @param {string[]|{allowedTools:string[]}} [args.allowedToolPolicy]
+ * @param {(turn: {finalContent: Array, conversation: Array, effectReceipts: Array, interactionReceipts: Array, attempt: number}) => Promise<{allow: boolean, feedback?: string, issues?: Array}>} [args.stopCheck]
+ *   Called when the model ends a turn without tool calls. A rejection is fed
+ *   back to the model as internal host feedback (bounded by
+ *   maxCompletionRetries); the user only sees the continued work.
  * @param {AbortSignal}                               [args.signal]
  * @param {Object}                                    [args.ctx]
  *   Threaded into every tool's validate / checkPermissions / execute.
@@ -105,6 +113,7 @@ async function* runAgentLoop(args) {
     maxRepeatedTurns = DEFAULT_MAX_REPEATED_TURNS,
     resumeState,
     allowedToolPolicy,
+    stopCheck,
     signal,
     ctx = {},
     onPermissionAsk,
@@ -138,8 +147,6 @@ async function* runAgentLoop(args) {
 
   const conversation = cloneJson(messages);
   const model = (provider.userConfig && provider.userConfig.model) || (provider.spec && provider.spec.defaultModel);
-  const workflowMode = !!(executionContract && executionContract.mode === "workflow");
-  const workflowProtocol = workflowMode ? require("./execution-contract") : null;
   const askFn = typeof onPermissionAsk === "function" ? onPermissionAsk : null;
   const resumed = resumeState && typeof resumeState === "object" ? resumeState : {};
   // A continuation is an exact saved execution state. Its policy always wins
@@ -173,7 +180,15 @@ async function* runAgentLoop(args) {
   let repeatedTurnCount = 0;
   const toolCtx = {
     ...ctx,
+    grants: (ctx && ctx.grants) || {},
     effectAttempts,
+    // External mutations of unknown outcome from earlier runs; a tool adds
+    // and removes entries as this run sends and confirms requests.
+    unresolvedEffectAttempts: Array.isArray(ctx && ctx.unresolvedEffectAttempts)
+      ? ctx.unresolvedEffectAttempts.map((attempt) => ({ ...attempt }))
+      : [],
+    cardWorkflow: !!(ctx.cardWorkflow || (resumed.cardToolSurface && resumed.cardToolSurface.active)),
+    expandedCardTools: !!(ctx.expandedCardTools || (resumed.cardToolSurface && resumed.cardToolSurface.expanded)),
     signal: signal || (ctx && ctx.signal),
     toolPermissionMode: ctx && ctx.toolPermissionMode
       ? normalizeToolPermissionMode(ctx.toolPermissionMode)
@@ -187,9 +202,18 @@ async function* runAgentLoop(args) {
       yield { type: "cancelled", stage: "before_model", turns: turnIndex };
       return;
     }
-    const toolSpecs = registry.toApiSpecs(visibleToolSpecs(registry, activeToolPolicy));
-    if (workflowMode) toolSpecs.push(workflowProtocol.WORKFLOW_FINISH_TOOL_SPEC);
+    const toolSpecs = registry.toApiSpecs(cardToolSurface(visibleToolSpecs(registry, activeToolPolicy), toolCtx));
     const budget = await prepareContextWindow({ provider, model, system, tools: toolSpecs, conversation, requestedMaxTokens: maxTokensPerTurn });
+    yield {
+      type: "context_usage",
+      turnIndex,
+      promptTokens: budget.promptTokens,
+      contextWindow: budget.contextWindow,
+      maxTokens: budget.maxTokens,
+      compacted: budget.compacted,
+      economicTargetTokens: budget.economicTargetTokens,
+      overEconomicTarget: budget.overEconomicTarget,
+    };
     if (!budget.ok) { yield { type: "error", error: budget.error }; return; }
     if (budget.compacted) conversation.splice(0, conversation.length, ...budget.messages);
     const input = { model, messages: conversation.slice(), maxTokens: budget.maxTokens };
@@ -240,6 +264,7 @@ async function* runAgentLoop(args) {
             turns: turnIndex,
             fileState: snapshotFileState(toolCtx.fileStateCache),
             allowedToolPolicy: activeToolPolicy,
+            cardToolSurface: toolCtx.cardWorkflow ? { active: true, expanded: toolCtx.expandedCardTools } : undefined,
             effectAttempts,
           }),
         };
@@ -269,6 +294,7 @@ async function* runAgentLoop(args) {
           turns: turnIndex,
           fileState: snapshotFileState(toolCtx.fileStateCache),
           allowedToolPolicy: activeToolPolicy,
+            cardToolSurface: toolCtx.cardWorkflow ? { active: true, expanded: toolCtx.expandedCardTools } : undefined,
           effectAttempts,
         }),
       };
@@ -282,76 +308,6 @@ async function* runAgentLoop(args) {
     conversation.push({ role: "assistant", content: streamResult.assistantContent });
 
     if (streamResult.toolUses.length === 0) {
-      if (workflowMode) {
-        if (completionRetries < maxCompletionRetries) {
-          completionRetries += 1;
-          conversation.push({
-            role: "user",
-            content: [{
-              type: "text",
-              text:
-                `[FLOWNOTE_RUNTIME_CONTRACT] The explicit skill workflow has not finished. Call ` +
-                `${workflowProtocol.WORKFLOW_FINISH_TOOL_NAME} exactly once with status completed or cancelled. ` +
-                "If the workflow needs user input, call ask_user instead of ending the workflow. If status is " +
-                "completed, declare mode answer, inspect, or effect; inspect/effect must be backed by verified " +
-                "tool receipts.",
-            }],
-          });
-          yield {
-            type: "completion_retry",
-            contractId: executionContract && executionContract.id,
-            attempt: completionRetries,
-            provisionalContent: streamResult.assistantContent,
-          };
-          yield { type: "turn_complete", turnIndex, stopReason: streamResult.stopReason };
-          turn += 1;
-          continue;
-        }
-        yield {
-          type: "error",
-          error: {
-            type: "completion_contract_failed",
-            message: `The skill workflow ended without a valid ${workflowProtocol.WORKFLOW_FINISH_TOOL_NAME} declaration.`,
-            contractId: executionContract && executionContract.id,
-            receipts: effectReceipts.slice(),
-          },
-        };
-        return;
-      }
-      if (requiresVerifiedEffects(executionContract) && !contractIsSatisfied(executionContract, effectReceipts)) {
-        if (completionRetries < maxCompletionRetries) {
-          completionRetries += 1;
-          conversation.push({
-            role: "user",
-            content: [{
-              type: "text",
-              text:
-                "[FLOWNOTE_RUNTIME_CONTRACT] This task requires a verified external action, but no matching " +
-                "execution receipt exists. Do not claim completion. Issue the required tool call now; if it cannot " +
-                "be performed, explain the blocker without saying it was completed.",
-            }],
-          });
-          yield {
-            type: "completion_retry",
-            contractId: executionContract && executionContract.id,
-            attempt: completionRetries,
-            provisionalContent: streamResult.assistantContent,
-          };
-          yield { type: "turn_complete", turnIndex, stopReason: streamResult.stopReason };
-          turn += 1;
-          continue;
-        }
-        yield {
-          type: "error",
-          error: {
-            type: "completion_contract_failed",
-            message: "The model ended without producing the verified action required by this task.",
-            contractId: executionContract && executionContract.id,
-            receipts: effectReceipts.slice(),
-          },
-        };
-        return;
-      }
       if (!assistantContentHasText(streamResult.assistantContent)) {
         // A structurally complete but empty assistant message is not a user
         // answer. Remove that empty turn and preserve the prior safe boundary
@@ -372,22 +328,50 @@ async function* runAgentLoop(args) {
             turns: turnIndex,
             fileState: snapshotFileState(toolCtx.fileStateCache),
             allowedToolPolicy: activeToolPolicy,
+            cardToolSurface: toolCtx.cardWorkflow ? { active: true, expanded: toolCtx.expandedCardTools } : undefined,
             effectAttempts,
           }),
         };
         return;
+      }
+      if (typeof stopCheck === "function" && completionRetries < maxCompletionRetries
+        && !(toolCtx.signal && toolCtx.signal.aborted)) {
+        let verdict = null;
+        try {
+          verdict = await stopCheck({
+            provider,
+            finalContent: cloneJson(streamResult.assistantContent),
+            conversation: cloneJson(conversation),
+            effectReceipts: effectReceipts.slice(),
+            interactionReceipts: interactionReceipts.slice(),
+            attempt: completionRetries,
+          });
+        } catch (_error) {
+          // The audit is advisory to the model; a failing audit never turns a
+          // finished answer into an error.
+          verdict = null;
+        }
+        if (verdict && verdict.allow === false && typeof verdict.feedback === "string" && verdict.feedback) {
+          completionRetries += 1;
+          conversation.push({ role: "user", content: [{ type: "text", text: verdict.feedback }] });
+          yield {
+            type: "completion_retry",
+            contractId: executionContract && executionContract.id,
+            attempt: completionRetries,
+            provisionalContent: streamResult.assistantContent,
+            issues: Array.isArray(verdict.issues) ? verdict.issues.map((issue) => issue && issue.type).filter(Boolean) : [],
+          };
+          yield { type: "turn_complete", turnIndex, stopReason: streamResult.stopReason };
+          turn += 1;
+          continue;
+        }
       }
       yield { type: "turn_complete", turnIndex, stopReason: streamResult.stopReason };
       yield { type: "done", turns: turnIndex + 1, contract: executionContract || null, receipts: effectReceipts.slice() };
       return;
     }
 
-    const workflowFinishUses = workflowMode
-      ? streamResult.toolUses.filter((toolUse) => toolUse.name === workflowProtocol.WORKFLOW_FINISH_TOOL_NAME)
-      : [];
-    const executableToolUses = workflowMode
-      ? streamResult.toolUses.filter((toolUse) => toolUse.name !== workflowProtocol.WORKFLOW_FINISH_TOOL_NAME)
-      : streamResult.toolUses;
+    const executableToolUses = streamResult.toolUses;
 
     // Interactive tools are a host-level turn barrier. A model may emit
     // `vault_write` and `ask_user` in the same assistant message; executing
@@ -406,8 +390,24 @@ async function* runAgentLoop(args) {
           .map((toolUse) => deferredToolResult(toolUse, "interaction_barrier"))
       : [];
     let suspensionRequest = null;
+    const measuredChanges = new Map();
 
     for (const batch of partitionToolUses(dispatchedToolUses, registry)) {
+      // Budget the result batch against the whole request, including the
+      // assistant's tool calls and results already produced this turn.
+      const pendingUses = dispatchedToolUses.filter((call) => !allResults.some((result) => result.id === call.id));
+      const resultBudgets = await allocateToolResultBudgets({
+        provider, model, system, tools: toolSpecs, conversation,
+        requestedMaxTokens: maxTokensPerTurn, toolUses: pendingUses, completedResults: allResults,
+      });
+      const contextFor = (call) => ({
+        ...toolCtx,
+        toolResultBudgetTokens: resultBudgets[call.id] || 0,
+        // Persist an external attempt under this call before it is sent.
+        recordEffectAttempt: typeof toolCtx.onEffectAttempt === "function"
+          ? (attempt) => toolCtx.onEffectAttempt({ toolUseId: call.id, attempt })
+          : undefined,
+      });
       for (const tu of batch.items) {
         const tool = registry.get(tu.name);
         let capabilities = null;
@@ -416,12 +416,21 @@ async function* runAgentLoop(args) {
       }
       if (batch.isConcurrencySafe) {
         const settled = await Promise.all(batch.items.map((tu) => runToolUse(
-          tu, registry, toolCtx, askFn, activeToolPolicy,
+          tu, registry, contextFor(tu), askFn, activeToolPolicy,
         )));
         for (const r of settled) allResults.push(r);
       } else {
+        // Serial tools may mutate. Measure each one's vault effect at the
+        // write boundary so receipts reflect what actually changed.
+        const recorder = toolCtx.changeRecorder;
         for (const tu of batch.items) {
-          const r = await runToolUse(tu, registry, toolCtx, askFn, activeToolPolicy);
+          if (recorder) recorder.beginTool(tu.id);
+          let r;
+          try {
+            r = await runToolUse(tu, registry, contextFor(tu), askFn, activeToolPolicy);
+          } finally {
+            if (recorder) measuredChanges.set(tu.id, await recorder.endTool(tu.id));
+          }
           allResults.push(r);
         }
       }
@@ -439,7 +448,7 @@ async function* runAgentLoop(args) {
           outcome: r.outcome,
           capabilities: r.capabilities,
         };
-        const receipt = await createEffectReceipt(tu, r, toolCtx);
+        const receipt = await createEffectReceipt(tu, r, toolCtx, measuredChanges.get(tu.id));
         if (receipt) {
           effectReceipts.push(receipt);
           yield { type: "effect_receipt", receipt };
@@ -469,6 +478,7 @@ async function* runAgentLoop(args) {
       }
     }
 
+    updateCardToolSurface(toolCtx, executableToolUses, allResults);
     if (suspensionRequest) {
       for (const toolUse of executableToolUses) {
         if (!allResults.some((result) => result.id === toolUse.id)) {
@@ -509,77 +519,10 @@ async function* runAgentLoop(args) {
           turns,
           fileState: snapshotFileState(toolCtx.fileStateCache),
           allowedToolPolicy: activeToolPolicy,
+            cardToolSurface: toolCtx.cardWorkflow ? { active: true, expanded: toolCtx.expandedCardTools } : undefined,
           effectAttempts,
         }),
       };
-      return;
-    }
-
-    const finishToolResultBlocks = [];
-    let acceptedFinish = null;
-    if (hasInteractionBarrier && workflowFinishUses.length > 0) {
-      for (const finishUse of workflowFinishUses) {
-        finishToolResultBlocks.push({
-          type: "tool_result",
-          tool_use_id: finishUse.id,
-          content: `Not executed because ${workflowProtocol.WORKFLOW_FINISH_TOOL_NAME} cannot finish in the same turn as a user question.`,
-          is_error: true,
-        });
-      }
-    } else if (workflowFinishUses.length === 1) {
-      const finishUse = workflowFinishUses[0];
-      const declaration = workflowProtocol.normalizeWorkflowFinishDeclaration(finishUse.input);
-      const validation = workflowProtocol.validateWorkflowFinish(
-        declaration,
-        effectReceipts,
-        executionContract,
-        interactionReceipts,
-      );
-      if (validation.ok) {
-        acceptedFinish = { declaration, validation };
-      } else {
-        finishToolResultBlocks.push({
-          type: "tool_result",
-          tool_use_id: finishUse.id,
-          content: validation.error,
-          is_error: true,
-        });
-      }
-    } else if (workflowFinishUses.length > 1) {
-      for (const finishUse of workflowFinishUses) {
-        finishToolResultBlocks.push({
-          type: "tool_result",
-          tool_use_id: finishUse.id,
-          content: `Call ${workflowProtocol.WORKFLOW_FINISH_TOOL_NAME} exactly once.`,
-          is_error: true,
-        });
-      }
-    }
-
-    if (acceptedFinish) {
-      const { declaration, validation } = acceptedFinish;
-      const disposition = declaration.status;
-      const verified = validation.verified !== false;
-      const finishEvent = {
-        type: "workflow_finish",
-        disposition,
-        declaration,
-        verified,
-      };
-      if (validation.verification) finishEvent.verification = validation.verification;
-      yield finishEvent;
-      yield { type: "turn_complete", turnIndex, stopReason: streamResult.stopReason };
-      const doneEvent = {
-        type: "done",
-        turns: turnIndex + 1,
-        contract: executionContract,
-        receipts: effectReceipts.slice(),
-        interactions: interactionReceipts.slice(),
-        disposition,
-        verified,
-      };
-      if (validation.verification) doneEvent.verification = validation.verification;
-      yield doneEvent;
       return;
     }
 
@@ -613,7 +556,6 @@ async function* runAgentLoop(args) {
         is_error: r.isError,
       };
     });
-    toolResultBlocks.push(...finishToolResultBlocks);
     conversation.push({ role: "user", content: toolResultBlocks });
 
     const progressSignature = createTurnProgressSignature(executableToolUses, allResults);
@@ -640,6 +582,7 @@ async function* runAgentLoop(args) {
           turns,
           fileState: snapshotFileState(toolCtx.fileStateCache),
           allowedToolPolicy: activeToolPolicy,
+            cardToolSurface: toolCtx.cardWorkflow ? { active: true, expanded: toolCtx.expandedCardTools } : undefined,
           effectAttempts,
         }),
       };
@@ -661,6 +604,7 @@ async function* runAgentLoop(args) {
       turns: priorTurns + turn,
       fileState: snapshotFileState(toolCtx.fileStateCache),
       allowedToolPolicy: activeToolPolicy,
+            cardToolSurface: toolCtx.cardWorkflow ? { active: true, expanded: toolCtx.expandedCardTools } : undefined,
       effectAttempts,
     }),
   };
@@ -888,7 +832,10 @@ async function runToolUse(tu, registry, ctx, askFn, activeToolPolicy) {
             { type: "suspend", reason: "permission_denied" },
           );
         }
-        if (decision.persist === "session") {
+        if (p.requiresExplicitConfirmation === true) {
+          // Confirmation covers this one call only; it is never a session grant.
+          ctx.explicitEffectConfirmation = true;
+        } else if (decision.persist === "session") {
           if (!ctx.grants) ctx.grants = {};
           ctx.grants[`${tu.name}:*`] = "session";
         }
@@ -1013,10 +960,6 @@ function stringifyContent(c) {
   try { return JSON.stringify(c); } catch { return String(c); }
 }
 
-function requiresVerifiedEffects(contract) {
-  return !!(contract && (contract.mode === "effect" || contract.mode === "inspect"));
-}
-
 function normalizeEffectPath(value) {
   return String(value || "")
     .replace(/\\+/g, "/")
@@ -1025,28 +968,29 @@ function normalizeEffectPath(value) {
     .trim();
 }
 
-function contractIsSatisfied(contract, receipts) {
-  if (!requiresVerifiedEffects(contract)) return true;
-  const requirements = Array.isArray(contract.requiredEffects) && contract.requiredEffects.length > 0
-    ? contract.requiredEffects
-    : [{ kind: contract.mode === "inspect" ? "observation" : "vault_mutation", targetPaths: [] }];
-  const verified = (Array.isArray(receipts) ? receipts : []).filter((receipt) => receipt && receipt.verified);
-  return requirements.every((requirement) => {
-    const kind = String((requirement && requirement.kind) || "vault_mutation");
-    const matching = verified.filter((receipt) => receipt.kind === kind);
-    if (matching.length === 0) return false;
-    const targets = (Array.isArray(requirement && requirement.targetPaths) ? requirement.targetPaths : [])
-      .map(normalizeEffectPath)
-      .filter(Boolean);
-    if (targets.length === 0) return true;
-    const actualPaths = new Set(matching.flatMap((receipt) => (
-      Array.isArray(receipt.paths) ? receipt.paths.map(normalizeEffectPath).filter(Boolean) : []
-    )));
-    return targets.every((path) => actualPaths.has(path));
-  });
+/**
+ * Build the receipt for one tool call. When the host measured the call's
+ * vault writes (`measured` is an array), a vault mutation is verified only if
+ * the tool's own postcondition holds AND the vault really changed; the
+ * receipt names the paths that actually changed.
+ */
+async function createEffectReceipt(toolUse, result, ctx, measured) {
+  const receipt = await createDeclaredEffectReceipt(toolUse, result, ctx);
+  if (!receipt || !Array.isArray(measured) || receipt.kind !== "vault_mutation") return receipt;
+  const changed = describeChanges(measured);
+  const changedPaths = [...new Set(changed.flatMap((change) => [change.from, change.path]).filter(Boolean))];
+  if (!changedPaths.length) {
+    return {
+      ...receipt,
+      verified: false,
+      outcome: receipt.verified === true ? "no_observed_change" : receipt.outcome,
+      measured: [],
+    };
+  }
+  return { ...receipt, paths: changedPaths, measured: changed };
 }
 
-async function createEffectReceipt(toolUse, result, ctx) {
+async function createDeclaredEffectReceipt(toolUse, result, ctx) {
   const effects = result && result.outcome && Array.isArray(result.outcome.effects)
     ? result.outcome.effects
     : [];
@@ -1103,7 +1047,11 @@ function isConcurrencySafeToolUse(tu, registry) {
   const tool = registry.get(tu.name);
   if (!tool) return false;
   try {
-    return resolveToolCapabilities(tool, tu.input).concurrency === "parallel";
+    const capabilities = resolveToolCapabilities(tool, tu.input);
+    // Anything that may change state runs serially inside a measurement
+    // window, whatever concurrency the tool itself declares.
+    return capabilities.concurrency === "parallel"
+      && (capabilities.effect === "none" || capabilities.effect === "observation");
   } catch (_e) {
     return false;
   }
@@ -1117,6 +1065,5 @@ module.exports = {
   DEFAULT_MAX_REPEATED_TURNS,
   DEFAULT_MAX_TOKENS_PER_TURN,
   DEFAULT_MAX_COMPLETION_RETRIES,
-  contractIsSatisfied,
   createEffectReceipt,
 };

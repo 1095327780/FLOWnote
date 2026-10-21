@@ -74,6 +74,10 @@ async function* consumeStreamGenerator(stream, uiAdapter) {
       }
       if (slot.type === "text" && ev.delta.type === "text_delta") {
         slot.text = (slot.text || "") + (ev.delta.text || "");
+      } else if (slot.type === "thinking" && ev.delta.type === "thinking_delta") {
+        if (typeof ev.delta.thinking === "string") slot.thinking = (slot.thinking || "") + ev.delta.thinking;
+      } else if (slot.type === "thinking" && ev.delta.type === "signature_delta") {
+        if (typeof ev.delta.signature === "string") slot.signature = (slot.signature || "") + ev.delta.signature;
       } else if (slot.type === "tool_use" && ev.delta.type === "input_json_delta") {
         const buffer = toolUseBuffers[ev.index];
         if (buffer) buffer.partialJson += ev.delta.partial_json || "";

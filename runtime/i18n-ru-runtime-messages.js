@@ -26,7 +26,7 @@ const ZH_CN_RUNTIME_MESSAGES = {
       modelRefreshFailed: "拉取失败：{msg}",
       modelRefreshUnsupported: "当前服务商不支持自动拉取模型列表。",
       maxOutputName: "最大输出 Token",
-      maxOutputDesc: "限制单次回复的最大输出长度。",
+      maxOutputDesc: "留 0 或空 = 自动使用适度输出上限（最多 32,768 tokens，且不超过模型限制）。长文写入可调高；较小值可能截断回复。",
       streamName: "流式响应",
       streamDesc: "开启后边生成边显示；部分中转站不稳定时可关闭。",
       advancedHeading: "高级参数",
@@ -165,6 +165,17 @@ const ZH_CN_RUNTIME_MESSAGES = {
       failed: "请求失败：{message}",
       failedPartial: "流程已停止，但已保留 {count} 项经过验证的文件更改。重试前请先检查下方记录。",
     },
+    block: {
+      patchLabel: "文件变更",
+      patchFileCount: "{count} 个文件变更",
+      patchAction: { added: "新建", modified: "修改", deleted: "删除", renamed: "重命名", copied: "复制" },
+      patchNoDiffForFile: "此文件没有可显示的行级差异",
+      patchNoLineChanges: "没有检测到行变化",
+      patchLoadingDiff: "正在加载行级差异…",
+      patchDiffFallback: "无法读取行级差异，已改为显示文件列表",
+      reasoningShort: "思考",
+      status: { completed: "已完成", running: "进行中", error: "失败", unknown: "结果未知，请核对变更", pending: "等待中" },
+    },
     message: {
       continue: "继续暂停的流程",
       continuing: "正在继续暂停的流程",
@@ -274,6 +285,11 @@ const ZH_CN_RUNTIME_MESSAGES = {
       hintFromBundled: "当前显示内置模板。保存后会创建用户副本。",
       save: "保存模板",
     },
+    permission: {
+      action: {
+        web_request_unresolved: "之前发往 {previous} 的 {previousMethod} 请求已发出，但结果没有记录下来，可能已经生效。请先到该服务核对；确认仍要发送时，才再向它发送 {method} 请求。",
+      },
+    },
   },
 };
 
@@ -305,7 +321,7 @@ const EN_RUNTIME_MESSAGES = {
       modelRefreshFailed: "Fetch failed: {msg}",
       modelRefreshUnsupported: "This provider does not support automatic model fetching.",
       maxOutputName: "Max output tokens",
-      maxOutputDesc: "Limit the maximum output length for one response.",
+      maxOutputDesc: "0 or empty uses a moderate limit up to 32,768 tokens, within the model limit. Increase for long notes; low limits may truncate replies.",
       streamName: "Streaming",
       streamDesc: "Show responses while they are generated. Turn this off if a proxy is unstable.",
       advancedHeading: "Advanced",
@@ -444,6 +460,17 @@ const EN_RUNTIME_MESSAGES = {
       failed: "Request failed: {message}",
       failedPartial: "The workflow stopped, but {count} verified file change(s) were preserved. Check the items below before retrying.",
     },
+    block: {
+      patchLabel: "File change",
+      patchFileCount: "{count} file(s) changed",
+      patchAction: { added: "Added", modified: "Modified", deleted: "Deleted", renamed: "Renamed", copied: "Copied" },
+      patchNoDiffForFile: "No line-level diff to show for this file.",
+      patchNoLineChanges: "No line changes detected.",
+      patchLoadingDiff: "Loading line-level diff…",
+      patchDiffFallback: "Line-level diff unavailable; showing file list.",
+      reasoningShort: "Thought",
+      status: { completed: "Completed", running: "Running", error: "Failed", unknown: "Result unknown — check changes", pending: "Pending" },
+    },
     message: {
       continue: "Continue suspended workflow",
       continuing: "Continuing suspended workflow",
@@ -552,6 +579,11 @@ const EN_RUNTIME_MESSAGES = {
       subtitle: "Edit the template content.",
       hintFromBundled: "Showing the bundled template. Saving creates a user copy.",
       save: "Save Template",
+    },
+    permission: {
+      action: {
+        web_request_unresolved: "An earlier {previousMethod} request to {previous} was sent, but its result was never recorded and it may already have taken effect. Check that service first; confirm only if you still want to send this {method} request.",
+      },
     },
   },
 };
@@ -813,6 +845,17 @@ const RU_RUNTIME_MESSAGES = {
       failed: "Запрос не удался: {message}",
       failedPartial: "Процесс остановлен, но {count} подтвержденных изменений файлов сохранено. Проверьте их перед повтором.",
     },
+    block: {
+      patchLabel: "Изменение файлов",
+      patchFileCount: "Изменено файлов: {count}",
+      patchAction: { added: "Создан", modified: "Изменён", deleted: "Удалён", renamed: "Переименован", copied: "Скопирован" },
+      patchNoDiffForFile: "Для этого файла нет построчных отличий.",
+      patchNoLineChanges: "Изменения строк не найдены.",
+      patchLoadingDiff: "Загрузка построчных отличий…",
+      patchDiffFallback: "Построчные отличия недоступны; показан список файлов.",
+      reasoningShort: "Размышление",
+      status: { completed: "Готово", running: "Выполняется", error: "Ошибка", unknown: "Результат неизвестен — проверьте изменения", pending: "Ожидание" },
+    },
     message: {
       continue: "Продолжить приостановленный процесс",
       continuing: "Приостановленный процесс продолжается",
@@ -1032,6 +1075,7 @@ const RU_RUNTIME_MESSAGES = {
         daily_append: "Добавить в ежедневную заметку за {date}",
         daily_other: "Изменить ежедневную заметку за {date}",
         create_dir: "Создать новую папку: {path}",
+        web_request_unresolved: "Предыдущий запрос {previousMethod} к {previous} был отправлен, но его результат не сохранился, и он мог уже сработать. Сначала проверьте этот сервис; подтверждайте, только если всё ещё хотите отправить запрос {method}.",
         generic: "Выполнить операцию {tool}",
       },
     },

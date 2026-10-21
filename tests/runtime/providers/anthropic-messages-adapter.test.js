@@ -107,6 +107,24 @@ test("buildRequestBody omits system when not provided", () => {
   assert.equal("tools" in body, false);
 });
 
+test("buildRequestBody applies DeepSeek thinking effort and omits it for Anthropic", () => {
+  const input = { model: "deepseek-v4-flash", messages: [], maxTokens: 256 };
+  for (const [mode, thinking, outputConfig] of [
+    ["low", { type: "enabled" }, { effort: "low" }],
+    ["high", { type: "enabled" }, { effort: "high" }],
+    ["disabled", { type: "disabled" }, undefined],
+    ["invalid", { type: "enabled" }, { effort: "low" }],
+  ]) {
+    const body = buildRequestBody(input, PROVIDERS.deepseek, { reasoningMode: mode });
+    assert.deepEqual(body.thinking, thinking);
+    assert.deepEqual(body.output_config, outputConfig);
+    assert.equal("budget_tokens" in body, false);
+  }
+  const other = buildRequestBody(input, PROVIDERS["anthropic-official"], { reasoningMode: "high" });
+  assert.equal("thinking" in other, false);
+  assert.equal("output_config" in other, false);
+});
+
 test("stripUnsupportedParams removes MiniMax's documented dropped params", () => {
   const body = {
     model: "MiniMax-M2.7",

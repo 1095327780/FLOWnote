@@ -2,10 +2,17 @@
 // not execute tools or render UI: consumers derive their own projections from
 // the validated append-only log.
 
+const { normalizeEffectAttemptRecord } = require("./effect-attempt-ledger");
+
+// Tool outcome codes that mean the remote service answered a sending attempt.
+// Every other ending (timeout, 5xx, abort, crash) leaves the effect unknown.
+const EFFECT_RESPONSE_CODES = new Set(["accepted_unverified", "request_rejected"]);
+
 const EVENT_TYPES = new Set([
   "run_started",
   "tool_started",
   "tool_progress",
+  "effect_attempt_sending",
   "tool_finished",
   "effect_verified",
   "effect_unverified",
@@ -141,10 +148,22 @@ function reduceExecutionEvents(events) {
         tool: event.tool,
         status: "running",
         capabilities: event.capabilities === undefined ? null : cloneJson(event.capabilities),
+        inputPreview: event.inputPreview === undefined ? null : cloneJson(event.inputPreview),
+        resultPreview: null,
         progress: [],
         result: null,
         effect: { status: "not_applicable", receipt: null },
+        effectAttempt: null,
       };
+      continue;
+    }
+    if (event.type === "effect_attempt_sending") {
+      const tool = requireTool(run, event);
+      if (tool.status !== "running") throw ledgerError(`effect attempt after tool finished for tool ${tool.id}`);
+      if (tool.effectAttempt) throw ledgerError(`duplicate effect attempt for tool ${tool.id}`);
+      const attempt = normalizeEffectAttemptRecord(event.attempt);
+      if (!attempt) throw ledgerError(`invalid effect attempt for tool ${tool.id}`);
+      tool.effectAttempt = { ...attempt, state: "sending" };
       continue;
     }
     if (event.type === "tool_progress") {
@@ -162,6 +181,12 @@ function reduceExecutionEvents(events) {
       tool.status = event.isError === true ? "failed" : "succeeded";
       tool.result = event.content === undefined ? null : cloneJson(event.content);
       tool.outcome = event.outcome === undefined ? null : cloneJson(event.outcome);
+      tool.resultPreview = typeof event.resultPreview === "string" ? event.resultPreview : null;
+      if (tool.effectAttempt) {
+        tool.effectAttempt.state = tool.outcome && EFFECT_RESPONSE_CODES.has(tool.outcome.code)
+          ? "response_received"
+          : "unknown_after_send";
+      }
       continue;
     }
     if (event.type === "effect_verified" || event.type === "effect_unverified") {
@@ -195,7 +220,9 @@ function reduceExecutionEvents(events) {
       }
       if (event.type === "run_interrupted") {
         for (const tool of Object.values(run.tools)) {
-          if (tool.status === "running") tool.status = "unknown_after_reload";
+          if (tool.status !== "running") continue;
+          tool.status = "unknown_after_reload";
+          if (tool.effectAttempt) tool.effectAttempt.state = "unknown_after_send";
         }
       }
       run.status = event.type.slice("run_".length);
@@ -237,6 +264,44 @@ function buildExecutionRecap(events) {
       effect: tool.effect,
     })),
   };
+}
+
+/**
+ * External mutations whose outcome is unknown across the stored session:
+ * sent (durably recorded before sending) but never answered, and not yet
+ * superseded by a later attempt the user explicitly confirmed.
+ */
+function collectUnresolvedEffectAttempts(storedMessages, { excludeMessageId = "" } = {}) {
+  // Session order matters: an explicitly confirmed attempt resolves only the
+  // attempts recorded before it, even when it repeats the same fingerprint.
+  let attempts = [];
+  for (const message of Array.isArray(storedMessages) ? storedMessages : []) {
+    if (!message || message.role !== "assistant" || (excludeMessageId && message.id === excludeMessageId)) continue;
+    const events = message.execution && message.execution.version === 1 ? message.execution.events : null;
+    if (!Array.isArray(events) || !events.length) continue;
+    let state;
+    try { state = reduceExecutionEvents(events); } catch (_error) { continue; }
+    for (const run of Object.values(state.runs)) {
+      for (const tool of Object.values(run.tools)) {
+        const attempt = tool.effectAttempt;
+        if (!attempt) continue;
+        if (attempt.resolves.length) {
+          attempts = attempts.filter((prior) => !attempt.resolves.includes(prior.fingerprint));
+        }
+        if (attempt.state === "response_received") continue;
+        attempts.push({
+          fingerprint: attempt.fingerprint,
+          tool: attempt.tool,
+          scope: attempt.scope,
+          method: attempt.method,
+          endpoint: attempt.endpoint,
+          messageId: String(message.id || ""),
+          toolUseId: tool.id,
+        });
+      }
+    }
+  }
+  return attempts;
 }
 
 class ExecutionLedger {
@@ -296,5 +361,6 @@ module.exports = {
   reduceExecutionEvents,
   recoverInterruptedRun,
   buildExecutionRecap,
+  collectUnresolvedEffectAttempts,
   EVENT_TYPES,
 };

@@ -48,6 +48,10 @@ function validateContinuationCheckpoint(value) {
         || entry.idempotencyKey !== `flownote-${hash}`;
     })) return { ok: false, error: "Checkpoint effectAttempts are invalid." };
   }
+  if (value.cardToolSurface !== undefined && (!value.cardToolSurface || value.cardToolSurface.active !== true
+    || typeof value.cardToolSurface.expanded !== "boolean")) {
+    return { ok: false, error: "Checkpoint cardToolSurface is invalid." };
+  }
 
   const unresolved = new Set();
   for (const message of value.messages) {
@@ -92,6 +96,7 @@ function createContinuationCheckpoint({
   fileState,
   allowedToolPolicy,
   effectAttempts,
+  cardToolSurface,
 } = {}) {
   const checkpoint = {
     version: 1,
@@ -107,6 +112,7 @@ function createContinuationCheckpoint({
   if (allowedToolPolicy) checkpoint.allowedToolPolicy = cloneJson(allowedToolPolicy);
   if (Array.isArray(effectAttempts) && effectAttempts.length > 0) checkpoint.effectAttempts = cloneJson(effectAttempts);
   if (fileState && typeof fileState === "object") checkpoint.fileState = cloneJson(fileState);
+  if (cardToolSurface) checkpoint.cardToolSurface = cloneJson(cardToolSurface);
   const validation = validateContinuationCheckpoint(checkpoint);
   if (!validation.ok) throw new Error(`ContinuationCheckpoint: ${validation.error}`);
   return checkpoint;

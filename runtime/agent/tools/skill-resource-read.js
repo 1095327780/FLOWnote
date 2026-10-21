@@ -7,13 +7,16 @@
 
 const { buildTool } = require("../tool-registry");
 const { normalizeSkillRelativePath, readFile, renderSkillTemplateVariables } = require("../skill-registry");
-const { byteLengthUtf8 } = require("../utils/byte-length");
+const { pageNotice } = require("./utf8-page");
+const { pageReadOutput, FALLBACK_MAX_BYTES } = require("./read-output-budget");
 
 const DESCRIPTION =
   "Read a file that belongs to an invoked skill, such as references/*.md, " +
   "assets/*.md, or examples. Use this when a SKILL.md mentions a relative " +
   "resource path. This is read-only and works on desktop and mobile because " +
   "it reads from the vault adapter or from the plugin's embedded skill bundle. " +
+  "By default, returns as much as the available context allows; use maxBytes " +
+  "for a smaller slice and byteOffset to continue. " +
   "Do not use it for normal vault notes; use vault_read for those.";
 
 const INPUT_SCHEMA = {
@@ -29,14 +32,15 @@ const INPUT_SCHEMA = {
     },
     maxBytes: {
       type: "integer",
-      minimum: 1,
-      description: "Optional byte cap for large resources. Defaults to 65536.",
+      minimum: 4,
+      description: "Optional byte cap for the returned resource text.",
     },
+    byteOffset: { type: "integer", minimum: 0, description: "UTF-8 byte offset in the rendered resource; use nextOffset from the prior result." },
   },
   required: ["skill", "path"],
 };
 
-const DEFAULT_MAX_BYTES = 64 * 1024;
+const DEFAULT_MAX_BYTES = FALLBACK_MAX_BYTES;
 const HARD_MAX_BYTES = 256 * 1024;
 
 function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariables } = {}) {
@@ -74,9 +78,12 @@ function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariab
       }
       if (
         input.maxBytes !== undefined &&
-        (!Number.isInteger(input.maxBytes) || input.maxBytes < 1)
+        (!Number.isInteger(input.maxBytes) || input.maxBytes < 4)
       ) {
-        return { ok: false, error: "maxBytes must be a positive integer." };
+        return { ok: false, error: "maxBytes must be an integer of at least 4." };
+      }
+      if (input.byteOffset !== undefined && (!Number.isInteger(input.byteOffset) || input.byteOffset < 0)) {
+        return { ok: false, error: "byteOffset must be a non-negative integer." };
       }
       return { ok: true };
     },
@@ -87,7 +94,7 @@ function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariab
       return skill && path ? `${skill}/${path}` : path || skill;
     },
 
-    async *execute(input, _ctx) {
+    async *execute(input, ctx) {
       const skill = skillRegistry.get(input.skill);
       const rel = normalizeSkillRelativePath(input.path);
       if (!skill) {
@@ -107,7 +114,7 @@ function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariab
         return;
       }
 
-      const maxBytes = Math.min(input.maxBytes || DEFAULT_MAX_BYTES, HARD_MAX_BYTES);
+      const maxBytes = input.maxBytes === undefined ? undefined : Math.min(input.maxBytes, HARD_MAX_BYTES);
       let content;
       const overridePath = skill.vaultResourceOverrides
         && Object.prototype.hasOwnProperty.call(skill.vaultResourceOverrides, rel)
@@ -145,14 +152,19 @@ function createSkillResourceReadTool({ skillRegistry, vault, skillTemplateVariab
         return;
       }
 
-      let output = renderSkillTemplateVariables(content, skillTemplateVariables);
-      if (byteLengthUtf8(output) > maxBytes) {
-        output = output.slice(0, maxBytes) +
-          `\n\n[skill_resource_read: content truncated at ${maxBytes} bytes]`;
+      const output = renderSkillTemplateVariables(content, skillTemplateVariables);
+      let page;
+      try {
+        page = pageReadOutput(output, { ctx, byteOffset: input.byteOffset || 0, maxBytes });
+      } catch (error) {
+        yield { type: "result", content: `skill_resource_read: ${error.message}`, isError: true };
+        return;
       }
+      const { text: pageText, ...pageMeta } = page;
       yield {
         type: "result",
-        content: `Skill resource: ${skill.name}/${rel}\n\n${output}`,
+        content: `Skill resource: ${skill.name}/${rel}\n\n${pageText}${pageNotice("skill_resource_read", page, `skill=${skill.name}, path=${rel}, `)}`,
+        data: { page: pageMeta },
       };
     },
   });

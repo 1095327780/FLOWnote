@@ -619,7 +619,7 @@ const I18N_MESSAGES = {
         streamName: "Enable streaming",
         streamDesc: "On: responses appear progressively. Off: responses appear after the model finishes. Disable temporarily on mobile if streaming has issues.",
         maxOutputName: "Max output tokens per request",
-        maxOutputDesc: "0 or empty = use the current model's hard limit (recommended; the model only generates what it needs). Use a smaller value if you want to cap cost.",
+        maxOutputDesc: "0 or empty uses a moderate limit up to 32,768 tokens, within the model limit. Increase for long notes; low limits may truncate replies.",
       },
       basic: {
         intro: "In most cases, you only need to verify connection status and Provider auth. Keep other advanced options at default.",
@@ -1161,7 +1161,7 @@ I18N_MESSAGES.ru = {
       streamName: "Включить потоковый ответ",
       streamDesc: "Вкл.: ответ появляется постепенно. Выкл.: ответ появляется целиком после завершения модели. На мобильном можно временно отключить при проблемах со streaming.",
       maxOutputName: "Лимит output tokens на запрос",
-      maxOutputDesc: "0 или пусто = использовать жесткий лимит текущей модели (рекомендуется; модель генерирует только нужный объем). Укажите меньшее значение, если хотите ограничить стоимость.",
+      maxOutputDesc: "0 или пусто — умеренный лимит до 32 768 токенов в пределах модели. Для длинных заметок увеличьте значение; низкий лимит может обрезать ответ.",
       providerLabels: I18N_SETTINGS_EXTRA_MESSAGES.ru.settings.agent.providerLabels, providerModeLabels: I18N_SETTINGS_EXTRA_MESSAGES.ru.settings.agent.providerModeLabels,
     },
     skills: buildRussianSkillsMessages(I18N_MESSAGES.en.settings.skills),
@@ -1194,4 +1194,5 @@ I18N_MESSAGES.ru = {
 };
 
 require("./i18n-ru-runtime-messages").applyRussianRuntimeMessages(I18N_MESSAGES);
+require("./i18n-token-economy-messages").applyTokenEconomyMessages(I18N_MESSAGES);
 module.exports = { I18N_MESSAGES };

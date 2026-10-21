@@ -33,10 +33,10 @@ const {
   normalizePatchPath,
   normalizePatchChangeType,
   extractPatchFileEntries,
-  summarizePatchChanges,
   patchChangeLabel,
   patchFileDisplayPath,
   normalizePatchDiffEntry,
+  normalizeInlinePatchDiff,
   inferPatchActionFromDiff,
   buildPatchLineDiff,
   splitPatchDiffHunks,
@@ -560,7 +560,7 @@ function renderPatchFallbackFileList(container, entries, view) {
     const item = list.createDiv({ cls: "oc-tool-file-item" });
     item.setAttr("data-change-type", action || "unknown");
     item.setAttr("title", pathInfo.rawPath || displayPath);
-    item.createSpan({ cls: "oc-patch-file-action", text: `[${label}] ` });
+    item.createSpan({ cls: `oc-patch-file-action is-${action || "unknown"}`, text: label });
     renderPatchPath(item, pathInfo.displayPath || displayPath, pathInfo, view);
   });
   if (typeof view.attachInternalLinkHandlers === "function") {
@@ -604,7 +604,7 @@ function renderPatchDiffDetails(content, view, items) {
 
     const fileDetails = files.createDiv({ cls: "oc-patch-file-details" });
     const summary = fileDetails.createDiv({ cls: "oc-patch-file-summary" });
-    summary.createSpan({ cls: "oc-patch-file-action", text: `[${actionLabel}]` });
+    summary.createSpan({ cls: `oc-patch-file-action is-${action || "unknown"}`, text: actionLabel });
 
     const pathWrap = summary.createSpan({ cls: "oc-patch-file-summary-path" });
     renderPatchPath(pathWrap, pathInfo.displayPath || displayPath, pathInfo, view);
@@ -625,8 +625,9 @@ function renderPatchDiffDetails(content, view, items) {
     });
     const lines = Array.isArray(diffRender.lines) ? diffRender.lines : [];
     const stats = countPatchDiffStats(diff, lines);
-    const statsText = `${stats.added > 0 ? `+${stats.added}` : "+0"} ${stats.removed > 0 ? `-${stats.removed}` : "-0"}`;
-    summary.createSpan({ cls: "oc-patch-file-stats", text: statsText });
+    const statsEl = summary.createSpan({ cls: "oc-patch-file-stats", attr: { title: `+${stats.added} -${stats.removed}` } });
+    statsEl.createSpan({ cls: "oc-patch-stat-add", text: `+${stats.added}` });
+    statsEl.createSpan({ cls: "oc-patch-stat-del", text: `-${stats.removed}` });
 
     const hunks = splitPatchDiffHunks(lines, { contextLines: PATCH_CONTEXT_LINES });
     if (!hunks.length) {
@@ -640,9 +641,10 @@ function renderPatchDiffDetails(content, view, items) {
           fileBody.createDiv({ cls: "oc-patch-hunk-separator", text: "..." });
         }
         const hunkEl = fileBody.createDiv({ cls: "oc-patch-hunk" });
+        const lineOffset = Math.max(0, Number(diff.startLine || 1) - 1);
         hunkEl.createDiv({
           cls: "oc-patch-hunk-header",
-          text: `@@ -${Number(hunk.oldStart || 1)} +${Number(hunk.newStart || 1)} @@`,
+          text: `@@ -${Number(hunk.oldStart || 1) + lineOffset} +${Number(hunk.newStart || 1) + lineOffset} @@`,
         });
         for (const line of hunk.lines) {
           renderPatchHunkLine(hunkEl, line);
@@ -946,9 +948,12 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   const entries = extractPatchFileEntries(block, detailText).filter((entry) => !isHiddenPatchEntry(this, entry));
 
   ensurePatchDiffStateStore(this);
-  const patchRequest = getPatchDiffRequest(this, block, message);
+  // Host-measured change blocks carry their own excerpts; others fetch diffs.
+  const inlineDiffs = block && block.raw && Array.isArray(block.raw.diffs) ? block.raw.diffs : null;
+  const patchRequest = inlineDiffs ? null : getPatchDiffRequest(this, block, message);
   const patchKey = patchRequest && patchRequest.key ? patchRequest.key : "";
-  let diffState = patchKey ? this.patchDiffCache.get(patchKey) : null;
+  let diffState = inlineDiffs ? { status: "ready", items: inlineDiffs.map(normalizeInlinePatchDiff).filter(Boolean) }
+    : (patchKey ? this.patchDiffCache.get(patchKey) : null);
   if (!messagePending && patchKey && !diffState) {
     requestPatchDiff(this, block, message);
     diffState = this.patchDiffCache.get(patchKey) || null;
@@ -958,11 +963,11 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
     ? diffState.items.filter((diff) => !isHiddenPatchDiff(this, diff))
     : [];
   const renderItems = buildPatchRenderItems(this, entries, diffEntries);
-  if (!messagePending && diffState && diffState.status === "ready" && !renderItems.length) return;
-  const changeSummary = summarizePatchChanges(entries);
-  const summaryText = changeSummary
-    || (renderItems.length ? `${renderItems.length} 个文件变更` : "")
-    || tFromContext(this, "view.block.patchLabel", "File change");
+  if (!messagePending && !inlineDiffs && diffState && diffState.status === "ready" && !renderItems.length) return;
+  const fileCount = entries.length || renderItems.length;
+  const summaryText = fileCount
+    ? tFromContext(this, "view.block.patchFileCount", "{count} file(s) changed", { count: fileCount })
+    : tFromContext(this, "view.block.patchLabel", "File change");
   const summaryPaths = collectPatchSummaryPaths(this, renderItems);
 
   const details = container.createEl("details", { cls: "oc-tool-call oc-tool-patch" });
@@ -995,7 +1000,7 @@ function renderPatchPart(container, block, messagePending, message, blockIndex) 
   applyToolStatusIcon(statusEl, status);
 
   const content = details.createDiv({ cls: "oc-tool-content oc-tool-patch-content" });
-  const renderedDiff = diffEntries.length
+  const renderedDiff = diffEntries.length || (inlineDiffs && renderItems.length)
     ? renderPatchDiffDetails(content, this, renderItems)
     : false;
   if (!renderedDiff && entries.length) {
@@ -1180,7 +1185,6 @@ function renderAssistantMeta(row, message) {
     footer.createSpan({ cls: "oc-message-meta-item", text: item });
   });
 }
-
 
 const blockRenderMethods = {
   renderReasoningPart,

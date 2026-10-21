@@ -1,29 +1,32 @@
-// vault_search tool — substring/regex search across the vault.
-//
-// Read-only, concurrency-safe. Reads files lazily via Vault.cachedRead.
-// Hard caps are in place so a careless search can't exhaust memory:
-//   * `max_files` — most files to open
-//   * `max_matches` — most match lines to return
-//   * Per-file byte cap so a single huge note can't dominate the budget.
+// vault_search: complete lexical content search with bounded, resumable output.
+// Each invocation reads the current vault; no retained index can go stale after edits.
 
 const { buildTool } = require("../tool-registry");
 const { globToRegExp } = require("./vault-list");
-const { byteLengthUtf8 } = require("../utils/byte-length");
+const { estimateTextTokens } = require("./read-output-budget");
+const { throwIfToolAborted } = require("../vault-effect-verifiers");
+
+const DEFAULT_MAX_MATCHES = 100;
+const MAX_PAGE_MATCHES = 100;
+const FAILURE_SAMPLE_SIZE = 8;
 
 const DESCRIPTION =
-  "Search note contents inside the user's Obsidian vault. Provide `query` " +
-  "(a substring by default, or a regex if `regex: true`). Returns up to " +
-  "`max_matches` matching lines as `path:line: text`. Scope the search with " +
-  "`path` (subtree), `pattern` (glob), or `extensions`. Pass `case_sensitive: " +
-  "true` for an exact-case match. Pair this with vault_read once you know " +
-  "which note to open.";
+  "Search note contents inside the user's Obsidian vault. `query` is a plain " +
+  "substring unless `regex: true`. The default search checks every file in " +
+  "the requested scope, including note bodies; this is lexical search, not " +
+  "semantic recall. Results are bounded pages of `path:line: text`. Use " +
+  "`next_cursor` with the same query and filters to continue. `max_files` " +
+  "optionally limits files read per call, with a cursor for remaining files. " +
+  "Pages read the live vault; restart the search if files change between pages. " +
+  "Use `path`, `pattern`, or `extensions` to scope the search, and vault_read " +
+  "to inspect a matching note.";
 
 const INPUT_SCHEMA = {
   type: "object",
   properties: {
     query: {
       type: "string",
-      description: "What to look for. Plain substring unless `regex: true`.",
+      description: "Plain substring unless `regex: true`.",
     },
     regex: {
       type: "boolean",
@@ -39,33 +42,34 @@ const INPUT_SCHEMA = {
     },
     pattern: {
       type: "string",
-      description: "Optional glob pattern against the path tail (e.g. \"daily/*.md\").",
+      description: "Optional glob against the path tail (e.g. daily/*.md).",
     },
     extensions: {
       type: "array",
       items: { type: "string" },
-      description: "Only search files with these extensions. Defaults to [\"md\"].",
+      description: "Extensions to search. Defaults to [\"md\"].",
     },
     max_files: {
       type: "integer",
-      description: "Maximum number of files to scan. Default 200.",
+      description: "Optional files to read on this page. Omit to scan the entire scope.",
       minimum: 1,
     },
     max_matches: {
       type: "integer",
-      description: "Maximum match lines to return. Default 100.",
+      description: "Matching lines to return on this page. Default and maximum 100.",
       minimum: 1,
+      maximum: MAX_PAGE_MATCHES,
+    },
+    cursor: {
+      type: "string",
+      description: "next_cursor from the prior page; keep the query and filters unchanged.",
     },
   },
   required: ["query"],
 };
 
-const DEFAULT_MAX_FILES = 200;
-const DEFAULT_MAX_MATCHES = 100;
-const PER_FILE_BYTE_CAP = 512 * 1024; // 512 KB — searching binary blobs is pointless
-
-function defaultNormalizePath(p) {
-  return String(p || "")
+function defaultNormalizePath(path) {
+  return String(path || "")
     .replace(/\\+/g, "/")
     .replace(/\/{2,}/g, "/")
     .replace(/^\/+/, "")
@@ -75,38 +79,99 @@ function defaultNormalizePath(p) {
 function extOf(path) {
   const dot = path.lastIndexOf(".");
   const slash = path.lastIndexOf("/");
-  if (dot <= slash) return "";
-  return path.slice(dot + 1).toLowerCase();
+  return dot <= slash ? "" : path.slice(dot + 1).toLowerCase();
 }
 
-function listMarkdownFiles(vault) {
-  if (typeof vault.getMarkdownFiles === "function") {
-    return (vault.getMarkdownFiles() || []).filter((f) => f && typeof f.path === "string");
-  }
+function listFiles(vault) {
   if (typeof vault.getAllLoadedFiles === "function") {
     return (vault.getAllLoadedFiles() || []).filter(
       (f) => f && typeof f.path === "string" && !Array.isArray(f.children),
     );
   }
+  if (typeof vault.getMarkdownFiles === "function") {
+    return (vault.getMarkdownFiles() || []).filter((f) => f && typeof f.path === "string");
+  }
   if (typeof vault.listFilesForSearch === "function") {
-    // Test/fake interface: returns [{ path, read() }] tuples.
     return vault.listFilesForSearch() || [];
   }
   throw new Error("vault_search: vault has no file enumeration API");
 }
 
-function snippetForLine(line) {
-  // Trim leading whitespace and clamp to ~200 chars for readability.
-  const trimmed = line.replace(/^\s+/, "");
-  return trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed;
+function snippetForLine(line, hitIndex) {
+  if (line.length <= 200) return line.replace(/^\s+/, "");
+  const start = Math.max(0, hitIndex - 80);
+  const end = Math.min(line.length, start + 200);
+  return `${start ? "…" : ""}${line.slice(start, end).replace(/^\s+/, "")}${end < line.length ? "…" : ""}`;
 }
 
-/**
- * @param {Object} deps
- * @param {Object} deps.vault
- * @param {Function} [deps.normalizePath]
- * @returns {import('../tool-registry').ToolDef}
- */
+function searchSpec(input, normalize) {
+  return {
+    query: input.query,
+    regex: !!input.regex,
+    case_sensitive: !!input.case_sensitive,
+    path: normalize(input.path || ""),
+    pattern: input.pattern || "",
+    extensions: Array.isArray(input.extensions) && input.extensions.length
+      ? [...new Set(input.extensions.map((e) => String(e).toLowerCase().replace(/^\./, "")))].sort()
+      : ["md"],
+  };
+}
+
+function decodeCursor(value) {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value));
+    if (parsed && parsed.v === 1 && typeof parsed.spec === "string" &&
+        typeof parsed.path === "string" &&
+        Number.isSafeInteger(parsed.failures) && parsed.failures >= 0 &&
+        (parsed.line === null || Number.isSafeInteger(parsed.line) && parsed.line >= 1)) {
+      return parsed;
+    }
+  } catch (_) {
+    // A malformed cursor is an input error, not an empty search.
+  }
+  return null;
+}
+
+function makeCursor(spec, path, line, failures) {
+  return encodeURIComponent(JSON.stringify({ v: 1, spec, path, line, failures }));
+}
+
+function matcherFor(spec) {
+  if (spec.regex) {
+    const re = new RegExp(spec.query, spec.case_sensitive ? "" : "i");
+    return (line) => {
+      const match = re.exec(line);
+      return match ? match.index : -1;
+    };
+  }
+  if (spec.case_sensitive) return (line) => line.indexOf(spec.query);
+  const needle = spec.query.toLowerCase();
+  return (line) => line.toLowerCase().indexOf(needle);
+}
+
+function candidateFiles(vault, spec) {
+  const prefix = spec.path ? `${spec.path}/` : "";
+  const extensions = new Set(spec.extensions);
+  const pattern = spec.pattern ? globToRegExp(spec.pattern) : null;
+  const candidates = [];
+  for (const file of listFiles(vault)) {
+    if (spec.path && file.path !== spec.path && !file.path.startsWith(prefix)) continue;
+    if (!extensions.has(extOf(file.path))) continue;
+    if (pattern) {
+      const tail = spec.path ? file.path.slice(prefix.length) : file.path;
+      if (!pattern.test(tail)) continue;
+    }
+    candidates.push(file);
+  }
+  candidates.sort((a, b) => a.path.localeCompare(b.path));
+  return candidates;
+}
+
+function plural(count, word) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** @returns {import('../tool-registry').ToolDef} */
 function createVaultSearchTool({ vault, normalizePath } = {}) {
   if (!vault) throw new Error("createVaultSearchTool: vault required");
   if (typeof vault.cachedRead !== "function") {
@@ -134,11 +199,23 @@ function createVaultSearchTool({ vault, normalizePath } = {}) {
       }
       if (input.regex) {
         try {
-          // Validate now so the model gets a clear error rather than a stack trace.
           // eslint-disable-next-line no-new
           new RegExp(input.query);
-        } catch (e) {
-          return { ok: false, error: `Invalid regex: ${e && e.message ? e.message : e}` };
+        } catch (error) {
+          return { ok: false, error: `Invalid regex: ${error.message || error}` };
+        }
+      }
+      if (input.max_matches !== undefined && (!Number.isInteger(input.max_matches) ||
+          input.max_matches < 1 || input.max_matches > MAX_PAGE_MATCHES)) {
+        return { ok: false, error: `max_matches must be an integer from 1 to ${MAX_PAGE_MATCHES}.` };
+      }
+      if (input.max_files !== undefined && (!Number.isInteger(input.max_files) || input.max_files < 1)) {
+        return { ok: false, error: "max_files must be a positive integer." };
+      }
+      if (input.cursor !== undefined) {
+        const decoded = typeof input.cursor === "string" ? decodeCursor(input.cursor) : null;
+        if (!decoded || decoded.spec !== JSON.stringify(searchSpec(input, normalize))) {
+          return { ok: false, error: "cursor is invalid or does not match the query and filters." };
         }
       }
       return { ok: true };
@@ -148,99 +225,154 @@ function createVaultSearchTool({ vault, normalizePath } = {}) {
       return input && typeof input.query === "string" ? input.query : "";
     },
 
-    async *execute(input, _ctx) {
-      const root = normalize(input.path || "");
-      const caseSensitive = !!input.case_sensitive;
-      const useRegex = !!input.regex;
-      const maxFiles = Number.isInteger(input.max_files) ? input.max_files : DEFAULT_MAX_FILES;
-      const maxMatches = Number.isInteger(input.max_matches) ? input.max_matches : DEFAULT_MAX_MATCHES;
-      const extSet = Array.isArray(input.extensions) && input.extensions.length
-        ? new Set(input.extensions.map((e) => String(e).toLowerCase().replace(/^\./, "")))
-        : new Set(["md"]);
-      const patternRe = input.pattern ? globToRegExp(input.pattern) : null;
-
-      let matcher;
-      if (useRegex) {
-        matcher = new RegExp(input.query, caseSensitive ? "" : "i");
-      } else if (caseSensitive) {
-        matcher = (s) => s.indexOf(input.query) !== -1;
-      } else {
-        const needle = input.query.toLowerCase();
-        matcher = (s) => s.toLowerCase().indexOf(needle) !== -1;
-      }
-
-      const allFiles = listMarkdownFiles(vault);
-      const rootPrefix = root === "" ? "" : `${root}/`;
-      const candidates = [];
-      for (const f of allFiles) {
-        if (root !== "" && f.path !== root && !f.path.startsWith(rootPrefix)) continue;
-        if (!extSet.has(extOf(f.path))) continue;
-        if (patternRe) {
-          const tail = root === "" ? f.path : f.path.slice(rootPrefix.length);
-          if (!patternRe.test(tail)) continue;
-        }
-        candidates.push(f);
-        if (candidates.length >= maxFiles) break;
-      }
-      candidates.sort((a, b) => a.path.localeCompare(b.path));
-
-      const lines = [];
-      let totalMatches = 0;
-      let filesScanned = 0;
-      let filesWithMatches = 0;
-      let truncated = false;
-
-      for (const f of candidates) {
-        if (totalMatches >= maxMatches) {
-          truncated = true;
-          break;
-        }
-        filesScanned += 1;
-        const raw = typeof f.read === "function" ? await f.read() : await vault.cachedRead(f);
-        let text = typeof raw === "string" ? raw : String(raw || "");
-        if (byteLengthUtf8(text) > PER_FILE_BYTE_CAP) {
-          text = text.slice(0, PER_FILE_BYTE_CAP);
-        }
-        const fileLines = text.split(/\r?\n/);
-        let matchInFile = false;
-        for (let i = 0; i < fileLines.length; i++) {
-          const line = fileLines[i];
-          let hit;
-          if (typeof matcher === "function") {
-            hit = matcher(line);
-          } else {
-            hit = matcher.test(line);
-          }
-          if (!hit) continue;
-          lines.push(`${f.path}:${i + 1}: ${snippetForLine(line)}`);
-          matchInFile = true;
-          totalMatches += 1;
-          if (totalMatches >= maxMatches) {
-            truncated = true;
-            break;
-          }
-        }
-        if (matchInFile) filesWithMatches += 1;
-      }
-
-      if (lines.length === 0) {
-        yield {
-          type: "result",
-          content: `vault_search: no matches in ${filesScanned} file${filesScanned === 1 ? "" : "s"}.`,
-        };
+    async *execute(input, ctx) {
+      const resultBudget = ctx && Number.isInteger(ctx.toolResultBudgetTokens)
+        && ctx.toolResultBudgetTokens >= 0 ? ctx.toolResultBudgetTokens : Infinity;
+      if (resultBudget === 0) {
+        yield { type: "result", isError: true,
+          content: "vault_search: no result context remains. Narrow the query or scope and retry; no search coverage was claimed." };
         return;
       }
-      const header = `Found ${totalMatches} match${totalMatches === 1 ? "" : "es"} ` +
-        `in ${filesWithMatches} file${filesWithMatches === 1 ? "" : "s"} ` +
-        `(scanned ${filesScanned}).`;
-      const tail = truncated
-        ? `\n\n[vault_search: truncated at max_matches=${maxMatches}. Narrow the query or scope.]`
-        : "";
-      yield { type: "result", content: `${header}\n${lines.join("\n")}${tail}` };
+      throwIfToolAborted(ctx, "vault_search_start");
+      const spec = searchSpec(input, normalize);
+      const specKey = JSON.stringify(spec);
+      const cursor = input.cursor ? decodeCursor(input.cursor) : null;
+      if (input.cursor && (!cursor || cursor.spec !== specKey)) {
+        throw new Error("vault_search: cursor is invalid or does not match the query and filters");
+      }
+      const maxMatches = input.max_matches === undefined ? DEFAULT_MAX_MATCHES : input.max_matches;
+      const maxFiles = input.max_files === undefined ? Infinity : input.max_files;
+      if (!Number.isInteger(maxMatches) || maxMatches < 1 || maxMatches > MAX_PAGE_MATCHES ||
+          maxFiles !== Infinity && (!Number.isInteger(maxFiles) || maxFiles < 1)) {
+        throw new RangeError("vault_search: invalid max_matches or max_files");
+      }
+      const matches = matcherFor(spec);
+      const candidates = candidateFiles(vault, spec);
+      throwIfToolAborted(ctx, "vault_search_enumeration");
+      const after = cursor ? cursor.path : null;
+      const pending = after === null ? candidates : candidates.filter((f) => {
+        const order = f.path.localeCompare(after);
+        return order > 0 || order === 0 && cursor.line !== null;
+      });
+      const filesBeforeCursor = candidates.length - pending.length;
+
+      const hits = [];
+      const failures = [];
+      let failedCount = 0;
+      let scanned = 0;
+      let found = 0;
+      let filesWithMatches = 0;
+      let lastScanned = null;
+
+      for (const file of pending) {
+        throwIfToolAborted(ctx, "vault_search_file");
+        if (scanned >= maxFiles) break;
+        scanned += 1;
+        lastScanned = file.path;
+        let raw;
+        try {
+          raw = typeof file.read === "function" ? await file.read() : await vault.cachedRead(file);
+          throwIfToolAborted(ctx, "vault_search_read");
+        } catch (error) {
+          if (error && (error.name === "AbortError" || error.code === "ABORT_ERR")) throw error;
+          failedCount += 1;
+          if (failures.length < FAILURE_SAMPLE_SIZE) {
+            const detail = String(error && error.message ? error.message : error).replace(/[\r\n]+/g, " ").slice(0, 160);
+            failures.push(`${file.path}: ${detail}`);
+          }
+          continue;
+        }
+        // Search the whole note. Only returned snippets are capped; body hits beyond
+        // the old 512 KiB read cap must remain discoverable.
+        const fileLines = String(raw == null ? "" : raw).split(/\r?\n/);
+        const start = cursor && file.path === cursor.path ? cursor.line : 0;
+        let hitInFile = false;
+        for (let i = start; i < fileLines.length; i += 1) {
+          if ((i & 255) === 0) throwIfToolAborted(ctx, "vault_search_lines");
+          const line = fileLines[i];
+          const hitIndex = matches(line);
+          if (hitIndex < 0) continue;
+          found += 1;
+          hitInFile = true;
+          if (hits.length < maxMatches) {
+            hits.push({ path: file.path, line: i + 1,
+              text: `${file.path}:${i + 1}: ${snippetForLine(line, hitIndex)}` });
+          }
+        }
+        if (hitInFile) filesWithMatches += 1;
+      }
+
+      const remainingFiles = pending.length - scanned;
+      const totalFailures = (cursor ? cursor.failures : 0) + failedCount;
+      const coverage = `Coverage: ${plural(candidates.length, "eligible file")}; ` +
+        `${plural(filesBeforeCursor, "file")} before cursor; ` +
+        `${plural(scanned, "file read")} attempted on this page; ` +
+        `${plural(scanned - failedCount, "file")} read successfully; ` +
+        `${plural(remainingFiles, "unread candidate")}; ` +
+        `${plural(failedCount, "read failure")} on this page` +
+        (cursor ? ` (${totalFailures} across pages).` : ".");
+      const formatPage = (count, failureSampleCount) => {
+        const remainingMatches = found - count;
+        const hasMore = remainingMatches > 0 || remainingFiles > 0;
+        const lastReturned = count ? hits[count - 1] : null;
+        const resumeAtHit = remainingMatches > 0;
+        const nextCursor = hasMore && (lastReturned || lastScanned)
+          ? makeCursor(specKey, resumeAtHit ? lastReturned.path : lastScanned,
+            resumeAtHit ? lastReturned.line : null, totalFailures)
+          : null;
+        const summary = count
+          ? `Returned ${plural(count, "match")}; scanned portion has ` +
+            `${plural(found, "matching line")} in ${plural(filesWithMatches, "file")}.`
+          : "vault_search: no matches in successfully read files on this page.";
+        const details = [];
+        if (remainingMatches > 0) {
+          const reason = count < hits.length ? "tool result budget" : `max_matches=${maxMatches}`;
+          details.push(`[vault_search: truncated at ${reason}; ${plural(remainingMatches, "matching line")} remains in scanned files.]`);
+        }
+        if (nextCursor) details.push(`next_cursor: ${nextCursor}`);
+        else if (totalFailures) details.push("No remaining candidates; coverage is incomplete due to read failures. Retry the search after resolving them.");
+        else details.push("Search page complete; no remaining matches or candidates.");
+        if (failedCount) {
+          details.push(failureSampleCount
+            ? `Read failures (first ${failureSampleCount} of ${failedCount}):\n${failures.slice(0, failureSampleCount).join("\n")}`
+            : `${plural(failedCount, "read failure")}; narrow the scope to inspect failed paths.`);
+        }
+        if (count) details.push(hits.slice(0, count).map(hit => hit.text).join("\n"));
+        return { type: "result", content: [summary, coverage, ...details].join("\n"), data: {
+          eligible_files: candidates.length,
+          files_before_cursor: filesBeforeCursor,
+          files_scanned: scanned,
+          files_read_successfully: scanned - failedCount,
+          unread_candidates: remainingFiles,
+          read_failures: failedCount,
+          read_failures_across_pages: totalFailures,
+          matching_lines_in_scanned_portion: found,
+          matches_returned: count,
+          remaining_matches_in_scanned_files: remainingMatches,
+          next_cursor: nextCursor,
+          budget_limited: count < hits.length,
+          complete: !hasMore && totalFailures === 0,
+        } };
+      };
+      // The full scan happens once. Shrink only the at-most-100 returned hits
+      // and bounded failure sample until the entire model-visible result fits.
+      let count = hits.length;
+      let failureSampleCount = failures.length;
+      let page = formatPage(count, failureSampleCount);
+      while (estimateTextTokens(page.content) > resultBudget) {
+        if (count > 1) count -= 1;
+        else if (failureSampleCount > 0) failureSampleCount -= 1;
+        else break;
+        page = formatPage(count, failureSampleCount);
+      }
+      if (estimateTextTokens(page.content) > resultBudget || (found > 0 && count === 0)) {
+        yield { type: "result", isError: true,
+          content: "vault_search: result budget cannot hold one match with coverage and cursor. Narrow the query or scope and retry; no search coverage was claimed." };
+        return;
+      }
+      yield page;
     },
   });
 }
 
-module.exports = {
-  createVaultSearchTool,
-};
+module.exports = { createVaultSearchTool };

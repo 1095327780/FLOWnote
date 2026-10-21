@@ -67,6 +67,22 @@ function countOccurrences(haystack, needle) {
   return count;
 }
 
+function insertedTextRanges(current, oldString, newString, replaceAll) {
+  if (!newString) return [];
+  const ranges = [];
+  let sourceAt = 0;
+  let outputAt = 0;
+  let matchAt;
+  while ((matchAt = current.indexOf(oldString, sourceAt)) !== -1) {
+    outputAt += matchAt - sourceAt;
+    ranges.push([outputAt, outputAt + newString.length]);
+    outputAt += newString.length;
+    sourceAt = matchAt + oldString.length;
+    if (!replaceAll) break;
+  }
+  return ranges;
+}
+
 /**
  * @param {Object} deps
  * @param {Object}   deps.vault            Obsidian Vault (or fake)
@@ -91,8 +107,11 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       risk: input && input.replace_all ? "high" : "medium",
       concurrency: "serial",
       presentation: "edit",
+      // Declare the file execute() will actually change. A legacy memory path
+      // stays legacy when only that file exists, so permission and receipt
+      // surfaces name the same target.
       targets: input && typeof input.path === "string"
-        ? [resolveWritablePath(normalize(input.path))]
+        ? [resolveReadablePath(vault, normalize(input.path))]
         : [],
     }),
     isReadOnly: () => false,
@@ -131,14 +150,19 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       const normalized = resolveWritablePath(requestedPath);
       const readable = resolveReadablePath(vault, requestedPath);
       if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.has === "function") {
-        if (!ctx.fileStateCache.has(normalized) && !ctx.fileStateCache.has(readable)) {
+        const cachedPath = ctx.fileStateCache.has(readable) ? readable : normalized;
+        if (!ctx.fileStateCache.has(cachedPath)) {
           return {
             ok: false,
             error:
-              `vault_edit refused: you must call vault_read on "${normalized}" first this ` +
+              `vault_edit refused: you must call vault_read on "${readable}" first this ` +
               "session before editing it. Read the file, identify the exact text you want to " +
               "replace, then call vault_edit again.",
           };
+        }
+        if (!ctx.fileStateCache.isTextVisible
+          || !ctx.fileStateCache.isTextVisible(cachedPath, input.old_string, { allOccurrences: input.replace_all === true })) {
+          return { ok: false, error: `vault_edit refused: the exact old_string was not shown by a complete or paged read of "${readable}". Read the relevant text first.` };
         }
       }
       return { ok: true };
@@ -149,7 +173,7 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       if (grants && grants["vault_edit:*"]) {
         return { behavior: "allow" };
       }
-      const normalized = resolveWritablePath(normalize(input.path));
+      const normalized = resolveReadablePath(vault, normalize(input.path));
       return {
         behavior: "ask",
         summary: `edit → ${normalized}`,
@@ -161,10 +185,15 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       return input && typeof input.path === "string" ? input.path : "";
     },
 
-    async verifyEffect(input, _outcome, ctx) {
-      const path = resolveWritablePath(normalize(input.path));
-      const expected = expectedCachedText(ctx, path);
-      return verifyTextEffect({ vault, path, expected: expected === null ? undefined : expected });
+    async verifyEffect(input, outcome, ctx) {
+      const requested = normalize(input.path);
+      const recordedPath = outcome && outcome.data && outcome.data.path;
+      const allowed = new Set([requested, resolveWritablePath(requested)]);
+      if (typeof recordedPath !== "string" || !allowed.has(recordedPath)) {
+        return { verified: false, outcome: "postcondition_failed", detail: "missing_or_unexpected_effect_path" };
+      }
+      const expected = expectedCachedText(ctx, recordedPath);
+      return verifyTextEffect({ vault, path: recordedPath, expected: expected === null ? undefined : expected });
     },
 
     async *execute(input, ctx) {
@@ -180,6 +209,17 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
       }
       const raw = await vault.cachedRead(file);
       const current = typeof raw === "string" ? raw : String(raw || "");
+      const cache = ctx && ctx.fileStateCache;
+      const cachedPath = cache && cache.has(normalized) ? normalized
+        : cache && cache.has(resolveWritablePath(normalize(input.path)))
+          ? resolveWritablePath(normalize(input.path)) : null;
+      if (cache && (!cachedPath || !cache.matchesContent
+        || !cache.matchesContent(cachedPath, current)
+        || !cache.isTextVisible
+        || !cache.isTextVisible(cachedPath, input.old_string, { allOccurrences: input.replace_all === true }))) {
+        yield { type: "result", content: `vault_edit: "${normalized}" changed or the replacement text was not visible in the read evidence. Read it again before editing.`, isError: true };
+        return;
+      }
 
       const occurrences = countOccurrences(current, input.old_string);
       if (occurrences === 0) {
@@ -218,9 +258,33 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
 
       yield { type: "progress", message: `edit → ${normalized}` };
       throwIfToolAborted(ctx);
-      await vault.modify(file, updated);
+      if (typeof vault.process === "function") {
+        try {
+          await vault.process(file, (latest) => {
+            if (latest !== current) throw new Error("file changed after read");
+            return updated;
+          });
+        } catch (error) {
+          yield { type: "result", content: `vault_edit: "${normalized}" was not changed because ${error.message}. Read it again and retry.`, isError: true };
+          return;
+        }
+      } else {
+        const latest = typeof vault.read === "function" ? await vault.read(file) : await vault.cachedRead(file);
+        if (latest !== current) {
+          yield { type: "result", content: `vault_edit: "${normalized}" changed after read. Read it again and retry.`, isError: true };
+          return;
+        }
+        await vault.modify(file, updated);
+      }
       if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordWrite === "function") {
-        ctx.fileStateCache.recordWrite(normalized, updated);
+        const before = typeof ctx.fileStateCache.get === "function" ? ctx.fileStateCache.get(normalized) : null;
+        const fullyVisible = before && before.content === current && (before.visibleRanges || [])
+          .some(([start, end]) => start === 0 && end === current.length);
+        // Preserve a proven full read. A partial read must not promote the unseen tail.
+        ctx.fileStateCache.recordWrite(normalized, updated, {
+          visibleRanges: fullyVisible ? [[0, updated.length]]
+            : insertedTextRanges(current, input.old_string, input.new_string, input.replace_all),
+        });
       }
 
       const delta = byteLengthUtf8(updated) - byteLengthUtf8(current);
@@ -230,6 +294,8 @@ function createVaultEditTool({ vault, normalizePath } = {}) {
         content:
           `Edited "${normalized}" — replaced ${replacedCount} occurrence` +
           `${replacedCount === 1 ? "" : "s"} (${deltaStr} bytes).`,
+        data: { path: normalized },
+        effects: [{ kind: "vault_mutation", targets: [normalized] }],
       };
     },
   });

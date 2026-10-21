@@ -171,12 +171,17 @@ function nodeStreamingRequest(args) {
 
 /**
  * Wrap a Node Readable stream in an AsyncIterable<string>. Node's
- * IncomingMessage is already async-iterable; we decode each chunk and
+ * IncomingMessage is already async-iterable; we decode across chunks and
  * mark the response as "body consumed" so a later .text() throws.
  */
 function makeNodeStreamIterable(readable, onConsumed, options = {}) {
   return (async function* () {
     const iterator = readable[Symbol.asyncIterator]();
+    const decoder = typeof TextDecoder === "function" ? new TextDecoder("utf-8") : null;
+    // The Node transport may run in an Electron realm without a global
+    // TextDecoder. StringDecoder keeps UTF-8 state across Buffer writes too.
+    const nodeDecoder = decoder ? null : new (require("string_decoder").StringDecoder)("utf8");
+    const flushDecoder = () => decoder ? decoder.decode() : nodeDecoder.end();
     let receivedChunks = 0;
     try {
       while (true) {
@@ -193,11 +198,23 @@ function makeNodeStreamIterable(readable, onConsumed, options = {}) {
         const chunk = result.value;
         if (chunk == null) continue;
         receivedChunks += 1;
-        if (typeof chunk === "string") yield chunk;
-        else if (typeof Buffer !== "undefined" && Buffer.isBuffer(chunk)) yield chunk.toString("utf8");
-        else if (chunk instanceof Uint8Array) yield new TextDecoder().decode(chunk);
-        else yield String(chunk);
+        if (typeof chunk === "string") {
+          // A string chunk cannot complete pending UTF-8 bytes. Flush before
+          // crossing that boundary, then preserve the already-decoded text.
+          const tail = flushDecoder();
+          if (tail) yield tail;
+          if (chunk) yield chunk;
+        } else if ((typeof Buffer !== "undefined" && Buffer.isBuffer(chunk)) || chunk instanceof Uint8Array) {
+          const text = decoder
+            ? decoder.decode(chunk, { stream: true })
+            : nodeDecoder.write(Buffer.from(chunk));
+          if (text) yield text;
+        } else {
+          yield String(chunk);
+        }
       }
+      const tail = flushDecoder();
+      if (tail) yield tail;
     } catch (error) {
       throw normalizeStreamReadError(error, {
         signal: options.signal,

@@ -9,15 +9,25 @@
 //   - Tool output masks configured secret values defensively.
 
 const { buildTool } = require("../tool-registry");
-const { byteLengthUtf8 } = require("../utils/byte-length");
-const { claimEffectAttempt, projectWebMutationOperation } = require("../effect-attempt-ledger");
+const { pageNotice } = require("./utf8-page");
+const { pageReadOutput } = require("./read-output-budget");
+const {
+  claimEffectAttempt,
+  releaseEffectAttempt,
+  effectAttemptScope,
+  effectAttemptEndpoint,
+  unresolvedAttemptsForScope,
+  projectWebMutationOperation,
+} = require("../effect-attempt-ledger");
 
 const DESCRIPTION =
   "Send an HTTP API request with method, headers, and optional JSON body. " +
   "Use this for API-backed skills that need POST / Authorization headers, " +
   "for example WeRead's official skill. Prefer web_fetch for normal web pages. " +
   "Use secret placeholders like `$WEREAD_API_KEY` in headers/body; FLOWnote " +
-  "substitutes them from Settings -> Skill management at execution time.";
+  "substitutes them from Settings -> Skill management at execution time. " +
+  "By default, returns as much response text as available context allows; " +
+  "use maxBytes for a smaller slice and byteOffset to continue a cached response.";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -47,15 +57,15 @@ const INPUT_SCHEMA = {
     },
     maxBytes: {
       type: "integer",
-      description: "Maximum bytes of response text to return. Default 60000.",
+      description: "Optional maximum bytes of response text to return.",
       minimum: 1024,
       maximum: 500000,
     },
+    byteOffset: { type: "integer", minimum: 0, description: "Continue a cached response at this UTF-8 byte offset; never resends the request." },
   },
   required: ["url"],
 };
 
-const DEFAULT_MAX_BYTES = 60 * 1024;
 const REQUEST_TIMEOUT_MS = 25000;
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 const DISALLOWED_HEADER_NAMES = new Set(["cookie", "set-cookie", "host", "content-length"]);
@@ -88,6 +98,10 @@ function normalizeMethod(value) {
 function isDangerousMethod(method) {
   const normalized = normalizeMethod(method);
   return normalized === "DELETE" || normalized === "PATCH" || normalized === "PUT";
+}
+
+function isCachedContinuation(input) {
+  return !!input && Number.isInteger(input.byteOffset) && input.byteOffset > 0;
 }
 
 function normalizeHeaderEntries(headers) {
@@ -165,6 +179,31 @@ function maskKnownSecrets(text, secrets) {
   return out;
 }
 
+function describeUnresolved(pending) {
+  const first = pending[0];
+  const more = pending.length > 1 ? ` (and ${pending.length - 1} more)` : "";
+  return `An earlier ${first.method} ${first.endpoint}${more} was sent, but its result is unknown (no response was recorded); it may already have taken effect`;
+}
+
+function pendingForInput(input, ctx) {
+  if (isCachedContinuation(input) || normalizeMethod(input && input.method) === "GET") return [];
+  return unresolvedAttemptsForScope(ctx && ctx.unresolvedEffectAttempts, effectAttemptScope(input && input.url));
+}
+
+function rememberUnresolved(ctx, entry) {
+  if (!ctx || !Array.isArray(ctx.unresolvedEffectAttempts)) return;
+  if (ctx.unresolvedEffectAttempts.some((item) => item.fingerprint === entry.fingerprint)) return;
+  ctx.unresolvedEffectAttempts.push(entry);
+}
+
+function forgetUnresolved(ctx, pending) {
+  if (!ctx || !Array.isArray(ctx.unresolvedEffectAttempts) || !pending.length) return;
+  const done = new Set(pending.map((item) => item.fingerprint));
+  for (let index = ctx.unresolvedEffectAttempts.length - 1; index >= 0; index -= 1) {
+    if (done.has(ctx.unresolvedEffectAttempts[index].fingerprint)) ctx.unresolvedEffectAttempts.splice(index, 1);
+  }
+}
+
 function responseHeader(headers, name) {
   const wanted = String(name || "").toLowerCase();
   for (const [key, value] of Object.entries(headers || {})) {
@@ -184,10 +223,11 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
   if (typeof requestUrl !== "function") {
     throw new Error("createWebRequestTool: requestUrl function is required");
   }
-  const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? maxBytes : DEFAULT_MAX_BYTES;
+  const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? maxBytes : undefined;
   const timeout = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : REQUEST_TIMEOUT_MS;
   const readSecrets = typeof getSecrets === "function" ? getSecrets : () => ({});
   const localEffectAttempts = [];
+  const cachedResponses = new Map();
 
   return buildTool({
     name: "web_request",
@@ -195,18 +235,18 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
     inputSchema: INPUT_SCHEMA,
     capabilities: (input) => {
       const method = normalizeMethod(input && input.method);
-      const mutation = method !== "GET";
+      const mutation = !isCachedContinuation(input) && method !== "GET";
       return {
         effect: mutation ? "network_mutation" : "observation",
-        risk: isDangerousMethod(method) ? "high" : mutation ? "medium" : "low",
+        risk: mutation && isDangerousMethod(method) ? "high" : mutation ? "medium" : "low",
         concurrency: mutation ? "serial" : "parallel",
         presentation: "web",
         targets: input && typeof input.url === "string" ? [input.url] : [],
       };
     },
-    isReadOnly: (input) => normalizeMethod(input && input.method) === "GET",
-    isDestructive: (input) => isDangerousMethod(input && input.method),
-    isConcurrencySafe: (input) => normalizeMethod(input && input.method) === "GET",
+    isReadOnly: (input) => isCachedContinuation(input) || normalizeMethod(input && input.method) === "GET",
+    isDestructive: (input) => !isCachedContinuation(input) && isDangerousMethod(input && input.method),
+    isConcurrencySafe: (input) => isCachedContinuation(input) || normalizeMethod(input && input.method) === "GET",
 
     async validate(input) {
       if (!input || typeof input.url !== "string" || !input.url.trim()) {
@@ -239,6 +279,9 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       }
       const headerResult = normalizeHeaderEntries(input.headers);
       if (!headerResult.ok) return { ok: false, error: headerResult.error };
+      if (input.byteOffset !== undefined && (!Number.isInteger(input.byteOffset) || input.byteOffset < 0)) {
+        return { ok: false, error: "byteOffset must be a non-negative integer." };
+      }
       return { ok: true };
     },
 
@@ -252,9 +295,22 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       }
     },
 
-    async checkPermissions(input) {
+    async checkPermissions(input, ctx) {
+      if (isCachedContinuation(input)) return { behavior: "allow" };
       const method = normalizeMethod(input && input.method);
       const target = input && input.url ? String(input.url) : "URL";
+      const pending = pendingForInput(input, ctx);
+      if (pending.length) {
+        const message = `${describeUnresolved(pending)}. Send ${method} ${effectAttemptEndpoint(target) || target} anyway?`;
+        return {
+          behavior: "ask",
+          message,
+          summary: message,
+          risk: "dangerous",
+          requiresExplicitConfirmation: true,
+          unresolvedEffect: { method: pending[0].method, endpoint: pending[0].endpoint, count: pending.length },
+        };
+      }
       return {
         behavior: "ask",
         message: `Send ${method} request to ${target}?`,
@@ -266,7 +322,24 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       const url = String(input.url).trim();
       const method = normalizeMethod(input.method);
       const requestedCap = Number.isInteger(input.maxBytes) ? input.maxBytes : byteCap;
-      const cap = Math.max(1024, Math.min(500000, requestedCap));
+      const cap = requestedCap === undefined ? undefined : Math.max(1024, Math.min(500000, requestedCap));
+      const cacheKey = JSON.stringify({ url, method, headers: input.headers || {}, json: input.json, body: input.body });
+
+      if (input.byteOffset > 0) {
+        const cached = cachedResponses.get(cacheKey);
+        if (!cached) {
+          yield { type: "result", content: "web_request: no cached response for continuation; byteOffset=0 is required first. Mutating requests will not be replayed automatically.", isError: true };
+          return;
+        }
+        try {
+          const page = pageReadOutput(cached.text, { ctx, byteOffset: input.byteOffset, maxBytes: cap });
+          const { text: pageText, ...pageMeta } = page;
+          yield { type: "result", content: cached.header + pageText + pageNotice("web_request", page, "the same request arguments and "), isError: cached.isError, code: "cached_response", data: { page: pageMeta, originalCode: cached.code } };
+        } catch (error) {
+          yield { type: "result", content: `web_request: ${error.message}`, isError: true };
+        }
+        return;
+      }
 
       const secrets = normalizeSecrets(readSecrets() || {});
       const missing = new Set();
@@ -298,17 +371,33 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       }
 
       let effectAttempt = null;
+      let unresolvedEntry = null;
       if (method !== "GET") {
-        const claim = await claimEffectAttempt(
-          ctx && Array.isArray(ctx.effectAttempts) ? ctx.effectAttempts : localEffectAttempts,
-          "web_request",
-          projectWebMutationOperation(input),
-        );
+        const pending = pendingForInput(input, ctx);
+        const confirmed = !!(ctx && ctx.explicitEffectConfirmation === true);
+        if (pending.length && !confirmed) {
+          // Host gate, independent of the permission prompt: never send a
+          // change to a service that may already have applied an earlier one.
+          yield {
+            type: "result",
+            content: `web_request: not sent. ${describeUnresolved(pending)}. Ask the user to check that service first; ` +
+              "FLOWnote sends another change to it only after the user explicitly confirms.",
+            isError: true,
+            code: "unresolved_effect_confirmation_required",
+          };
+          return;
+        }
+        const ledger = ctx && Array.isArray(ctx.effectAttempts) ? ctx.effectAttempts : localEffectAttempts;
+        const claim = await claimEffectAttempt(ledger, "web_request", projectWebMutationOperation(input));
         if (!claim.ok) {
           yield { type: "result", content: `web_request: ${claim.error}`, isError: true, code: "effect_attempt_unavailable" };
           return;
         }
-        if (claim.duplicate) {
+        // An identical request whose first send has an unknown outcome may be
+        // retried only with explicit confirmation; it reuses the same key.
+        const confirmedRetry = claim.duplicate && confirmed && claim.entry.state === "unknown_after_send"
+          && pending.some((item) => item.fingerprint === claim.entry.fingerprint);
+        if (claim.duplicate && !confirmedRetry) {
           yield {
             type: "result",
             content: `web_request: duplicate external mutation suppressed; original attempt state is ${claim.entry.state}.`,
@@ -318,6 +407,35 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
           return;
         }
         effectAttempt = claim.entry;
+        unresolvedEntry = {
+          fingerprint: effectAttempt.fingerprint,
+          tool: "web_request",
+          scope: effectAttemptScope(url),
+          method,
+          endpoint: effectAttemptEndpoint(url),
+        };
+        if (ctx && typeof ctx.recordEffectAttempt === "function") {
+          try {
+            await ctx.recordEffectAttempt({
+              version: 1,
+              fingerprint: effectAttempt.fingerprint,
+              idempotencyKey: effectAttempt.idempotencyKey,
+              ...unresolvedEntry,
+              resolves: pending.map((item) => item.fingerprint),
+            });
+          } catch (error) {
+            releaseEffectAttempt(ledger, effectAttempt);
+            const reason = error instanceof Error ? error.message : String(error);
+            yield {
+              type: "result",
+              content: `web_request: not sent; the attempt could not be recorded before sending (${maskKnownSecrets(reason, secrets)}).`,
+              isError: true,
+              code: "effect_attempt_not_recorded",
+            };
+            return;
+          }
+        }
+        forgetUnresolved(ctx, pending);
         if (!hasHeader(headers, "idempotency-key")) headers["Idempotency-Key"] = effectAttempt.idempotencyKey;
         effectAttempt.state = "sending";
       }
@@ -340,7 +458,10 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
           }),
         ]);
       } catch (err) {
-        if (effectAttempt) effectAttempt.state = "unknown_after_send";
+        if (effectAttempt) {
+          effectAttempt.state = "unknown_after_send";
+          rememberUnresolved(ctx, unresolvedEntry);
+        }
         const rawMsg = err instanceof Error ? err.message : String(err);
         yield {
           type: "result",
@@ -359,26 +480,39 @@ function createWebRequestTool({ requestUrl, getSecrets, maxBytes, timeoutMs } = 
       const rawBody = String(response && response.text ? response.text : "");
       const cleaned = rawBody.trim() || "(empty body)";
 
-      let payload = cleaned;
-      let truncatedNotice = "";
-      if (byteLengthUtf8(cleaned) > cap) {
-        payload = cleaned.slice(0, cap);
-        truncatedNotice = `\n\n[web_request: truncated at ${cap} bytes]`;
-      }
-      payload = maskKnownSecrets(payload, secrets);
-
-      const content = `URL: ${url}\nHTTP ${status} · ${contentType}\n\n${payload}${truncatedNotice}`;
+      const safeText = maskKnownSecrets(cleaned, secrets);
+      const header = `URL: ${url}\nHTTP ${status} · ${contentType}\n\n`;
       const accepted = status >= 200 && status < 300;
       const rejected = status >= 400 && status < 500;
       if (effectAttempt) effectAttempt.state = accepted
         ? "accepted_unverified"
         : rejected ? "rejected" : "unknown_after_send";
+      if (effectAttempt && effectAttempt.state === "unknown_after_send") rememberUnresolved(ctx, unresolvedEntry);
+      const code = method === "GET" ? (accepted ? "ok" : "request_failed")
+        : accepted ? "accepted_unverified" : rejected ? "request_rejected" : "unknown_after_send";
+      cachedResponses.set(cacheKey, { header, text: safeText, isError: !accepted, code });
+      if (cachedResponses.size > 4) cachedResponses.delete(cachedResponses.keys().next().value);
+      let page;
+      try {
+        page = pageReadOutput(safeText, { ctx, maxBytes: cap });
+      } catch (error) {
+        yield {
+          type: "result",
+          content: `web_request: HTTP ${status} response cached, but ${error.message}`,
+          isError: true,
+          code: "response_budget_too_small",
+          data: { originalCode: code },
+        };
+        return;
+      }
+      const { text: pageText, ...pageMeta } = page;
+      const content = header + pageText + pageNotice("web_request", page, "the same request arguments and ");
       yield {
         type: "result",
         content,
         isError: !accepted,
-        code: method === "GET" ? (accepted ? "ok" : "request_failed")
-          : accepted ? "accepted_unverified" : rejected ? "request_rejected" : "unknown_after_send",
+        code,
+        data: { page: pageMeta },
       };
     },
   });
