@@ -863,14 +863,14 @@ function openLinkedContextFilePicker() {
   this.renderLinkedContextFilePicker();
   if (picker.searchEl) picker.searchEl.focus();
 }
-async function buildLinkedContextPromptBlock(options = {}) {
+async function buildLinkedContextPromptEvidence(options = {}) {
   const candidatePaths = options && Array.isArray(options.linkedPaths) ? options.linkedPaths : this.getLinkedContextFilePaths();
   const linkedPaths = candidatePaths
     .map((pathValue) => normalizeLinkedContextPath(pathValue))
     .filter(Boolean);
-  if (!linkedPaths.length) return "";
+  if (!linkedPaths.length) return { block: "", evidence: [] };
   const vault = this.app && this.app.vault;
-  if (!vault || typeof vault.getAbstractFileByPath !== "function") return "";
+  if (!vault || typeof vault.getAbstractFileByPath !== "function") return { block: "", evidence: [] };
   const sections = [
     "Additional context from user-linked Obsidian targets (@):",
     "Use these files/folders as reference context when answering the request.",
@@ -879,6 +879,7 @@ async function buildLinkedContextPromptBlock(options = {}) {
   let includedFiles = 0;
   let includedFolders = 0;
   let skipped = 0;
+  const evidence = [];
   for (const pathValue of linkedPaths) {
     const target = vault.getAbstractFileByPath(pathValue);
     if (!target || typeof target.path !== "string") {
@@ -917,20 +918,30 @@ async function buildLinkedContextPromptBlock(options = {}) {
     const truncated = content.length > snippet.length;
     totalChars += snippet.length;
     includedFiles += 1;
-    sections.push(``);
-    sections.push(`<<<FLOWNOTE_FILE path="${target.path}">>>`);
-    sections.push(snippet);
+    const fileSection = [`<<<FLOWNOTE_FILE path="${target.path}">>>`, snippet];
     if (truncated) {
-      sections.push(`[Truncated to ${snippet.length} chars]`);
+      fileSection.push(`[Truncated to ${snippet.length} chars]`);
     }
-    sections.push("<<<END_FLOWNOTE_FILE>>>");
+    fileSection.push("<<<END_FLOWNOTE_FILE>>>");
+    const promptBlock = fileSection.join("\n");
+    sections.push("", promptBlock);
+    evidence.push({
+      path: target.path,
+      content,
+      visibleRanges: snippet.length ? [[0, snippet.length]] : [],
+      complete: !truncated,
+      promptBlock,
+    });
   }
-  if (!includedFiles && !includedFolders) return "";
+  if (!includedFiles && !includedFolders) return { block: "", evidence: [] };
   if (skipped > 0) {
     sections.push(``);
     sections.push(`[Note] ${skipped} linked target(s) were skipped due to read errors or size limits.`);
   }
-  return sections.join("\n");
+  return { block: sections.join("\n"), evidence };
+}
+async function buildLinkedContextPromptBlock(options = {}) {
+  return (await buildLinkedContextPromptEvidence.call(this, options)).block;
 }
 async function composePromptWithLinkedFiles(basePrompt, options = {}) {
   const prompt = String(basePrompt || "");
@@ -941,8 +952,9 @@ async function composePromptWithLinkedFiles(basePrompt, options = {}) {
     .filter(Boolean);
   if (!linkedPaths.length) return prompt;
   try {
-    const contextBlock = await this.buildLinkedContextPromptBlock({ linkedPaths });
+    const { block: contextBlock, evidence } = await buildLinkedContextPromptEvidence.call(this, { linkedPaths });
     if (!contextBlock) return prompt;
+    if (Array.isArray(options.evidenceSink)) options.evidenceSink.push(...evidence);
     return `${contextBlock}\n\nUser request:\n${prompt}`;
   } catch (error) {
     if (this.plugin && typeof this.plugin.log === "function") {

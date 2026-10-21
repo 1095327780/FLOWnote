@@ -5,6 +5,9 @@
 // SessionStore/data.json. It deliberately records machine identities and
 // verified effects, never arbitrary provider/tool payloads or human prose.
 
+const { isBoundedPreview, MAX_RESULT_CHARS } = require("./tool-history-preview");
+const { normalizeEffectAttemptRecord } = require("./effect-attempt-ledger");
+
 const MAX_TARGETS = 32;
 const MAX_EFFECTS = 16;
 const MAX_CHECKPOINT_TOOL_IDS = 64;
@@ -171,6 +174,18 @@ function projectDurableExecutionFact(fact) {
         toolUseId: boundedIdentifier(source.toolUseId),
         tool: boundedIdentifier(source.tool),
         capabilities: projectCapabilities(source.capabilities),
+        // Bounded argument preview for replaying the call in later turns.
+        inputPreview: source.inputPreview && typeof source.inputPreview === "object"
+          && !Array.isArray(source.inputPreview) && isBoundedPreview(source.inputPreview)
+          ? JSON.parse(JSON.stringify(source.inputPreview))
+          : undefined,
+      };
+    case "effect_attempt_sending":
+      // Fingerprints, origin, method and endpoint only; never body or headers.
+      return {
+        type: "effect_attempt_sending",
+        toolUseId: boundedIdentifier(source.toolUseId),
+        attempt: normalizeEffectAttemptRecord(source.attempt),
       };
     case "tool_finished":
       return {
@@ -178,6 +193,9 @@ function projectDurableExecutionFact(fact) {
         toolUseId: boundedIdentifier(source.toolUseId),
         isError: source.isError === true,
         outcome: projectOutcome(source.outcome),
+        resultPreview: typeof source.resultPreview === "string"
+          ? source.resultPreview.slice(0, MAX_RESULT_CHARS + 64)
+          : undefined,
       };
     case "effect_verified":
     case "effect_unverified":

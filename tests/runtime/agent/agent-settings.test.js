@@ -24,6 +24,7 @@ test("defaultAgentSettings: deepseek + V4 Flash + direct mode + enabled", () => 
   assert.equal(s.direct.providerMode, "api");
   assert.equal(s.direct.model, "deepseek-v4-flash");
   assert.equal(s.direct.stream, true);
+  assert.equal(s.direct.reasoningMode, "low");
   assert.deepEqual(s.direct.apiKeys, {});
 });
 
@@ -88,6 +89,7 @@ test("migrateAgentSettings: existing agentProvider is normalized (missing fields
   migrateAgentSettings(settings);
   assert.equal(settings.agentProvider.direct.model, "deepseek-v4-flash");
   assert.equal(settings.agentProvider.direct.providerMode, "api");
+  assert.equal(settings.agentProvider.direct.reasoningMode, "low");
   assert.equal(settings.agentProvider.enabled, true);
 });
 
@@ -117,6 +119,15 @@ test("migrateAgentSettings: handles null/undefined gracefully", () => {
 test("normalizeAgentSettings: drops region values that aren't cn/intl", () => {
   const n = normalizeAgentSettings({ mode: "direct", direct: { providerId: "zhipu-glm", region: "europe" } });
   assert.equal(n.direct.region, undefined);
+});
+
+test("normalizeAgentSettings: validates persisted DeepSeek reasoning mode", () => {
+  for (const mode of ["low", "high", "disabled"]) {
+    assert.equal(normalizeAgentSettings({ direct: { providerId: "deepseek", reasoningMode: mode } }).direct.reasoningMode, mode);
+  }
+  for (const mode of [null, "off", "HIGH", 1]) {
+    assert.equal(normalizeAgentSettings({ direct: { providerId: "deepseek", reasoningMode: mode } }).direct.reasoningMode, "low");
+  }
 });
 
 test("normalizeAgentSettings: keeps valid region", () => {

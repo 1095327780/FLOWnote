@@ -211,3 +211,35 @@ test("plugin onload/onunload should work in minimal mocked environment", async (
     fixture.restore();
   }
 });
+
+test("source checkout bootstraps when Obsidian require is renderer-scoped", (t) => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const vm = require("node:vm");
+  const sourceDir = path.resolve(__dirname, "../..");
+  // The checkout may live anywhere (including a CI workspace). Model the
+  // installed layout explicitly rather than inferring a vault from its parents.
+  const vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flownote-bootstrap-vault-"));
+  t.after(() => fs.rmSync(vaultRoot, { recursive: true, force: true }));
+  const pluginDir = path.join(vaultRoot, ".obsidian", "plugins", "flownote");
+  fs.mkdirSync(pluginDir, { recursive: true });
+  fs.symlinkSync(path.join(sourceDir, "runtime"), path.join(pluginDir, "runtime"), "junction");
+  const loadedPaths = [];
+  const moduleObject = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(sourceDir, "main.js"), "utf8"), {
+    module: moduleObject, exports: moduleObject.exports,
+    __dirname: "/unrelated/electron/renderer",
+    window: { app: { vault: { adapter: { basePath: vaultRoot }, configDir: ".obsidian" } } },
+    require(request) {
+      if (request === "obsidian") return {};
+      if (request.startsWith("./runtime/")) throw new Error("renderer require cannot resolve plugin-relative modules");
+      if (path.isAbsolute(request)) loadedPaths.push(request);
+      return require(request);
+    },
+  }, { filename: "flownote-source-bootstrap" });
+  assert.equal(typeof moduleObject.exports, "function");
+  for (const name of ["templater-config-migration", "diagnostic-trace", "i18n-messages"]) {
+    assert.ok(loadedPaths.includes(path.join(pluginDir, "runtime", `${name}.js`)), name);
+  }
+});

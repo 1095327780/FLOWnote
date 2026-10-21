@@ -9,6 +9,7 @@
 
 const { getProviderSpec } = require("../../providers/registry");
 const { getActiveApiKey } = require("../../agent/agent-settings");
+const { getEffectiveAgentMode } = require("../../agent/agent-mode");
 const { normalizeSupportedLocale } = require("../../i18n-locale-utils");
 
 function getPluginLocale(plugin) {
@@ -40,7 +41,7 @@ function agentText(plugin, zh, en) {
  */
 function summarizeActiveAgent(plugin) {
   const settings = (plugin && plugin.settings && plugin.settings.agentProvider) || {};
-  const mode = settings.mode === "opencode-legacy" ? "opencode-legacy" : "direct";
+  const mode = getEffectiveAgentMode(settings);
 
   if (mode === "opencode-legacy") {
     // Legacy stays opaque: we don't know which model the CLI is using

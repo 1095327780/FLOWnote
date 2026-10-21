@@ -8,12 +8,12 @@ const Module = require("node:module");
 // from the API — the picker had nothing to switch to. The user could only
 // change models from Settings. buildDirectModelOptions now merges the fetched
 // catalog for any placeholder-list provider and always keeps the current model.
-function loadSharedUtils() {
+function loadSharedUtils(platform = { isMobile: false }) {
   const originalLoad = Module._load;
   const modulePath = require.resolve("../../runtime/view/layout/shared-utils");
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "obsidian") {
-      return { setIcon() {}, Notice: class {}, Platform: { isMobile: false } };
+      return { setIcon() {}, Notice: class {}, Platform: platform };
     }
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -21,6 +21,7 @@ function loadSharedUtils() {
   const loaded = require(modulePath);
   return {
     buildDirectModelOptions: loaded.buildDirectModelOptions,
+    sharedLayoutMethods: loaded.sharedLayoutMethods,
     restore() {
       Module._load = originalLoad;
       delete require.cache[modulePath];
@@ -128,6 +129,30 @@ test("a curated multi-model provider keeps its static registry list (no behavior
     const ids = fx.buildDirectModelOptions(view).map((o) => o.id);
     assert.ok(ids.length > 1, "multi-model provider should expose its full registry list");
     assert.ok(ids.includes("deepseek-v4-flash"));
+  } finally {
+    fx.restore();
+  }
+});
+
+test("mobile legacy preference populates the inline picker from its direct provider", () => {
+  const fx = loadSharedUtils({ isMobile: true });
+  try {
+    const options = [];
+    const modelSelect = {
+      empty() { options.length = 0; },
+      createEl(_tag, attrs) {
+        options.push({ value: attrs.value, text: attrs.text });
+        return {};
+      },
+      get options() { return options; },
+      value: "",
+    };
+    const view = makeView({ providerId: "deepseek", model: "deepseek-v4-flash", fetched: null });
+    view.plugin.settings.agentProvider.mode = "opencode-legacy";
+    view.elements = { modelSelect, modelSelectText: { setAttribute() {}, textContent: "" } };
+    fx.sharedLayoutMethods.updateModelSelectOptions.call(view);
+    assert.ok(options.some((option) => option.value === "deepseek-v4-flash"));
+    assert.equal(view.selectedModel, "deepseek-v4-flash");
   } finally {
     fx.restore();
   }

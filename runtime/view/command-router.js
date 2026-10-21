@@ -2,6 +2,7 @@ const { Notice } = require("obsidian");
 const { tFromContext } = require("../i18n-runtime");
 const { normalizeSupportedLocale } = require("../i18n-locale-utils");
 const { getLocalizedSkillDescription } = require("../skill-i18n");
+const { getEffectiveAgentMode } = require("../agent/agent-mode");
 
 function tr(view, key, fallback, params = {}) {
   return tFromContext(view, key, fallback, params);
@@ -292,6 +293,14 @@ function openSkillSelector() {
 }
 
 async function refreshModelList() {
+  const agent = this.plugin && this.plugin.settings && this.plugin.settings.agentProvider;
+  if (getEffectiveAgentMode(agent) === "direct") {
+    // Direct providers populate their own registry/API catalog through the
+    // inline picker. Never ask the legacy OpenCode client on mobile merely
+    // because a desktop-synced preference still says opencode-legacy.
+    if (typeof this.updateModelSelectOptions === "function") this.updateModelSelectOptions();
+    return [];
+  }
   if (this.plugin && typeof this.plugin.loadModelCatalogFromTerminalOutput === "function") {
     const cachedModels = this.plugin.loadModelCatalogFromTerminalOutput();
     if (Array.isArray(cachedModels) && cachedModels.length && typeof this.updateModelSelectOptions === "function") {
@@ -324,7 +333,7 @@ async function applyModelSelection(modelID, options = {}) {
   // Direct mode: model selection persists into settings.agentProvider.direct.model.
   // No OpenCode round-trip.
   const ap = this.plugin.settings.agentProvider;
-  if (ap && ap.mode === "direct") {
+  if (getEffectiveAgentMode(ap) === "direct") {
     const mobileTarget = getMobileOllamaModelTarget(this.plugin);
     const direct = (mobileTarget && mobileTarget.direct) || ap.direct || {};
     const previousDirectModel = String(direct.model || "");

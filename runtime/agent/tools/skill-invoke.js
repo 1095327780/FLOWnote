@@ -10,6 +10,7 @@
 const { buildTool } = require("../tool-registry");
 const { substituteArguments, renderSkillTemplateVariables } = require("../skill-registry");
 const { byteLengthUtf8 } = require("../utils/byte-length");
+const { utf8Page } = require("./utf8-page");
 
 const DESCRIPTION =
   "Load a vault skill so its instructions become available for the rest of " +
@@ -113,7 +114,7 @@ function createSkillInvokeTool({ skillRegistry, skillTemplateVariables } = {}) {
       let body = renderSkillTemplateVariables(skill.body, skillTemplateVariables);
       body = substituteArguments(body, argsStr, skill.argumentNames || []);
       if (byteLengthUtf8(body) > MAX_BODY_BYTES) {
-        body = body.slice(0, MAX_BODY_BYTES) + "\n\n[skill_invoke: body truncated — split this skill into smaller pieces]";
+        body = utf8Page(body, 0, MAX_BODY_BYTES).text + "\n\n[skill_invoke: body truncated — split this skill into smaller pieces]";
       }
       yield { type: "progress", message: `loaded skill: ${name}` };
       const resourceHint = formatResourceHint(skill);

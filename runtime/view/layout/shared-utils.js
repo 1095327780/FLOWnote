@@ -6,6 +6,7 @@ const {
   resolveSessionDisplayTitle,
 } = require("../../domain/session-title");
 const { tFromContext } = require("../../i18n-runtime");
+const { getEffectiveAgentMode } = require("../../agent/agent-mode");
 
 const LINKED_CONTEXT_ALLOWED_EXTENSIONS = new Set(["md", "canvas", "txt", "json", "csv", "yaml", "yml"]);
 const LINKED_CONTEXT_MAX_FILES = 12;
@@ -138,7 +139,7 @@ function appendGroupedModelOptions(selectEl, models, view) {
 function isDirectAgentMode(view) {
   const settings = view && view.plugin && view.plugin.settings;
   const ap = settings && settings.agentProvider;
-  return ap && ap.mode === "direct";
+  return getEffectiveAgentMode(ap) === "direct";
 }
 
 function isMobileRuntime() {

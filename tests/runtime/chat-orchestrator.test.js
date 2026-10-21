@@ -9,6 +9,7 @@ function loadRunSendPromptWithMockObsidian(options = {}) {
     if (request === "obsidian") {
       return {
         Notice: class NoticeMock {},
+        Platform: { isMobile: Boolean(options.isMobile) },
       };
     }
     if (
@@ -109,7 +110,7 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
   const view = {
     plugin: {
       sessionStore,
-      settings: { skillInjectMode: "summary", defaultModel: "" },
+      settings: { skillInjectMode: "summary", defaultModel: "", agentProvider: { mode: "opencode-legacy" } },
       skillService: {
         buildInjectedPrompt(_skill, _mode, promptText) {
           return String(promptText || "");
@@ -119,6 +120,9 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
         async sendMessage(options) {
           sentPrompt = String(options && options.prompt ? options.prompt : "");
           if (typeof options.onToken === "function") options.onToken("partial");
+          if (typeof options.onUsageSnapshot === "function") {
+            await options.onUsageSnapshot({ requestCount: 1, usage: { inputTokens: 12 } });
+          }
           return { text: "final", reasoning: "", meta: "", blocks: [] };
         },
       },
@@ -191,11 +195,12 @@ test("runSendPrompt should orchestrate draft lifecycle and finalize assistant re
     assert.equal(messages[1].role, "assistant");
     assert.equal(messages[1].text, "final");
     assert.equal(messages[1].pending, false);
+    assert.deepEqual(messages[1].stats, { requestCount: 1, usage: { inputTokens: 12 } });
     assert.deepEqual(composeLinkedPaths, ["Project/alpha.md", "Work/todo.md"]);
     assert.match(sentPrompt, /\[linked=Project\/alpha\.md,Work\/todo\.md\]/);
     assert.equal(clearLinkedContextCalled, 1);
     assert.deepEqual(view.linkedContextFiles, []);
-    assert.equal(persisted, 1);
+    assert.equal(persisted, 2);
     assert.equal(forceBottomDurations.some((duration) => Number(duration) > 0), false);
     assert.equal(renderMessageOptions.length, 1, "completion should not rebuild the entire transcript");
     assert.equal(renderMessageOptions[0].forceBottom, true);
@@ -220,7 +225,7 @@ test("runSendPrompt should keep explicit skill command for native command routin
   const view = {
     plugin: {
       sessionStore,
-      settings: { skillInjectMode: "summary", defaultModel: "" },
+      settings: { skillInjectMode: "summary", defaultModel: "", agentProvider: { mode: "opencode-legacy" } },
       skillService: {
         buildInjectedPrompt() {
           buildInjectedPromptCalled += 1;
@@ -674,7 +679,7 @@ test("stream handlers stay bound to their request session after the user switche
   const view = {
     plugin: {
       sessionStore,
-      settings: { defaultModel: "" },
+      settings: { defaultModel: "", agentProvider: { mode: "opencode-legacy" } },
       skillService: null,
       opencodeClient: {
         async sendMessage(options) {
@@ -746,6 +751,154 @@ test("stream handlers stay bound to their request session after the user switche
     assert.deepEqual(runtimeState.messagesBySession.s2, []);
     assert.equal(backgroundPanelRenders, 0, "a background request must not redraw the newly active chat");
     assert.equal(backgroundBlockStatusReads, 0, "a background request must not replace the active chat status");
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("mobile sends a synced legacy configuration through the direct runner without changing the stored mode", async () => {
+  const runtimeState = {
+    sessions: [{ id: "s1", title: "new chat", updatedAt: 0 }],
+    activeSessionId: "s1",
+    messagesBySession: { s1: [] },
+  };
+  const executionEvents = [
+    { seq: 0, time: 1, type: "run_started", runId: "draft" },
+    { seq: 1, time: 2, type: "tool_started", runId: "draft", toolUseId: "read-1", tool: "vault_read" },
+    { seq: 2, time: 3, type: "tool_finished", runId: "draft", toolUseId: "read-1", isError: false },
+    { seq: 3, time: 4, type: "run_completed", runId: "draft" },
+  ];
+  const persisted = [];
+  const fixture = loadRunSendPromptWithMockObsidian({
+    isMobile: true,
+    async runDirectAgentTurn(options) {
+      await options.handlers.onExecutionSnapshot(executionEvents.slice(0, 3));
+      await options.handlers.onExecutionSnapshot(executionEvents);
+      // Simulate an unrelated settings/view save landing after the terminal
+      // event but before the runner has assembled its final response.
+      await options.view.plugin.persistState();
+      return {
+        text: "final answer",
+        reasoning: "",
+        meta: "",
+        blocks: [{ type: "tool", tool: "vault_read", status: "done" }],
+        status: "completed",
+        execution: { version: 1, events: executionEvents },
+      };
+    },
+  });
+  const sessionStore = createSessionStore(runtimeState);
+  const view = {
+    plugin: {
+      sessionStore,
+      settings: { agentProvider: { mode: "opencode-legacy" }, defaultModel: "" },
+      skillService: null,
+      async createSession() { throw new Error("unexpected createSession"); },
+      async persistState() {
+        persisted.push(JSON.parse(JSON.stringify(runtimeState.messagesBySession.s1)));
+      },
+      markModelUnavailable() { return { hidden: false }; },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "",
+    autoScrollEnabled: true,
+    silentAbortBudget: 0,
+    currentAbort: null,
+    linkedContextFiles: [],
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return []; },
+    clearLinkedContextFiles() {},
+    composePromptWithLinkedFiles(prompt) { return String(prompt || ""); },
+    render() {}, renderMessages() {}, refreshHistoryMenu() {}, scheduleScrollMessagesToBottom() {},
+    setForceBottomWindow() {}, setBusy() {}, setRuntimeStatus() {}, findMessageRow() { return null; },
+    hasReasoningBlock() { return false; }, renderAssistantBlocks() {}, removeStandaloneReasoningContainer() {},
+    reorderAssistantMessageLayout() {}, renderInlineQuestionPanel() {}, showPermissionRequestModal: async () => "reject",
+    upsertPendingQuestionRequest() { return null; }, removePendingQuestionRequest() {}, hasVisibleQuestionToolCard() { return false; },
+    showPromptAppendModal() {}, handleToastEvent() {}, isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "hello");
+    assert.equal(view.plugin.settings.agentProvider.mode, "opencode-legacy");
+    const terminalSnapshots = persisted
+      .map((messages) => messages.find((message) => message.role === "assistant"))
+      .filter((message) => message && message.status === "completed");
+    assert.ok(terminalSnapshots.length > 0);
+    assert.ok(terminalSnapshots.every((message) => message.text === "final answer"));
+    assert.ok(terminalSnapshots.every((message) => message.blocks.length === 1));
+    assert.equal(persisted.at(-1).find((message) => message.role === "assistant").pending, false);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("OpenCode legacy turns get a host-measured change list from vault events", async () => {
+  const fixture = loadRunSendPromptWithMockObsidian();
+  const runtimeState = {
+    sessions: [{ id: "remote-1", title: "会话", updatedAt: 0 }],
+    activeSessionId: "remote-1",
+    messagesBySession: { "remote-1": [] },
+  };
+  const files = new Map([["Daily/2026-10-20.md", "old"]]);
+  const listeners = [];
+  const trigger = (type, file) => listeners.filter((ref) => ref.type === type).forEach((ref) => ref.fn(file));
+  const vault = {
+    getAbstractFileByPath: (path) => (files.has(path) ? { path } : null),
+    read: async (file) => files.get(file.path),
+    on(type, fn) { const ref = { type, fn }; listeners.push(ref); return ref; },
+    offref(ref) { listeners.splice(listeners.indexOf(ref), 1); },
+  };
+  const view = {
+    app: { vault },
+    plugin: {
+      sessionStore: createSessionStore(runtimeState),
+      settings: { agentProvider: { mode: "opencode-legacy" }, defaultModel: "" },
+      skillService: null,
+      opencodeClient: {
+        async sendMessage() {
+          // OpenCode writes to disk itself; Obsidian reports the changes.
+          files.set("Daily/2026-10-20.md", "new");
+          trigger("modify", { path: "Daily/2026-10-20.md" });
+          files.set("Inbox/Idea.md", "idea");
+          trigger("create", { path: "Inbox/Idea.md" });
+          return { text: "已更新日记并新建了想法。", reasoning: "", meta: "", blocks: [] };
+        },
+      },
+      async persistState() {},
+      markModelUnavailable() { return { hidden: false }; },
+      async saveSettings() {},
+    },
+    root: { querySelector() { return null; } },
+    elements: { messages: null },
+    selectedModel: "", autoScrollEnabled: true, silentAbortBudget: 0, currentAbort: null, linkedContextFiles: [],
+    parseModelSlashCommand() { return null; },
+    parseSkillSelectorSlashCommand() { return null; },
+    resolveSkillFromPrompt() { return { skill: null, promptText: "hello" }; },
+    getLinkedContextFilePaths() { return []; },
+    clearLinkedContextFiles() {},
+    render() {}, renderMessages() {}, renderSidebar() {}, refreshHistoryMenu() {},
+    scheduleScrollMessagesToBottom() {}, setForceBottomWindow() {}, setBusy() {}, setRuntimeStatus() {},
+    findMessageRow() { return null; }, hasReasoningBlock() { return false; }, renderAssistantBlocks() {},
+    removeStandaloneReasoningContainer() {}, reorderAssistantMessageLayout() {}, renderInlineQuestionPanel() {},
+    showPermissionRequestModal: async () => "reject", upsertPendingQuestionRequest() { return null; },
+    removePendingQuestionRequest() {}, hasVisibleQuestionToolCard() { return false; }, showPromptAppendModal() {},
+    handleToastEvent() {}, isAbortLikeError() { return false; },
+  };
+
+  try {
+    await fixture.runSendPrompt(view, "hello");
+    const assistant = runtimeState.messagesBySession["remote-1"][1];
+    assert.equal(assistant.text, "已更新日记并新建了想法。");
+    const changeBlock = assistant.blocks.find((block) => block.source === "host_measured");
+    assert.deepEqual(changeBlock.raw.files, [
+      { action: "modified", path: "Daily/2026-10-20.md" },
+      { action: "added", path: "Inbox/Idea.md" },
+    ]);
+    assert.equal(listeners.length, 0);
   } finally {
     fixture.restore();
   }

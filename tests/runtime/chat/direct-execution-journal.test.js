@@ -41,42 +41,6 @@ test("records cancellation as a terminal machine state", async () => {
   assert.equal(run.status, "cancelled");
 });
 
-test("records a blocked workflow without accepting completion, even when done repeats the disposition", async () => {
-  const journal = new DirectExecutionJournal({ runId: "draft-blocked", now: () => 30 });
-  await journal.start({ id: "skill-ah-card", mode: "workflow", source: "explicit_skill" });
-  await journal.consume({
-    type: "workflow_finish",
-    disposition: "blocked",
-    declaration: { explanation: "Choose a destination before I can continue." },
-    verified: true,
-  });
-  await journal.consume({ type: "done", disposition: "blocked" });
-
-  const run = reduceExecutionEvents(journal.events).runs["draft-blocked"];
-  assert.equal(run.status, "blocked");
-  assert.equal(run.disposition, "blocked");
-  assert.equal(run.completion, null);
-  assert.equal(journal.events.some((event) => event.type === "completion_accepted"), false);
-});
-
-test("accepts workflow completion only after workflow_finish is verified", async () => {
-  const verified = new DirectExecutionJournal({ runId: "draft-completed", now: () => 40 });
-  await verified.start({ id: "skill-ah-card", mode: "workflow" });
-  await verified.consume({ type: "workflow_finish", disposition: "completed", verified: true });
-  await verified.consume({ type: "done", disposition: "completed" });
-  const completedRun = reduceExecutionEvents(verified.events).runs["draft-completed"];
-  assert.equal(completedRun.status, "completed");
-  assert.deepEqual(completedRun.completionDecisions, ["accepted"]);
-
-  const unverified = new DirectExecutionJournal({ runId: "draft-unverified", now: () => 50 });
-  await unverified.start({ id: "skill-ah-card", mode: "workflow" });
-  await unverified.consume({ type: "workflow_finish", disposition: "completed", verified: false });
-  const failedRun = reduceExecutionEvents(unverified.events).runs["draft-unverified"];
-  assert.equal(failedRun.status, "failed");
-  assert.equal(failedRun.completion, "rejected");
-  assert.equal(unverified.events.some((event) => event.type === "completion_accepted"), false);
-});
-
 test("records suspension with its exact continuation reference instead of failing the run", async () => {
   const checkpointRef = {
     version: 1,
@@ -185,6 +149,19 @@ test("persists a bounded, safe projection instead of raw tool input or output", 
   });
   assert.equal(run.tools["call-secret"].effect.status, "verified");
   assert.deepEqual(run.tools["call-secret"].effect.receipt.paths, ["Cards/a.md"]);
+  // The history replay record keeps identities only: content becomes a length.
+  assert.deepEqual(run.tools["call-secret"].inputPreview, { path: "Cards/a.md", content: `[${sentinelInput.length} chars]` });
+  assert.match(run.tools["call-secret"].resultPreview, /^Tool failed \(\d+ chars of error output omitted/);
+});
+
+test("an explicit skill run completes on done without a model-declared finish", async () => {
+  const journal = new DirectExecutionJournal({ runId: "skill-run", now: () => 5 });
+  await journal.start({ id: "skill-x", mode: "workflow", source: "explicit_skill" });
+  await journal.consume({ type: "completion_retry", attempt: 1 });
+  await journal.consume({ type: "done" });
+  const run = reduceExecutionEvents(journal.events).runs["skill-run"];
+  assert.equal(run.status, "completed");
+  assert.deepEqual(run.completionDecisions, ["rejected", "accepted"]);
 });
 
 test("stores a checkpoint reference without checkpoint body when one is supplied", async () => {

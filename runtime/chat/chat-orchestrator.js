@@ -3,6 +3,9 @@ const { tFromContext } = require("../i18n-runtime");
 const { runDirectAgentTurn } = require("./direct-agent-runner");
 const { resolvePermissionRequestDecision } = require("../agent/permission-policy");
 const { reduceExecutionEvents } = require("../agent/execution-ledger");
+const { getEffectiveAgentMode } = require("../agent/agent-mode");
+const { createVaultChangeRecorder } = require("../agent/vault-change-recorder");
+const { buildTurnChangeBlock } = require("./turn-change-block");
 
 function tr(view, key, fallback, params = {}) {
   return tFromContext(view, key, fallback, params);
@@ -30,7 +33,7 @@ function collectUserLinkedContextFiles(view, hideUserMessage) {
 function getAgentMode(view) {
   const settings = view && view.plugin && view.plugin.settings;
   const agentProvider = settings && settings.agentProvider;
-  return agentProvider && agentProvider.mode === "direct" ? "direct" : "opencode-legacy";
+  return getEffectiveAgentMode(agentProvider);
 }
 
 function isLocalSessionId(sessionId) {
@@ -398,6 +401,17 @@ function createTransportHandlers(view, sessionId, draftId, signal) {
       await view.plugin.persistState();
     },
 
+    onUsageSnapshot: async (stats) => {
+      const store = view && view.plugin && view.plugin.sessionStore;
+      if (!store || typeof store.state !== "function" || !stats || typeof stats !== "object") return;
+      const state = store.state();
+      const messages = state && state.messagesBySession && state.messagesBySession[sessionId];
+      const draft = Array.isArray(messages) ? messages.find((message) => message && message.id === draftId) : null;
+      if (!draft) return;
+      draft.stats = JSON.parse(JSON.stringify(stats));
+      if (typeof view.plugin.persistState === "function") await view.plugin.persistState();
+    },
+
     getDeferredTerminalExecution: () => (
       deferredTerminalExecution
         ? JSON.parse(JSON.stringify(deferredTerminalExecution))
@@ -444,7 +458,7 @@ async function handlePromptFailure(view, sessionId, draftId, error, deferredTerm
         text: existing && typeof existing.text === "string" ? existing.text : "",
         reasoning: existing && typeof existing.reasoning === "string" ? existing.reasoning : "",
         meta: existing && typeof existing.meta === "string" ? existing.meta : "",
-        blocks: existing && Array.isArray(existing.blocks) ? existing.blocks : [],
+        blocks: withMeasuredChanges(existing && Array.isArray(existing.blocks) ? existing.blocks : [], error),
         execution,
         status: "cancelled",
       },
@@ -494,7 +508,7 @@ async function handlePromptFailure(view, sessionId, draftId, error, deferredTerm
       text: String((existing && existing.text) || failureCopy),
       reasoning: String((existing && existing.reasoning) || ""),
       meta: String((existing && existing.meta) || ""),
-      blocks: existing && Array.isArray(existing.blocks) ? existing.blocks : [],
+      blocks: withMeasuredChanges(existing && Array.isArray(existing.blocks) ? existing.blocks : [], error),
       execution,
       status: "failed",
     },
@@ -502,6 +516,16 @@ async function handlePromptFailure(view, sessionId, draftId, error, deferredTerm
   );
   new Notice(msg);
   return { shouldRerenderModelPicker };
+}
+
+// Wait briefly for the file watcher to report writes an external runtime
+// made just before its response completed.
+const OPENCODE_CHANGE_SETTLE_MS = 600;
+
+function withMeasuredChanges(blocks, error) {
+  const block = error && typeof error === "object" ? error.flownoteChangeBlock : null;
+  if (!block) return blocks;
+  return [...blocks.filter((item) => !(item && item.id === block.id)), block];
 }
 
 function verifiedMutationPaths(execution) {
@@ -599,6 +623,7 @@ async function runSendPrompt(view, userText, options = {}) {
   sessionId = await ensureCompatibleSessionForAgentMode(view, sessionId, agentMode);
 
   const linkedContextFiles = collectUserLinkedContextFiles(view, hideUserMessage);
+  const linkedContextEvidence = [];
   const protectedMessageIds = continuationMessageId ? [continuationMessageId] : [];
   const { draftId } = mountPendingDraft(
     view,
@@ -656,7 +681,7 @@ async function runSendPrompt(view, userText, options = {}) {
     if (useNativeSkillCommand) {
       let commandArgs = String(skillMatch.promptText || "").trim();
       if (typeof view.composePromptWithLinkedFiles === "function") {
-        commandArgs = await view.composePromptWithLinkedFiles(commandArgs, { linkedPaths: linkedContextFiles });
+        commandArgs = await view.composePromptWithLinkedFiles(commandArgs, { linkedPaths: linkedContextFiles, evidenceSink: linkedContextEvidence });
       }
       prompt = commandArgs ? `${skillCommand} ${commandArgs}` : skillCommand;
     } else {
@@ -685,7 +710,7 @@ async function runSendPrompt(view, userText, options = {}) {
         prompt = rawPrompt;
       }
       if (typeof view.composePromptWithLinkedFiles === "function") {
-        prompt = await view.composePromptWithLinkedFiles(prompt, { linkedPaths: linkedContextFiles });
+        prompt = await view.composePromptWithLinkedFiles(prompt, { linkedPaths: linkedContextFiles, evidenceSink: linkedContextEvidence });
       }
     }
 
@@ -708,6 +733,7 @@ async function runSendPrompt(view, userText, options = {}) {
         sessionId,
         draftId,
         userText: prompt,
+        linkedContextEvidence,
         intentText: String(userText || ""),
         continuationMessageId,
         continuationRunId,
@@ -716,12 +742,40 @@ async function runSendPrompt(view, userText, options = {}) {
         signal: requestAbort.signal,
       });
     } else {
-      response = await view.plugin.opencodeClient.sendMessage({
-        sessionId,
-        prompt,
-        signal: requestAbort.signal,
-        ...handlers,
-      });
+      // OpenCode writes to disk itself. Vault events during the turn are the
+      // host's measurement of what it changed.
+      const recorder = view.app && view.app.vault
+        ? createVaultChangeRecorder({ vault: view.app.vault, attributeUnwindowedEvents: true })
+        : null;
+      if (recorder) recorder.start();
+      const measuredBlock = async () => {
+        if (!recorder) return null;
+        try {
+          const { changes } = await recorder.finalize({ settleMs: OPENCODE_CHANGE_SETTLE_MS });
+          return buildTurnChangeBlock({ runId: draftId, changes });
+        } catch (_error) {
+          return null;
+        }
+      };
+      try {
+        response = await view.plugin.opencodeClient.sendMessage({
+          sessionId,
+          prompt,
+          signal: requestAbort.signal,
+          ...handlers,
+        });
+      } catch (error) {
+        const block = await measuredBlock();
+        if (block && error && typeof error === "object") error.flownoteChangeBlock = block;
+        throw error;
+      }
+      const block = await measuredBlock();
+      if (block) {
+        response = {
+          ...(response || {}),
+          blocks: [...(response && Array.isArray(response.blocks) ? response.blocks : []), block],
+        };
+      }
     }
 
     const deferredTerminalExecution = handlers && typeof handlers.getDeferredTerminalExecution === "function"

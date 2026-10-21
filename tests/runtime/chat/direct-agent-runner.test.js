@@ -10,7 +10,6 @@ const {
   resolveMainTurnTokenBudget,
 } = require("../../../runtime/chat/direct-agent-runner");
 const { ToolRegistry, buildTool } = require("../../../runtime/agent/tool-registry");
-const { resolveExecutionContract } = require("../../../runtime/agent/execution-contract");
 const { SkillRegistry } = require("../../../runtime/agent/skill-registry");
 const { createSkillResourceReadTool } = require("../../../runtime/agent/tools/skill-resource-read");
 const { saveTemplate } = require("../../../runtime/settings/template-management");
@@ -80,7 +79,7 @@ function collectHandlerCalls() {
   };
 }
 
-test("main model turns inherit the active model output limit unless the user chooses a smaller override", () => {
+test("main model turns use a bounded default and respect explicit overrides", () => {
   const provider = {
     userConfig: { model: "deepseek-v4-flash" },
     spec: {
@@ -88,101 +87,10 @@ test("main model turns inherit the active model output limit unless the user cho
     },
   };
 
-  assert.equal(resolveMainTurnTokenBudget({ direct: { maxOutputTokens: 0 } }, provider), 384_000);
+  assert.equal(resolveMainTurnTokenBudget({ direct: { maxOutputTokens: 0 } }, provider), 32_768);
   assert.equal(resolveMainTurnTokenBudget({ direct: { maxOutputTokens: 32_000 } }, provider), 32_000);
   assert.equal(resolveMainTurnTokenBudget({ direct: { maxOutputTokens: 500_000 } }, provider), 384_000);
   assert.equal(resolveMainTurnTokenBudget({ direct: {} }, { userConfig: { model: "custom" }, spec: { models: [] } }), 16_384);
-});
-
-test("resolveExecutionContract retries until the provider emits the typed control tool", async () => {
-  const provider = makeFakeProvider([
-    [
-      ev.msgStart(),
-      ev.textBlock(0),
-      ev.textDelta(0, "我会直接处理。"),
-      ev.blockStop(0),
-      ev.msgDelta("end_turn"),
-      ev.msgStop(),
-    ],
-    [
-      ev.msgStart(),
-      ev.toolUseStart(0, "contract-call", "flownote_declare_task"),
-      ev.toolUseJson(0, '{"mode":"effect","target_paths":["new.md"],"reason":"rename requested"}'),
-      ev.blockStop(0),
-      ev.msgDelta("tool_use"),
-      ev.msgStop(),
-    ],
-  ]);
-
-  const contract = await resolveExecutionContract({
-    provider,
-    userText: "把 old.md 改名为 new.md",
-    maxAttempts: 2,
-  });
-
-  assert.equal(contract.mode, "effect");
-  assert.deepEqual(contract.requiredEffects, [{ kind: "vault_mutation", targetPaths: ["new.md"] }]);
-  assert.equal(contract.source, "model_control_tool");
-});
-
-test("resolveExecutionContract fails closed when the provider never emits its control tool", async () => {
-  const textOnly = [
-    ev.msgStart(),
-    ev.textBlock(0),
-    ev.textDelta(0, "只是文本。"),
-    ev.blockStop(0),
-    ev.msgDelta("end_turn"),
-    ev.msgStop(),
-  ];
-  const provider = makeFakeProvider([textOnly, textOnly]);
-
-  await assert.rejects(
-    () => resolveExecutionContract({ provider, userText: "修改文件", maxAttempts: 2 }),
-    (error) => error && error.code === "TASK_CONTRACT_MISSING",
-  );
-});
-
-test("resolveExecutionContract does not turn provider failures into semantic retries", async () => {
-  const provider = makeFakeProvider([[
-    { type: "error", error: { type: "http_401", message: "unauthorized" } },
-  ]]);
-
-  await assert.rejects(
-    () => resolveExecutionContract({ provider, userText: "修改文件", maxAttempts: 2 }),
-    (error) => error && error.code === "http_401",
-  );
-});
-
-test("resolveExecutionContract retries truncated control output with a larger token budget", async () => {
-  const budgets = [];
-  let calls = 0;
-  const provider = {
-    userConfig: { model: "deepseek-v4-flash" },
-    spec: { defaultModel: "deepseek-v4-flash", models: [{ id: "deepseek-v4-flash", maxOutput: 384_000 }] },
-    async *createMessage(input) {
-      budgets.push(input.maxTokens);
-      calls += 1;
-      yield ev.msgStart();
-      if (calls === 1) {
-        yield ev.textBlock(0);
-        yield ev.textDelta(0, "unfinished control reasoning");
-        yield ev.blockStop(0);
-        yield ev.msgDelta("max_tokens");
-        yield ev.msgStop();
-        return;
-      }
-      yield ev.toolUseStart(0, "contract-call", "flownote_declare_task");
-      yield ev.toolUseJson(0, '{"mode":"effect","target_paths":[],"reason":"card creation"}');
-      yield ev.blockStop(0);
-      yield ev.msgDelta("tool_use");
-      yield ev.msgStop();
-    },
-  };
-
-  const contract = await resolveExecutionContract({ provider, userText: "/ah-card", maxAttempts: 2 });
-
-  assert.equal(contract.mode, "effect");
-  assert.deepEqual(budgets, [2048, 4096]);
 });
 
 async function collectToolEvents(tool, input) {
@@ -319,7 +227,6 @@ test("runDirectAgentTurn reads history from its bound session after the user swi
     userText: "continue here",
     handlers: collectHandlerCalls().handlers,
     skillRegistryOverride: new SkillRegistry([]),
-    executionContractOverride: { id: "answer-1", mode: "answer", requiredEffects: [] },
     runAgentLoopImpl: async function* (args) {
       capturedMessages = args.messages;
       yield { type: "stream", event: ev.textDelta(0, "Done") };
@@ -334,7 +241,7 @@ test("runDirectAgentTurn reads history from its bound session after the user swi
   assert.doesNotMatch(serialized, /wrong session answer/);
 });
 
-test("runDirectAgentTurn resolves an explicit standard skill locally and never calls the contract model", async () => {
+test("runDirectAgentTurn records an explicit skill's completion policy and streams its reply", async () => {
   const view = fakeView();
   setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
   view._messages.push({ id: "u1", role: "user", text: "/ah-card   source A / B  " });
@@ -359,7 +266,6 @@ test("runDirectAgentTurn resolves an explicit standard skill locally and never c
     },
   }]);
   let capturedLoopArgs = null;
-  let contractModelCalls = 0;
   const { handlers, out } = collectHandlerCalls();
 
   const response = await runDirectAgentTurn({
@@ -370,26 +276,16 @@ test("runDirectAgentTurn resolves an explicit standard skill locally and never c
     handlers,
     skillRegistryOverride: skillRegistry,
     preloadedSkillCommand: { skill: "ah-card", args: "  source A / B  ", command: "/ah-card" },
-    resolveExecutionContractImpl: async () => {
-      contractModelCalls += 1;
-      throw new Error("explicit skill must not use the contract model");
-    },
     runAgentLoopImpl: async function* (args) {
       capturedLoopArgs = args;
       yield { type: "stream", event: ev.textDelta(0, "Created the requested card.") };
-      assert.deepEqual(out.tokens, [], "workflow prose stays provisional before workflow_finish");
-      yield {
-        type: "workflow_finish",
-        disposition: "completed",
-        declaration: { summary: "Created the requested card." },
-        verified: true,
-      };
-      yield { type: "done", disposition: "completed", verified: true };
+      yield { type: "turn_complete", turnIndex: 0, stopReason: "end_turn" };
+      yield { type: "done", turns: 1 };
     },
   });
 
-  assert.equal(contractModelCalls, 0);
   assert.ok(capturedLoopArgs, "main model loop should run exactly once");
+  assert.equal(typeof capturedLoopArgs.stopCheck, "function");
   assert.equal(capturedLoopArgs.executionContract.mode, "workflow");
   assert.equal(capturedLoopArgs.executionContract.source, "explicit_skill");
   assert.equal(capturedLoopArgs.executionContract.completionMode, "effect");
@@ -404,117 +300,6 @@ test("runDirectAgentTurn resolves an explicit standard skill locally and never c
   assert.equal(response.text, "Created the requested card.");
   assert.equal(out.tokens.at(-1), "Created the requested card.");
   assert.equal(response.status, "completed");
-});
-
-test("workflow completion retry preserves the prior model summary and appends verified changes", async () => {
-  const view = fakeView();
-  view.plugin.settings.uiLanguage = "zh-CN";
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-  const { handlers, out } = collectHandlerCalls();
-
-  const response = await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: "/ah-note",
-    handlers,
-    executionContractOverride: { id: "skill-ah-note", mode: "workflow", source: "explicit_skill" },
-    runAgentLoopImpl: async function* () {
-      yield { type: "stream", event: ev.textDelta(0, "已创建今日日记，并更新了今日聚焦。") };
-      yield {
-        type: "completion_retry",
-        attempt: 1,
-        provisionalContent: [{ type: "text", text: "已创建今日日记，并更新了今日聚焦。" }],
-      };
-      yield { type: "turn_complete", turnIndex: 0, stopReason: "end_turn" };
-      yield {
-        type: "tool_start",
-        tool: "vault_write",
-        toolUseId: "write-1",
-        input: { path: "01-捕获层/每日笔记/2026-08-27.md", mode: "create" },
-      };
-      yield { type: "tool_finish", tool: "vault_write", toolUseId: "write-1", content: "created", isError: false };
-      yield {
-        type: "effect_receipt",
-        receipt: {
-          kind: "vault_mutation",
-          tool: "vault_write",
-          toolUseId: "write-1",
-          verified: true,
-          paths: ["01-捕获层/每日笔记/2026-08-27.md"],
-        },
-      };
-      yield { type: "turn_complete", turnIndex: 1, stopReason: "tool_use" };
-      yield {
-        type: "workflow_finish",
-        disposition: "completed",
-        declaration: { status: "completed", mode: "effect" },
-        verified: true,
-      };
-      yield { type: "turn_complete", turnIndex: 2, stopReason: "tool_use" };
-      yield { type: "done", disposition: "completed", verified: true };
-    },
-  });
-
-  assert.match(response.text, /^已创建今日日记，并更新了今日聚焦。/);
-  assert.match(response.text, /\*\*已完成并核验\*\*/);
-  assert.match(response.text, /- 创建 `01-捕获层\/每日笔记\/2026-08-27\.md`/);
-  assert.doesNotMatch(response.text, /操作已完成/);
-  const ordered = response.blocks.map((block) => `${block.type}:${block.phase || block.tool || ""}`);
-  assert.deepEqual(ordered, [
-    "stream-text:process",
-    "tool:vault_write",
-    "stream-text:final",
-  ]);
-  assert.ok(out.blocks.some((blocks) => blocks.some((block) => (
-    block.type === "stream-text" && block.phase === "streaming"
-  ))), "process prose should be visible before workflow_finish");
-});
-
-test("a metadata-free standard skill visibly distinguishes answer-only completion from verified note work", async () => {
-  const view = fakeView();
-  view.plugin.settings.uiLanguage = "zh-CN";
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-  view._messages.push({ id: "u1", role: "user", text: "/third-party" });
-  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
-  const skillRegistry = new SkillRegistry([{
-    name: "third-party",
-    description: "A standard third-party Skill without FLOWnote metadata.",
-    body: "Answer the request using the standard Skills protocol.",
-    userInvocable: true,
-    completionPolicy: {
-      state: "legacy_unclassified",
-      mode: null,
-      requiredEffects: [],
-      minReceipts: null,
-      errorCode: null,
-    },
-  }]);
-
-  const response = await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: "",
-    handlers: collectHandlerCalls().handlers,
-    skillRegistryOverride: skillRegistry,
-    preloadedSkillCommand: { skill: "third-party", args: "", command: "/third-party" },
-    runAgentLoopImpl: async function* () {
-      yield { type: "stream", event: ev.textDelta(0, "已完成并写入笔记。") };
-      yield {
-        type: "workflow_finish",
-        disposition: "completed",
-        declaration: { status: "completed", mode: "answer", reason: "Answered only" },
-        verified: true,
-      };
-      yield { type: "done", disposition: "completed", verified: true };
-    },
-  });
-
-  assert.match(response.text, /只返回了回答/);
-  assert.match(response.text, /没有记录到已验证的笔记读取或更改/);
-  assert.match(response.text, /已完成并写入笔记/);
-  assert.match(response.meta, /execution=answer-only/);
 });
 
 test("mobile preloaded policy repairs a stale vault manifest and canonicalizes an undefined command", async () => {
@@ -580,7 +365,6 @@ test("runDirectAgentTurn rejects an explicit skill marked user-invocable false",
     body: "DO NOT LOAD",
     userInvocable: false,
   }]);
-  let resolverCalls = 0;
   let loopCalls = 0;
 
   await assert.rejects(
@@ -592,10 +376,6 @@ test("runDirectAgentTurn rejects an explicit skill marked user-invocable false",
       handlers: collectHandlerCalls().handlers,
       skillRegistryOverride: skillRegistry,
       preloadedSkillCommand: { skill: "internal-only", args: "", command: "/internal-only" },
-      resolveExecutionContractImpl: async () => {
-        resolverCalls += 1;
-        return { id: "wrong", mode: "answer", requiredEffects: [] };
-      },
       runAgentLoopImpl: async function* () {
         loopCalls += 1;
         yield { type: "done" };
@@ -604,7 +384,6 @@ test("runDirectAgentTurn rejects an explicit skill marked user-invocable false",
     (error) => error && error.code === "SKILL_NOT_USER_INVOCABLE",
   );
 
-  assert.equal(resolverCalls, 0);
   assert.equal(loopCalls, 0);
 });
 
@@ -648,266 +427,6 @@ test("runDirectAgentTurn rejects invalid completion metadata before the provider
   );
 
   assert.equal(providerLoopCalls, 0);
-});
-
-test("runDirectAgentTurn keeps model contract resolution for ordinary natural-language requests", async () => {
-  const view = fakeView();
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-  let resolverCalls = 0;
-  let capturedContract = null;
-
-  await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: "Explain Zettelkasten linking.",
-    handlers: collectHandlerCalls().handlers,
-    resolveExecutionContractImpl: async ({ userText }) => {
-      resolverCalls += 1;
-      assert.equal(userText, "Explain Zettelkasten linking.");
-      return { id: "answer-1", mode: "answer", requiredEffects: [], source: "model_control_tool" };
-    },
-    runAgentLoopImpl: async function* (args) {
-      capturedContract = args.executionContract;
-      yield { type: "stream", event: ev.textDelta(0, "Use explicit links between notes.") };
-      yield { type: "done" };
-    },
-  });
-
-  assert.equal(resolverCalls, 1);
-  assert.equal(capturedContract.id, "answer-1");
-});
-
-test("runDirectAgentTurn classifies the compact user intent instead of duplicated linked-file content", async () => {
-  const view = fakeView();
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-  let classifiedText = "";
-  const linkedPayload = "PRIVATE_LINKED_NOTE_SENTINEL".repeat(20_000);
-
-  await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: `summarize this\n${linkedPayload}`,
-    intentText: "summarize this",
-    handlers: collectHandlerCalls().handlers,
-    skillRegistryOverride: new SkillRegistry([]),
-    resolveExecutionContractImpl: async ({ userText }) => {
-      classifiedText = userText;
-      return { id: "inspect-1", mode: "inspect", requiredEffects: [] };
-    },
-    runAgentLoopImpl: async function* () {
-      yield { type: "done" };
-    },
-  });
-
-  assert.equal(classifiedText, "summarize this");
-  assert.doesNotMatch(classifiedText, /PRIVATE_LINKED_NOTE_SENTINEL/);
-});
-
-test("runDirectAgentTurn never lets the contract model downgrade an explicit file mutation", async () => {
-  const view = fakeView();
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-  let capturedContract = null;
-
-  await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: "把总结写入 A.md",
-    intentText: "把总结写入 A.md",
-    handlers: collectHandlerCalls().handlers,
-    skillRegistryOverride: new SkillRegistry([]),
-    resolveExecutionContractImpl: async () => ({
-      id: "wrong-answer",
-      mode: "answer",
-      requiredEffects: [],
-      source: "model_control_tool",
-    }),
-    runAgentLoopImpl: async function* (args) {
-      capturedContract = args.executionContract;
-      yield { type: "done" };
-    },
-  });
-
-  assert.equal(capturedContract.mode, "effect");
-  assert.deepEqual(capturedContract.requiredEffects, [
-    { kind: "vault_mutation", targetPaths: ["A.md"] },
-  ]);
-});
-
-for (const [disposition, explanation] of [
-  ["blocked", "Choose a destination before I can continue."],
-  ["cancelled", "The workflow was cancelled."],
-]) {
-  test(`runDirectAgentTurn publishes ${disposition} workflow prose without reporting completion`, async () => {
-    const view = fakeView();
-    setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-    const skillRegistry = new SkillRegistry([{
-      name: "ah-card",
-      description: "Card workflow",
-      body: "CARD WORKFLOW",
-      userInvocable: true,
-    }]);
-    const { handlers, out } = collectHandlerCalls();
-
-    const response = await runDirectAgentTurn({
-      view,
-      sessionId: "s1",
-      draftId: `draft-${disposition}`,
-      userText: "",
-      handlers,
-      skillRegistryOverride: skillRegistry,
-      preloadedSkillCommand: { skill: "ah-card", args: "", command: "/ah-card" },
-      resolveExecutionContractImpl: async () => { throw new Error("must not run"); },
-      runAgentLoopImpl: async function* () {
-        yield { type: "stream", event: ev.textDelta(0, explanation) };
-        assert.deepEqual(out.tokens, []);
-        yield {
-          type: "workflow_finish",
-          disposition,
-          declaration: { status: disposition, reason: explanation },
-          verified: true,
-        };
-        yield { type: "done", disposition };
-      },
-    });
-
-    assert.equal(response.text, explanation);
-    assert.equal(response.status, disposition);
-    assert.equal(response.execution.events.some((event) => event.type === "completion_accepted"), false);
-    assert.equal(response.execution.events.at(-1).type, `run_${disposition}`);
-  });
-}
-
-test("runDirectAgentTurn never publishes a false mutation claim without an effect receipt", async () => {
-  const view = fakeView();
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-  view._messages.push({ id: "u1", role: "user", text: "把 old.md 改名为 new.md" });
-  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
-
-  const falseDone = [
-    ev.msgStart(),
-    ev.textBlock(0),
-    ev.textDelta(0, "已经把 old.md 重命名为 new.md。"),
-    ev.blockStop(0),
-    ev.msgDelta("end_turn"),
-    ev.msgStop(),
-  ];
-  const provider = makeFakeProvider([falseDone, falseDone]);
-  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
-
-  const { handlers } = collectHandlerCalls();
-  const response = await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: "把 old.md 改名为 new.md",
-    handlers,
-    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
-    executionContractOverride: {
-      id: "rename-contract",
-      mode: "effect",
-      requiredEffects: [{ kind: "vault_mutation", targetPaths: ["old.md", "new.md"] }],
-    },
-  });
-
-  assert.match(response.text, /未完成|not completed/i);
-  assert.doesNotMatch(response.text, /已经把 old\.md 重命名/);
-  const rejectedProcess = response.blocks.find((block) => (
-    block.type === "stream-text" && /已经把 old\.md 重命名/.test(block.text)
-  ));
-  const finalBlock = response.blocks.find((block) => block.type === "stream-text" && block.phase === "final");
-  assert.equal(rejectedProcess.phase, "process");
-  assert.equal(finalBlock.text, response.text);
-  assert.match(response.meta, /execution=incomplete/);
-});
-
-test("runDirectAgentTurn keeps provisional prose in the timeline and adds verified deliverables", async () => {
-  const view = fakeView();
-  const files = new Map();
-  view.app.vault.getFileByPath = (path) => (files.has(path) ? { path } : null);
-  view.app.vault.cachedRead = async (file) => files.get(file.path) || "";
-  view.app.vault.create = async (path, content) => {
-    files.set(path, content);
-    return { path };
-  };
-  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
-
-  const provider = makeFakeProvider([
-    [
-      ev.msgStart(),
-      ev.textBlock(0),
-      ev.textDelta(0, "已写好了。"),
-      ev.blockStop(0),
-      ev.msgDelta("end_turn"),
-      ev.msgStop(),
-    ],
-    [
-      ev.msgStart(),
-      ev.toolUseStart(0, "tu-write", "vault_write"),
-      ev.toolUseJson(0, '{"path":"new.md","content":"hello","mode":"create"}'),
-      ev.blockStop(0),
-      ev.msgDelta("tool_use"),
-      ev.msgStop(),
-    ],
-    [
-      ev.msgStart(),
-      ev.textBlock(0),
-      ev.textDelta(0, "new.md 已写入并通过回读验证。"),
-      ev.blockStop(0),
-      ev.msgDelta("end_turn"),
-      ev.msgStop(),
-    ],
-  ]);
-  const registry = new ToolRegistry();
-  registry.register(buildTool({
-    name: "vault_write",
-    description: "write",
-    inputSchema: { type: "object" },
-    capabilities: (input) => ({ effect: "vault_mutation", risk: "medium", concurrency: "serial", presentation: "edit", targets: input && input.path ? [input.path] : [] }),
-    isReadOnly: () => false,
-    async verifyEffect(input, _outcome, ctx) {
-      const file = ctx.app.vault.getFileByPath(input.path);
-      const actual = file ? await ctx.app.vault.cachedRead(file) : null;
-      return { verified: actual === input.content, outcome: actual === input.content ? "verified" : "postcondition_failed" };
-    },
-    async *execute(input, ctx) {
-      await view.app.vault.create(input.path, input.content);
-      ctx.fileStateCache.recordWrite(input.path, input.content);
-      yield { type: "result", content: `Created ${input.path}` };
-    },
-  }));
-  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
-  const { handlers, out } = collectHandlerCalls();
-  const response = await runDirectAgentTurn({
-    view,
-    sessionId: "s1",
-    draftId: "d1",
-    userText: "写入 new.md",
-    handlers,
-    toolRegistryOverride: registry,
-    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
-    executionContractOverride: {
-      id: "write-contract",
-      mode: "effect",
-      requiredEffects: [{ kind: "vault_mutation", targetPaths: ["new.md"] }],
-    },
-  });
-
-  assert.equal(files.get("new.md"), "hello");
-  assert.match(response.text, /^new\.md 已写入并通过回读验证。/);
-  assert.match(response.text, /\*\*Completed and verified\*\*/);
-  assert.match(response.text, /- Created `new\.md`/);
-  assert.equal(out.tokens.some((text) => /已写好了/.test(text)), false);
-  const provisional = response.blocks.find((block) => (
-    block.type === "stream-text" && /已写好了/.test(block.text)
-  ));
-  assert.equal(provisional.phase, "process");
-  const writeBlock = response.blocks.find((block) => block.type === "tool" && block.tool === "vault_write");
-  assert.equal(writeBlock.id, "tu-write");
-  assert.equal(writeBlock.verified, true);
-  assert.match(response.meta, /execution=verified/);
 });
 
 test("runDirectAgentTurn allows rename instructions that do not claim completion", async () => {
@@ -1056,7 +575,6 @@ test("runDirectAgentTurn projects multi-step text and tools as one stable chrono
     draftId: "d1",
     userText: "inspect then update",
     handlers,
-    executionContractOverride: { id: "answer-1", mode: "answer", requiredEffects: [] },
     runAgentLoopImpl: async function* () {
       yield { type: "stream", event: ev.textDelta(0, "Inspecting first.") };
       yield { type: "tool_start", tool: "vault_read", toolUseId: "read-1", input: { path: "A.md" } };
@@ -1506,7 +1024,7 @@ test("Direct skill_resource_read prefers the user-edited template over the embed
 // runDirectAgentTurn injects skill listing + currentDate into system prompt
 // ---------------------------------------------------------------------------
 
-test("runDirectAgentTurn passes a system prompt containing currentDate + skill listing", async () => {
+test("runDirectAgentTurn keeps current time in the current user message and skills in the stable system prompt", async () => {
   const view = fakeView();
   setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
   view._messages.push({ id: "u1", role: "user", text: "hi" });
@@ -1543,6 +1061,7 @@ test("runDirectAgentTurn passes a system prompt containing currentDate + skill l
     userText: "hi",
     handlers,
     runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+    runTurnAuditImpl: async () => ({ ok: true, report: { claims: [], messageKind: "answer_only" } }),
     skillRegistryOverride: skillRegistry,
   });
 
@@ -1550,8 +1069,10 @@ test("runDirectAgentTurn passes a system prompt containing currentDate + skill l
   const sys = capturedInput.system || "";
   // Local date is YYYY-MM-DD; we don't assert the value (would be flaky),
   // just the marker.
-  assert.match(sys, /# currentDate/);
-  assert.match(sys, /\d{4}-\d{2}-\d{2}/);
+  assert.doesNotMatch(sys, /# currentDate/);
+  const currentTurn = capturedInput.messages.at(-1).content.map(b => b.text || "").join("\n");
+  assert.match(currentTurn, /FLOWNOTE_CURRENT_TIME/);
+  assert.match(currentTurn, /\d{4}-\d{2}-\d{2}/);
   assert.match(sys, /Available skills/);
   assert.match(sys, /- ah-card:/);
   assert.match(sys, /- ah-note:/);
@@ -1575,10 +1096,7 @@ test("runDirectAgentTurn preloads explicit slash skill instructions into the cur
       yield ev.textBlock(0);
       yield ev.textDelta(0, "ok");
       yield ev.blockStop(0);
-      yield ev.toolUseStart(1, "finish-1", "flownote_finish_skill");
-      yield ev.toolUseJson(1, '{"status":"completed","mode":"answer","reason":"captured"}');
-      yield ev.blockStop(1);
-      yield ev.msgDelta("tool_use");
+      yield ev.msgDelta("end_turn");
       yield ev.msgStop();
     },
   };
@@ -1603,6 +1121,7 @@ test("runDirectAgentTurn preloads explicit slash skill instructions into the cur
     userText: "hello",
     handlers,
     runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+    runTurnAuditImpl: async () => ({ ok: true, report: { claims: [], messageKind: "answer_only" } }),
     skillRegistryOverride: skillRegistry,
     preloadedSkillCommand: {
       skill: "ah-capture",
@@ -1612,6 +1131,7 @@ test("runDirectAgentTurn preloads explicit slash skill instructions into the cur
   });
 
   assert.ok(capturedInput, "provider must have been called");
+  assert.equal(capturedInput.tools.some((tool) => tool.name === "flownote_finish_skill"), false);
   const currentTurn = capturedInput.messages[capturedInput.messages.length - 1];
   const text = currentTurn.content.map((block) => block.text || "").join("\n");
   assert.match(text, /preloaded skill: ah-capture/);
@@ -1727,7 +1247,6 @@ test("runDirectAgentTurn returns typed compact stats with real provider token us
     draftId: "d1",
     userText: "hi",
     handlers,
-    executionContractOverride: { id: "answer", mode: "answer", requiredEffects: [] },
     runAgentLoopImpl: async function* () {
       yield { type: "stream", event: { type: "message_start", message: { usage: { input_tokens: 1000 } } } };
       yield { type: "stream", event: ev.textDelta(0, "Done") };
@@ -1739,6 +1258,9 @@ test("runDirectAgentTurn returns typed compact stats with real provider token us
 
   assert.equal(response.stats.modelLabel, "DeepSeek V4 Flash");
   assert.equal(response.stats.toolCount, 0);
+  assert.equal(response.stats.requestCount, 1);
+  assert.equal(response.stats.requestUsage.length, 1);
+  assert.equal(response.stats.requestUsage[0].requestIndex, 0);
   assert.deepEqual(response.stats.usage, {
     inputTokens: 1000,
     outputTokens: 200,
@@ -1746,6 +1268,97 @@ test("runDirectAgentTurn returns typed compact stats with real provider token us
     cachedInputTokens: 0,
     reasoningTokens: 0,
   });
+});
+
+test("runDirectAgentTurn meters the main reply and the end-of-turn audit without counting repeated snapshots twice", async () => {
+  const view = fakeView();
+  view.plugin.settings.agentProvider.direct.stream = true;
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "test-key");
+  const requests = [];
+  const { handlers } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "Explain x",
+    handlers,
+    skillRegistryOverride: new SkillRegistry([]),
+    toolRegistryOverride: new ToolRegistry(),
+    requestImpl: async (request) => {
+      const body = JSON.parse(request.body);
+      const isAudit = (body.tools || []).some((tool) => tool.name === "flownote_report_turn");
+      requests.push(isAudit ? "audit" : "main");
+      const data = isAudit ? [
+        { type: "message_start", message: { usage: { input_tokens: 50, cache_read_input_tokens: 450, cache_creation_input_tokens: 20 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "report-1", name: "flownote_report_turn", input: {} } },
+        { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"claims":[],"message_kind":"answer_only"}' } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 8 } },
+        { type: "message_stop" },
+      ] : [
+        { type: "message_start", message: { usage: { input_tokens: 100, cache_read_input_tokens: 900, cache_creation_input_tokens: 0 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Public explanation" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 25 } },
+        { type: "message_stop" },
+      ];
+      const sse = data.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+      return { status: 200, headers: {}, text: async () => sse };
+    },
+  });
+
+  assert.deepEqual(requests, ["main", "audit"]);
+  assert.equal(response.text, "Public explanation");
+  assert.equal(response.stats.requestCount, 2);
+  assert.deepEqual(response.stats.requestUsage.map(({ phase, responseComplete, requestIndex }) => [phase, responseComplete, requestIndex]), [
+    ["main", true, 0], ["audit", true, 1],
+  ]);
+  assert.equal(response.stats.usage.inputTokens, 1520);
+  assert.equal(response.stats.usage.cachedInputTokens, 1350);
+  assert.equal(response.stats.usage.cacheWriteInputTokens, 20);
+  assert.equal(response.stats.usage.outputTokens, 33);
+  assert.equal(response.stats.usage.totalTokens, 1553);
+});
+
+test("runDirectAgentTurn keeps complete text from a non-streaming Anthropic-compatible response", async () => {
+  const view = fakeView();
+  view.plugin.settings.agentProvider.direct.stream = false;
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "test-key");
+  const { handlers } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view,
+    sessionId: "s1",
+    draftId: "d1",
+    userText: "Explain x",
+    handlers,
+    skillRegistryOverride: new SkillRegistry([]),
+    toolRegistryOverride: new ToolRegistry(),
+    requestImpl: async (request) => {
+      const isAudit = (JSON.parse(request.body).tools || []).some((tool) => tool.name === "flownote_report_turn");
+      return {
+        status: 200,
+        text: async () => JSON.stringify(isAudit ? {
+          content: [{ type: "tool_use", id: "report-1", name: "flownote_report_turn", input: { claims: [], message_kind: "answer_only" } }],
+          stop_reason: "tool_use",
+          usage: { input_tokens: 0, output_tokens: 0 },
+        } : {
+          content: [{ type: "text", text: "Complete buffered answer" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 40, cache_read_input_tokens: 60, output_tokens: 5 },
+        }),
+      };
+    },
+  });
+
+  assert.equal(response.text, "Complete buffered answer");
+  assert.equal(response.stats.requestCount, 2);
+  assert.equal(response.stats.usage.inputTokens, 100);
+  assert.equal(response.stats.usage.cachedInputTokens, 60);
+  assert.equal(response.stats.usage.outputTokens, 5);
+  assert.deepEqual(response.stats.requestUsage.map(({ phase, responseComplete }) => [phase, responseComplete]), [
+    ["main", true], ["audit", true],
+  ]);
 });
 
 test("runDirectAgentTurn returns a suspended response with verified partial-effect recovery copy", async () => {
@@ -1777,7 +1390,6 @@ test("runDirectAgentTurn returns a suspended response with verified partial-effe
     draftId: "d1",
     userText: "/ah-card",
     handlers,
-    executionContractOverride: contract,
     checkpointStoreOverride: {
       store: async (value) => {
         storedCheckpoints.push(value);
@@ -1871,7 +1483,6 @@ test("suspension fails closed as a typed failed run when durable checkpoint stor
       draftId: "d1",
       userText: "/safe-suspend",
       handlers,
-      executionContractOverride: contract,
       runAgentLoopImpl: async function* () {
         yield { type: "suspended", reason: "no_progress", stage: "between_turns", turns: 8, checkpoint };
       },
@@ -1945,13 +1556,7 @@ test("runDirectAgentTurn leaves a consumed checkpoint intact until the caller du
     },
     runAgentLoopImpl: async function* (args) {
       captured = args;
-      yield {
-        type: "workflow_finish",
-        disposition: "completed",
-        declaration: { status: "completed", mode: "answer", reason: "Complete" },
-        verified: true,
-      };
-      yield { type: "done", disposition: "completed", verified: true };
+      yield { type: "done", turns: 1 };
     },
   });
 
@@ -1963,7 +1568,7 @@ test("runDirectAgentTurn leaves a consumed checkpoint intact until the caller du
   assert.deepEqual(removed, []);
 });
 
-test("runDirectAgentTurn resumes the exact checkpoint and skips skill and contract reclassification", async () => {
+test("runDirectAgentTurn resumes the exact checkpoint with its saved skill policy", async () => {
   const view = fakeView();
   setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
   const contract = { id: "skill-ah-card", mode: "workflow", source: "explicit_skill" };
@@ -2006,7 +1611,6 @@ test("runDirectAgentTurn resumes the exact checkpoint and skips skill and contra
   view._messages.push({ id: "d2", role: "assistant", text: "", pending: true });
   const { handlers } = collectHandlerCalls();
   let captured = null;
-  let resolverCalls = 0;
 
   const response = await runDirectAgentTurn({
     view,
@@ -2016,15 +1620,12 @@ test("runDirectAgentTurn resumes the exact checkpoint and skips skill and contra
     continuationMessageId: "a1",
     continuationRunId: "old-run",
     handlers,
-    resolveExecutionContractImpl: async () => { resolverCalls += 1; return { mode: "answer" }; },
     runAgentLoopImpl: async function* (args) {
       captured = args;
-      yield { type: "workflow_finish", disposition: "completed", declaration: { status: "completed", mode: "answer" }, verified: true };
-      yield { type: "done", disposition: "completed", verified: true };
+      yield { type: "done", turns: 1 };
     },
   });
 
-  assert.equal(resolverCalls, 0);
   assert.equal(captured.executionContract.id, "skill-ah-card");
   assert.deepEqual(captured.resumeState.effectReceipts, checkpoint.effectReceipts);
   assert.equal(captured.resumeState.turns, 20);
@@ -2032,4 +1633,136 @@ test("runDirectAgentTurn resumes the exact checkpoint and skips skill and contra
   assert.match(JSON.stringify(captured.messages), /FLOWNOTE_RESUME/);
   assert.match(JSON.stringify(captured.messages), /read-1/);
   assert.equal(response.status, "completed");
+});
+
+
+// ---------------------------------------------------------------------------
+// Measured changes and end-of-turn reconciliation
+// ---------------------------------------------------------------------------
+
+function measuredVaultView(initialFiles = {}, folders = ["Inbox"]) {
+  const view = fakeView();
+  const files = new Map(Object.entries(initialFiles));
+  const folderSet = new Set(folders);
+  const listeners = [];
+  view.app.vault = {
+    files,
+    getFileByPath: (path) => (files.has(path) ? { path, name: path.split("/").pop() } : null),
+    getFolderByPath: (path) => (folderSet.has(path) ? { path, children: [] } : null),
+    getAbstractFileByPath(path) { return this.getFileByPath(path) || this.getFolderByPath(path); },
+    read: async (file) => files.get(file.path),
+    cachedRead: async (file) => files.get(file.path),
+    async create(path, content) { files.set(path, content); return { path }; },
+    async modify(file, content) { files.set(file.path, content); },
+    async process(file, fn) { const next = fn(files.get(file.path)); files.set(file.path, next); return next; },
+    on(type, fn) { const ref = { type, fn }; listeners.push(ref); return ref; },
+    offref(ref) { listeners.splice(listeners.indexOf(ref), 1); },
+    listenerCount: () => listeners.length,
+  };
+  setApiKeyFor(view.plugin.settings.agentProvider, "deepseek", "k");
+  return view;
+}
+
+const textTurn = (text) => [ev.msgStart(), ev.textBlock(0), ev.textDelta(0, text), ev.blockStop(0), ev.msgDelta("end_turn"), ev.msgStop()];
+
+test("an unbacked completion claim goes back to the model; only the answer after the real write is published", async () => {
+  const view = measuredVaultView();
+  view._messages.push({ id: "u1", role: "user", text: "把这句话存到 Inbox/Note.md" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+  const provider = makeFakeProvider([
+    textTurn("已把内容保存到 Inbox/Note.md。"),
+    [ev.msgStart(), ev.toolUseStart(0, "w1", "vault_write"), ev.toolUseJson(0, '{"path":"Inbox/Note.md","content":"那句话\\n"}'), ev.blockStop(0), ev.msgDelta("tool_use"), ev.msgStop()],
+    textTurn("已保存到 Inbox/Note.md。"),
+  ]);
+  const audits = [];
+  const { handlers, out } = collectHandlerCalls();
+  const response = await runDirectAgentTurn({
+    view, sessionId: "s1", draftId: "d1", userText: "把这句话存到 Inbox/Note.md", handlers,
+    skillRegistryOverride: new SkillRegistry([]),
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+    runTurnAuditImpl: async (input) => {
+      audits.push(input);
+      return { ok: true, report: { claims: [{ text: "已保存到 Inbox/Note.md", backedBy: input.changes.length ? 0 : -1 }], messageKind: "reports_done" } };
+    },
+  });
+
+  assert.equal(view.app.vault.files.get("Inbox/Note.md"), "那句话\n");
+  assert.equal(audits.length, 2);
+  assert.deepEqual(audits[0].changes, []);
+  assert.deepEqual(audits[1].changes, [{ path: "Inbox/Note.md", op: "created" }]);
+  assert.equal(response.text, "已保存到 Inbox/Note.md。");
+  assert.deepEqual(response.changes, [{ path: "Inbox/Note.md", op: "created" }]);
+  const finalTexts = response.blocks.filter((block) => block.type === "stream-text" && block.phase === "final").map((block) => block.text);
+  assert.deepEqual(finalTexts, ["已保存到 Inbox/Note.md。"]);
+  assert.ok(response.blocks.some((block) => block.type === "stream-text" && block.phase === "process" && /已把内容保存/.test(block.text)));
+  const changeBlock = response.blocks.at(-1);
+  assert.equal(changeBlock.source, "host_measured");
+  assert.deepEqual(changeBlock.raw.files, [{ action: "added", path: "Inbox/Note.md" }]);
+  assert.ok(out.tokens.includes(""), "the retracted claim is cleared from the live bubble");
+  assert.equal(view.app.vault.listenerCount(), 0);
+  const receipt = response.execution.events.find((event) => event.type === "effect_verified");
+  assert.deepEqual(receipt.receipt.paths, ["Inbox/Note.md"]);
+});
+
+test("a pure answer produces no change block and is not rewritten", async () => {
+  const view = measuredVaultView();
+  view._messages.push({ id: "u1", role: "user", text: "什么是卡片笔记？" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+  const { runAgentLoop } = require("../../../runtime/agent/agent-loop");
+  const provider = makeFakeProvider([textTurn("卡片笔记是……")]);
+  const response = await runDirectAgentTurn({
+    view, sessionId: "s1", draftId: "d1", userText: "什么是卡片笔记？", handlers: collectHandlerCalls().handlers,
+    skillRegistryOverride: new SkillRegistry([]),
+    runAgentLoopImpl: (args) => runAgentLoop({ ...args, provider }),
+    runTurnAuditImpl: async () => ({ ok: true, report: { claims: [], messageKind: "answer_only" } }),
+  });
+  assert.equal(response.text, "卡片笔记是……");
+  assert.deepEqual(response.changes, []);
+  assert.equal(response.blocks.some((block) => block.type === "patch"), false);
+});
+
+test("a failed run still reports the files it really changed", async () => {
+  const view = measuredVaultView();
+  view._messages.push({ id: "u1", role: "user", text: "x" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+  await assert.rejects(
+    () => runDirectAgentTurn({
+      view, sessionId: "s1", draftId: "d1", userText: "x", handlers: collectHandlerCalls().handlers,
+      skillRegistryOverride: new SkillRegistry([]),
+      runAgentLoopImpl: async function* (args) {
+        await args.ctx.app.vault.create("Inbox/Partial.md", "partial");
+        yield { type: "error", error: { type: "provider_stream_error", message: "boom" } };
+      },
+    }),
+    (error) => {
+      assert.deepEqual(error.flownoteChangeBlock.raw.files, [{ action: "added", path: "Inbox/Partial.md" }]);
+      return true;
+    },
+  );
+  assert.equal(view.app.vault.listenerCount(), 0);
+});
+
+test("an explicit effect skill that reports completion without any change is sent back to the model", async () => {
+  const view = measuredVaultView();
+  view._messages.push({ id: "u1", role: "user", text: "/ah-capture idea" });
+  view._messages.push({ id: "d1", role: "assistant", text: "", pending: true });
+  const skillRegistry = new SkillRegistry([{
+    name: "ah-capture", slug: "ah-capture", description: "Capture", body: "BODY", argumentNames: [], resourcePaths: [],
+    dirPath: "<test>/ah-capture", userInvocable: true,
+    completionPolicy: { state: "declared", mode: "effect", requiredEffects: [], requiredInteractions: [], minReceipts: null, errorCode: null },
+  }]);
+  let verdict = null;
+  await runDirectAgentTurn({
+    view, sessionId: "s1", draftId: "d1", userText: "idea", handlers: collectHandlerCalls().handlers,
+    skillRegistryOverride: skillRegistry,
+    preloadedSkillCommand: { skill: "ah-capture", args: "idea", command: "/ah-capture" },
+    runTurnAuditImpl: async () => ({ ok: true, report: { claims: [], messageKind: "reports_done" } }),
+    runAgentLoopImpl: async function* (args) {
+      verdict = await args.stopCheck({ finalContent: [{ type: "text", text: "已记录。" }], interactionReceipts: [] });
+      yield { type: "done", turns: 1 };
+    },
+  });
+  assert.equal(verdict.allow, false);
+  assert.match(verdict.feedback, /\/ah-capture must change the vault, but nothing changed/);
 });
