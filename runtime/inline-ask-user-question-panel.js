@@ -382,7 +382,10 @@ class InlineAskUserQuestionPanel {
     const actionsEl = this.contentArea.createDiv({ cls: "claudian-ask-list" });
     const allAnswered = this.questions.every((_, i) => this.isQuestionAnswered(i));
 
-    const submitRow = actionsEl.createEl("button", { cls: "claudian-ask-item", attr: { type: "button", disabled: allAnswered ? undefined : "true" } });
+    // Obsidian's createEl sets attr values verbatim; `disabled: undefined`
+    // would become disabled="undefined". Use the boolean property instead.
+    const submitRow = actionsEl.createEl("button", { cls: "claudian-ask-item", attr: { type: "button" } });
+    submitRow.disabled = !allAnswered;
     if (this.focusedItemIndex === 0) submitRow.addClass("is-focused");
     if (!allAnswered) submitRow.addClass("is-disabled");
     submitRow.createSpan({ text: this.focusedItemIndex === 0 ? "›" : " ", cls: "claudian-ask-cursor" });
