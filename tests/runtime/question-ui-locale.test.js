@@ -339,3 +339,58 @@ test("session switching is a native button sibling to rename and delete controls
   assert.doesNotMatch(source, /item\.addEventListener\("keydown"/);
   assert.match(source, /aria-current/);
 });
+
+// Mimics Obsidian's createEl: attr values are passed to setAttribute verbatim
+// (undefined becomes "undefined"), and a disabled button ignores clicks.
+function obsidianLikeEl(tag = "div") {
+  const attrs = new Map();
+  const listeners = {};
+  const el = {
+    tag, children: [], classes: new Set(), text: "",
+    setAttribute(name, value) { attrs.set(name, String(value)); },
+    getAttribute(name) { return attrs.has(name) ? attrs.get(name) : null; },
+    get disabled() { return attrs.has("disabled"); },
+    set disabled(value) { if (value) attrs.set("disabled", ""); else attrs.delete("disabled"); },
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    click() { if (this.disabled) return; (listeners.click || []).forEach((fn) => fn({})); },
+    addClass(cls) { this.classes.add(cls); },
+    createEl(childTag, options = {}) {
+      const child = obsidianLikeEl(childTag);
+      if (options.cls) child.classes.add(options.cls);
+      if (options.text !== undefined) child.text = String(options.text);
+      for (const [key, value] of Object.entries(options.attr || {})) child.setAttribute(key, value);
+      this.children.push(child);
+      return child;
+    },
+    createDiv(options) { return this.createEl("div", options); },
+    createSpan(options) { return this.createEl("span", options); },
+  };
+  return el;
+}
+
+test("inline question Submit is clickable with the mouse once every question is answered", () => {
+  let resolved;
+  const panel = new InlineAskUserQuestionPanel({}, {}, (result) => { resolved = result; }, null, {});
+  panel.questions = [{ question: "颜色?", options: [{ label: "红" }] }];
+  panel.answers.set(0, new Set());
+  panel.customInputs.set(0, "");
+  panel.updateFocusIndicator = () => {};
+
+  const findSubmit = () => {
+    panel.contentArea = obsidianLikeEl();
+    panel.currentItems = [];
+    panel.renderSubmitTab();
+    return panel.currentItems[0];
+  };
+
+  const blocked = findSubmit();
+  assert.equal(blocked.disabled, true);
+  blocked.click();
+  assert.equal(resolved, undefined);
+
+  panel.answers.get(0).add("红");
+  const ready = findSubmit();
+  assert.equal(ready.getAttribute("disabled"), null);
+  ready.click();
+  assert.deepEqual(resolved, { "颜色?": "红" });
+});
