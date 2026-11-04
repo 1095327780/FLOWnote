@@ -10,6 +10,7 @@ const {
   rememberPluginVersion,
 } = require("../release-notice");
 const { setRuntimeLocale } = require("../runtime-locale-state");
+const { getEffectiveAgentMode } = require("../agent/agent-mode");
 
 const RUNTIME_SCHEMA_VERSION = 1;
 
@@ -461,9 +462,7 @@ const sessionBootstrapMethods = {
   async createSession(title) {
     // Direct mode (and mobile, which always uses direct) doesn't have a
     // remote session backend — generate a local ID.
-    const mode = this.settings
-      && this.settings.agentProvider
-      && this.settings.agentProvider.mode;
+    const mode = getEffectiveAgentMode(this.settings && this.settings.agentProvider);
     const useDirect = mode === "direct" || !this.opencodeClient;
     let sessionId = "";
     let createdTitle = "";
@@ -657,15 +656,9 @@ const sessionBootstrapMethods = {
   },
 
   async runBootstrapRemote() {
-    // No OpenCode bridge (mobile, or desktop running in direct mode
-    // before any OpenCode-only init): the remote model catalog + remote
-    // session sync don't apply. Refresh the model catalog via the
-    // direct-mode provider so the model picker still has something
-    // to show, but skip the remote session pull.
-    if (!this.opencodeClient) {
-      if (typeof this.refreshModelCatalog === "function") {
-        try { await this.refreshModelCatalog(); } catch { /* non-fatal */ }
-      }
+    // Direct model choices come from provider settings, not the OpenCode catalog.
+    if (getEffectiveAgentMode(this.settings && this.settings.agentProvider) === "direct" || !this.opencodeClient) {
+      if (typeof this.notifyModelCatalogUpdated === "function") this.notifyModelCatalogUpdated();
       this.bootstrapRemoteDone = true;
       this.bootstrapRemoteAt = Date.now();
       return;

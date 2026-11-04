@@ -21,6 +21,7 @@ const {
 } = require("../agent/agent-settings");
 const { normalizeToolPermissionMode } = require("../agent/permission-policy");
 const { buildProviderFromSpec } = require("../agent/agent-provider-resolver");
+const { getEffectiveAgentMode } = require("../agent/agent-mode");
 const {
   getProviderSpec,
   listProviderSpecs,
@@ -29,8 +30,7 @@ const {
 } = require("../providers/registry");
 
 function getEffectiveAgentProviderMode(agent, platform = Platform) {
-  const persistedMode = agent && agent.mode === "opencode-legacy" ? "opencode-legacy" : "direct";
-  return platform && platform.isMobile ? "direct" : persistedMode;
+  return getEffectiveAgentMode(agent, platform);
 }
 
 function ensureAgentProviderSettings(plugin) {
@@ -343,6 +343,25 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
   if (!spec) return;
   scheduleOllamaModelAutofetch({ plugin, agent, spec, refresh: reRender });
 
+  if (spec.id === "deepseek") {
+    new Setting(containerEl)
+      .setName(t("settings.agent.deepseekReasoningName", "DeepSeek 思考模式"))
+      .setDesc(t(
+        "settings.agent.deepseekReasoningDesc",
+        "日常使用低档以减少思考 token；复杂任务可切高档，或完全关闭思考。只影响 DeepSeek 请求，不会切换模型。",
+      ))
+      .addDropdown((d) => {
+        d.addOption("low", t("settings.agent.deepseekReasoningLow", "低（默认，日常省 token）"));
+        d.addOption("high", t("settings.agent.deepseekReasoningHigh", "高（复杂任务）"));
+        d.addOption("disabled", t("settings.agent.deepseekReasoningDisabled", "关闭思考"));
+        d.setValue(agent.direct.reasoningMode);
+        bindDropdownChange(d, async (mode) => {
+          agent.direct.reasoningMode = mode === "high" || mode === "disabled" ? mode : "low";
+          await plugin.saveSettings();
+        });
+      });
+  }
+
   // --- Mode dropdown (only if provider has more than one mode) ------------
   const modeIds = Object.keys(spec.modes || {});
   if (modeIds.length > 1) {
@@ -611,6 +630,7 @@ function renderAgentProviderSection({ containerEl, plugin, tab, refresh }) {
             versionHeaderOverride: agent.direct.versionHeaderOverride || "",
             stream: false, // simpler + faster for the test ping
           };
+          if (spec.id === "deepseek") userConfig.reasoningMode = agent.direct.reasoningMode;
           if (!userConfig.apiKey && !spec.apiKeyOptional) {
             throw new Error(t("settings.agent.testNoKey", "请先填写 API Key。"));
           }
@@ -677,7 +697,7 @@ function renderAgentProviderAdvanced({ containerEl, plugin, tab }) {
     plugin.settings.agentProvider = normalizeAgentSettingsInPlace(plugin.settings.agentProvider);
   }
   const agent = plugin.settings.agentProvider;
-  if (agent.mode !== "direct") return;
+  if (getEffectiveAgentMode(agent) !== "direct") return;
   const spec = getProviderSpec(agent.direct.providerId);
   if (!spec) return;
 
@@ -750,19 +770,15 @@ function renderAgentProviderAdvanced({ containerEl, plugin, tab }) {
       });
     });
 
-  const activeModel = (spec.models || []).find((m) => m && m.id === agent.direct.model);
-  const modelCeiling = (activeModel && activeModel.maxOutput) || 0;
   new Setting(containerEl)
     .setName(t("settings.agent.maxOutputName", "单次输出 token 上限"))
     .setDesc(t(
       "settings.agent.maxOutputDesc",
-      "留 0 或空 = 直接用当前模型的硬上限（推荐，模型只生成需要的长度，多余不浪费）。" +
-      "想限制成本时可手动填一个较小值。" +
-      (modelCeiling > 0 ? `当前模型「${activeModel.label}」硬上限：${modelCeiling.toLocaleString()} tokens。` : ""),
+      "留 0 或空 = 自动按任务使用安全默认值；想限制单次输出成本时可手动填较小值。",
     ))
     .addText((tx) => {
       tx
-        .setPlaceholder(modelCeiling > 0 ? String(modelCeiling) : "16384")
+        .setPlaceholder("0")
         .setValue(agent.direct.maxOutputTokens ? String(agent.direct.maxOutputTokens) : "")
         .onChange(async (v) => {
           const n = Number(String(v || "").trim());

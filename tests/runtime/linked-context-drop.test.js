@@ -497,6 +497,36 @@ test("buildLinkedContextPromptBlock should include folder path without attaching
   }
 });
 
+test("linked context composition returns exact prompt evidence with truncation boundaries", async () => {
+  const fixture = loadLinkedContextMethodsWithMockObsidian();
+  try {
+    const { linkedContextMethods } = fixture;
+    const longText = "L".repeat(9500);
+    const { view } = createMockView(linkedContextMethods, {
+      filesByPath: { "short.md": "md", "long.md": "md" },
+      fileContentsByPath: { "short.md": "short source", "long.md": longText },
+      initialLinked: ["short.md", "long.md"],
+    });
+    const evidenceSink = [];
+    const prompt = await view.composePromptWithLinkedFiles("make a card", { evidenceSink });
+    assert.equal(evidenceSink.length, 2);
+    assert.equal(evidenceSink[0].content, "short source");
+    assert.deepEqual(evidenceSink[0].visibleRanges, [[0, 12]]);
+    assert.equal(evidenceSink[0].complete, true);
+    assert.equal(evidenceSink[0].promptBlock,
+      '<<<FLOWNOTE_FILE path="short.md">>>\nshort source\n<<<END_FLOWNOTE_FILE>>>');
+    assert.equal(evidenceSink[1].content, longText);
+    assert.deepEqual(evidenceSink[1].visibleRanges, [[0, 9000]]);
+    assert.equal(evidenceSink[1].complete, false);
+    assert.equal(evidenceSink[1].promptBlock,
+      `<<<FLOWNOTE_FILE path="long.md">>>\n${"L".repeat(9000)}\n[Truncated to 9000 chars]\n<<<END_FLOWNOTE_FILE>>>`);
+    assert.ok(evidenceSink.every((item) => prompt.includes(item.promptBlock)));
+    assert.match(prompt, /\[Truncated to 9000 chars\]/);
+  } finally {
+    fixture.restore();
+  }
+});
+
 test("handleLinkedContextInputDrop should ignore non-file payloads", () => {
   const fixture = loadLinkedContextMethodsWithMockObsidian();
   try {

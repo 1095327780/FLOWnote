@@ -10,6 +10,14 @@
 
 > FLOWnote 默认使用用户自行配置的 AI API Key，在桌面端和移动端都可运行。OpenCode 仍作为可选的桌面端桥接模式保留，适合已经习惯旧工作流的用户。
 
+## 控制 AI 开销
+
+DeepSeek 默认使用「日常（低强度）」思考模式。捕获和编辑通常可先用日常模式；复杂分析可切换为「深度」，简单操作也可关闭思考。设置中的「单次输出 token 上限」留空或设为 0 时，使用最多 32,768 tokens 的自动上限（不超过模型限制）；长文写入可手动调高。
+
+回复下方分别显示输入、输出、缓存命中和请求次数。思考用量仅在服务商报告时显示，属于输出的一部分；「缓存未报告」不等于没有命中。输入包含缓存部分，不能直接把总 token 数乘以未缓存单价当成实际费用。
+
+文件、网页和技能资源根据模型剩余上下文预算读取：能容纳的全文一次返回，局部修改优先按行读取，实际超出预算时才分页。完全相同的重复读取结果引用会话中保留的原文；不会仅为压低 token 数删除独有证据。用量统计包含正式执行与回复结束时核对文件变更的全部模型请求，具体费用仍取决于任务与缓存命中。
+
 ## 产品预览
 
 <p align="center">
@@ -19,6 +27,12 @@
 <p align="center">
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote 聊天工作区">
 </p>
+
+## v0.6.0 发布说明
+
+- **改了什么以实际为准**：FLOWnote 会实际检测每一轮对文件的修改，并在回复下方列出改动的文件和差异；AI 声称做了但实际没做时，会自动补做或如实说明。
+- **界面全面优化**：配色跟随 Obsidian 主题，聊天、首页和手机端样式统一，更简洁。
+- **更稳定**：修复中文流式偶发乱码、网络请求崩溃后可能重复发送等问题。
 
 ## v0.5.25 发布说明
 
@@ -326,6 +340,12 @@ Language: [简体中文](#flownote) | **English** | [Русский](README.ru.m
 <p align="center">
   <img src="assets/screenshots/chat-workspace.png" width="100%" alt="FLOWnote chat workspace">
 </p>
+
+## v0.6.0 Release Notes
+
+- **Changes you can trust**: FLOWnote measures every file change in a turn and lists the changed files with diffs under the reply. If the AI claims a change it did not make, it completes it or says so plainly.
+- **Refreshed interface**: Colors follow your Obsidian theme, and chat, home and mobile share one cleaner style.
+- **More reliable**: Fixes occasional garbled Chinese while streaming and possible duplicate web requests after a crash.
 
 ## v0.5.25 Release Notes
 

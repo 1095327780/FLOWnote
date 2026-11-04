@@ -141,9 +141,9 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
       const normalized = resolveWritablePath(normalize(input.path));
       const content = input.content;
       const existing = vault.getFileByPath(normalized);
-      const recordWrite = (finalContent) => {
+      const recordWrite = (finalContent, visibility) => {
         if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordWrite === "function") {
-          ctx.fileStateCache.recordWrite(normalized, finalContent);
+          ctx.fileStateCache.recordWrite(normalized, finalContent, visibility);
         }
       };
 
@@ -188,8 +188,19 @@ function createVaultWriteTool({ vault, normalizePath } = {}) {
         const current = await vault.cachedRead(existing);
         const joined = `${current || ""}${content}`;
         throwIfToolAborted(ctx);
-        await vault.modify(existing, joined);
-        recordWrite(joined);
+        if (typeof vault.process === "function") {
+          await vault.process(existing, live => {
+            if (live !== current) throw new Error("vault_write: file changed before append; retry with current text.");
+            return joined;
+          });
+        } else {
+          if (await vault.cachedRead(existing) !== current) throw new Error("vault_write: file changed before append; retry with current text.");
+          await vault.modify(existing, joined);
+        }
+        const before = ctx && ctx.fileStateCache && typeof ctx.fileStateCache.get === "function" ? ctx.fileStateCache.get(normalized) : null;
+        const fullyVisible = before && before.content === current && (before.visibleRanges || [])
+          .some(([start, end]) => start === 0 && end === String(current || "").length);
+        recordWrite(joined, { visibleRanges: [[fullyVisible ? 0 : String(current || "").length, joined.length]] });
         yield {
           type: "result",
           content: `Appended ${byteLengthUtf8(content)} bytes to "${normalized}".`,

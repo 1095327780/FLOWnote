@@ -42,18 +42,14 @@ test("buildSystemPrompt omits the Context block when no opts given", () => {
   assert.doesNotMatch(out, /Context:/);
 });
 
-test("buildSystemPrompt includes currentDate when opts.todayLabel is set", () => {
-  const out = buildSystemPrompt([], {
-    todayLabel: "2026-05-15 (星期五)",
-    currentDateTimeLabel: "2026-05-15 (星期五) 09:07",
-    locale: "zh-CN",
-  });
-  assert.match(out, /# currentDate/);
-  assert.match(out, /2026-05-15 \(星期五\)/);
-  assert.match(out, /# currentDateTime/);
-  assert.match(out, /09:07/);
-  assert.match(out, /不要自行猜测/);
-  assert.match(out, /相对时间/);
+test("system prefix stays identical across minutes and days", () => {
+  const skills = [{name: "ah-card", description: "Card", body: ""}];
+  const first = buildSystemPrompt(skills, {todayLabel: "2026-05-15", currentDateTimeLabel: "09:07", vaultName: "Test"});
+  const later = buildSystemPrompt(skills, {todayLabel: "2026-05-16", currentDateTimeLabel: "11:09", vaultName: "Test"});
+  assert.equal(first, later);
+  assert.doesNotMatch(first, /09:07|11:09|2026-05-15/);
+  const { buildTurnTimeContext } = require("../../../runtime/chat/direct-turn-context");
+  assert.match(buildTurnTimeContext("2026-05-16 11:09", "zh-CN"), /2026-05-16 11:09/);
 });
 
 test("buildSystemPrompt includes Russian output-language instruction", () => {
@@ -91,19 +87,16 @@ test("buildSystemPrompt supports English context blocks", () => {
     vaultName: "My Vault",
     locale: "en",
   });
-  assert.match(out, /Today is 2026-05-15 \(Friday\)/);
-  assert.match(out, /Resolve relative dates/);
-  assert.match(out, /The current local time is 2026-05-15 \(Friday\) 09:07/);
-  assert.match(out, /do not guess/);
+  assert.doesNotMatch(out, /2026-05-15/);
   assert.match(out, /Current Obsidian vault: My Vault/);
 });
 
 test("buildSystemPrompt appends the skill listing after Context", () => {
   const out = buildSystemPrompt(
     [{ name: "ah-card", description: "Card crafter", body: "" }],
-    { todayLabel: "2026-05-15 (星期五)" },
+    { vaultName: "Test" },
   );
-  const ctxIdx = out.indexOf("# currentDate");
+  const ctxIdx = out.indexOf("# vault");
   const skillIdx = out.indexOf("Available skills");
   assert.ok(ctxIdx > 0 && skillIdx > 0, "both sections must be present");
   assert.ok(skillIdx > ctxIdx, "skills must come after Context");
@@ -111,7 +104,7 @@ test("buildSystemPrompt appends the skill listing after Context", () => {
 });
 
 test("buildSystemPrompt with empty skills + opts still produces context", () => {
-  const out = buildSystemPrompt([], { todayLabel: "2026-05-15 (星期五)" });
-  assert.match(out, /# currentDate/);
+  const out = buildSystemPrompt([], { vaultName: "Test" });
+  assert.match(out, /# vault/);
   assert.doesNotMatch(out, /Available skills/);
 });

@@ -7,7 +7,7 @@
 const { getProviderSpec } = require("../providers/registry");
 const { createAnthropicMessagesProvider } = require("../providers/anthropic-messages-adapter");
 const { createOpenAIChatProvider } = require("../providers/openai-chat-adapter");
-const { getActiveApiKey } = require("./agent-settings");
+const { getActiveApiKey, normalizeAgentSettings } = require("./agent-settings");
 
 /**
  * @param {import('./agent-settings').AgentSettings} settings
@@ -74,6 +74,9 @@ function resolveAgentProvider(settings, opts = {}) {
     versionHeaderOverride: direct.versionHeaderOverride || "",
     stream: direct.stream !== false,
   };
+  if (spec.id === "deepseek") {
+    userConfig.reasoningMode = normalizeAgentSettings(settings).direct.reasoningMode;
+  }
 
   const requestImpl = opts.requestImpl;
 

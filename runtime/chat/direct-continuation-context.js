@@ -106,6 +106,7 @@ async function prepareContinuationContext({
         turns: checkpoint.turns,
         allowedToolPolicy: checkpoint.allowedToolPolicy || null,
         effectAttempts: Array.isArray(checkpoint.effectAttempts) ? checkpoint.effectAttempts : [],
+        ...(checkpoint.cardToolSurface ? { cardToolSurface: checkpoint.cardToolSurface } : {}),
       },
       fileStateCache,
     };

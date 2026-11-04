@@ -182,6 +182,58 @@ test("getEffectiveAgentProviderMode uses direct on mobile without mutating persi
   }
 });
 
+test("mobile legacy preference renders direct settings and advanced controls", () => {
+  const fixture = loadAgentProviderSectionWithPlatform({ isMobile: true });
+  const plugin = {
+    settings: normalizeSettings({
+      agentProviderModePreference: "opencode-legacy",
+      agentProvider: {
+        ...defaultAgentSettings(),
+        mode: "opencode-legacy",
+      },
+    }),
+    async saveSettings() {},
+  };
+  try {
+    fixture.renderAgentProviderSection({ containerEl: fakeContainer(), plugin, tab: {}, refresh() {} });
+    assert.ok(fixture.captured.settings.some((setting) => setting.name === "服务商"));
+    assert.ok(!fixture.captured.settings.some((setting) => setting.name === "运行方式"));
+    fixture.renderAgentProviderAdvanced({ containerEl: fakeContainer(), plugin, tab: {} });
+    assert.ok(fixture.captured.settings.some((setting) => setting.name === "Base URL 覆盖"));
+    assert.equal(plugin.settings.agentProvider.mode, "opencode-legacy");
+    assert.equal(plugin.settings.agentProviderModePreference, "opencode-legacy");
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("DeepSeek reasoning choices persist without changing the selected model and stay hidden for other providers", async () => {
+  const fixture = loadAgentProviderSectionWithPlatform({ isMobile: false });
+  const plugin = {
+    settings: normalizeSettings({ agentProvider: defaultAgentSettings() }),
+    async saveSettings() { this.settings = normalizeSettings(this.settings); },
+  };
+  try {
+    fixture.renderAgentProviderSection({ containerEl: fakeContainer(), plugin, tab: {}, refresh() {} });
+    const reasoning = fixture.captured.settings.find((setting) => setting.name === "DeepSeek 思考模式");
+    assert.ok(reasoning && reasoning.dropdown);
+    assert.deepEqual(reasoning.dropdown.options.map((option) => option.value), ["low", "high", "disabled"]);
+    assert.equal(reasoning.dropdown.value, "low");
+    const model = plugin.settings.agentProvider.direct.model;
+    reasoning.dropdown.selectEl.value = "high";
+    await reasoning.dropdown.changeHandler("low");
+    assert.equal(plugin.settings.agentProvider.direct.reasoningMode, "high");
+    assert.equal(plugin.settings.agentProvider.direct.model, model);
+
+    fixture.captured.settings.length = 0;
+    plugin.settings.agentProvider.direct.providerId = "zhipu-glm";
+    fixture.renderAgentProviderSection({ containerEl: fakeContainer(), plugin, tab: {}, refresh() {} });
+    assert.equal(fixture.captured.settings.some((setting) => setting.name === "DeepSeek 思考模式"), false);
+  } finally {
+    fixture.restore();
+  }
+});
+
 test("isOllamaCloudModelId distinguishes ollama.com cloud models from local ones", () => {
   const fixture = loadAgentProviderSectionWithPlatform({ isMobile: false });
   try {

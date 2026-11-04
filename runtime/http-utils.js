@@ -189,8 +189,19 @@ function nodeHttpRequestSse(url, timeoutMs, signal, handlers, options = {}) {
         }
 
         if (trace) trace(`HTTP GET ${parsed.pathname} -> ${status} (sse)`);
-        res.on("data", consumeSseChunk);
-        res.on("end", () => finish(resolve));
+        // Network chunks may split a multi-byte UTF-8 character. Keep decoder
+        // state for the whole response instead of decoding each chunk alone.
+        // Required here, not at module load: this module is in the mobile
+        // require chain, where Node built-ins resolve to null/undefined.
+        const decoder = new (require("string_decoder").StringDecoder)("utf8");
+        res.on("data", (chunk) => {
+          consumeSseChunk(typeof chunk === "string" ? chunk : decoder.write(chunk));
+        });
+        res.on("end", () => {
+          const tail = decoder.end();
+          if (tail) consumeSseChunk(tail);
+          finish(resolve);
+        });
         res.on("error", (err) => finish(reject, err));
       },
     );

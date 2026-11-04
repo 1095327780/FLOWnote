@@ -34,10 +34,12 @@ function createObsidianMock() {
   class Modal {}
   class PluginSettingTab {}
   class Setting {}
+  class ItemView {}
   return {
     Plugin,
     Notice,
     Modal,
+    ItemView,
     PluginSettingTab,
     Setting,
     Platform: { isMobile: true },
@@ -46,10 +48,22 @@ function createObsidianMock() {
   };
 }
 
-function loadReleasePlugin(releaseMainPath, { simulateMobileProcess = false } = {}) {
+const NODE_BUILTINS = new Set(Module.builtinModules);
+
+function loadReleasePlugin(releaseMainPath, { simulateMobileProcess = false, mobileNodeBuiltins = false } = {}) {
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "obsidian") return createObsidianMock();
+    // Obsidian's plugin loader hands Node built-ins through window.require on
+    // mobile (no Node there) and returns null under desktop mobile emulation.
+    // Module load must survive both instead of failing on the first import.
+    if (
+      mobileNodeBuiltins !== false
+      && parent && parent.filename === releaseMainPath
+      && NODE_BUILTINS.has(String(request).replace(/^node:/, ""))
+    ) {
+      return mobileNodeBuiltins.value;
+    }
     // Obsidian mobile may expose a compatibility object for Node's process
     // module without process.env. The release bundle must remain functional in
     // that exact environment instead of silently classifying every Skill YAML
@@ -102,6 +116,30 @@ function assertParity(result, label) {
   }
 }
 
+function assertMobileRuntimeModulesLoad(releaseMainPath) {
+  const loaded = [];
+  for (const value of [null, undefined]) {
+    const fixture = loadReleasePlugin(releaseMainPath, { mobileNodeBuiltins: { value } });
+    try {
+      const plugin = new fixture.PluginClass({
+        vault: { configDir: ".obsidian", adapter: {} },
+        workspace: {},
+      }, { id: "flownote", dir: ".obsidian/plugins/flownote", version: "smoke" });
+      plugin.ensureFacadeMethodsLoaded();
+      const modules = plugin.ensureRuntimeModules();
+      assert.equal(
+        typeof modules.SdkTransport,
+        "function",
+        `release runtime modules must load when Node built-ins resolve to ${value}`,
+      );
+      loaded.push(String(value));
+    } finally {
+      fixture.restore();
+    }
+  }
+  return loaded;
+}
+
 async function inspectReleaseBundle({
   releaseDir = path.join(process.cwd(), "release"),
   bundledRoot = path.join(path.resolve(releaseDir), "..", "bundled-skills"),
@@ -120,6 +158,8 @@ async function inspectReleaseBundle({
   assertBundledSkillReferences(sourceRoot, { embeddedFiles });
   const expectedMobileSkillSlugs = skillSlugsFromFiles(embeddedFiles);
   assert.ok(expectedMobileSkillSlugs.length > 0, "embedded map contains no canonical SKILL.md files");
+
+  const mobileBuiltinShims = assertMobileRuntimeModulesLoad(releaseMainPath);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flownote-release-bundle-"));
   const pluginDir = path.join(root, ".obsidian", "plugins", "flownote");
@@ -201,6 +241,7 @@ async function inspectReleaseBundle({
       mobileSkillSlugs,
       expectedMobileSkillSlugs,
       ahNoteCompletionPolicy: ahNote && ahNote.completionPolicy,
+      mobileBuiltinShims,
       invalidMobileSkills,
       parity,
       materializedParity,

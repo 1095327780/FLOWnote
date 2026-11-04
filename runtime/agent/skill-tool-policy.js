@@ -8,7 +8,6 @@ const POLICY_VERSION = 1;
 const HOST_PROTOCOL_TOOL_NAMES = new Set([
   "skill_invoke",
   "skill_resource_read",
-  "flownote_finish_skill",
 ]);
 
 function normalizeAllowedToolPolicy(value, registry) {
@@ -21,7 +20,15 @@ function normalizeAllowedToolPolicy(value, registry) {
     const name = raw.trim();
     if (!names.includes(name)) names.push(name);
   }
-  if (names.length === 0) return unrestrictedPolicy();
+  if (names.length === 0) {
+    // An omitted/empty Skill declaration imposes no additional restriction,
+    // but an empty intersection saved by the host must remain deny-all.
+    // Preserve that distinction during nested invocation and checkpoint resume.
+    if (!Array.isArray(value) && value.restricted === true) {
+      return { ok: true, policy: { version: POLICY_VERSION, restricted: true, allowedTools: [] } };
+    }
+    return unrestrictedPolicy();
+  }
   const known = new Set(registry && typeof registry.list === "function"
     ? registry.list().map((tool) => tool.name)
     : []);
@@ -67,11 +74,6 @@ function visibleToolSpecs(registry, policy) {
   return tools.filter((tool) => toolIsAllowed(policy, tool.name));
 }
 
-function policyCheckpointValue(policy) {
-  const normalized = normalizeAllowedToolPolicy(policy, null);
-  return normalized.ok ? normalized.policy : null;
-}
-
 module.exports = {
   POLICY_VERSION,
   HOST_PROTOCOL_TOOL_NAMES,
@@ -79,5 +81,4 @@ module.exports = {
   applySkillAllowedTools,
   toolIsAllowed,
   visibleToolSpecs,
-  policyCheckpointValue,
 };

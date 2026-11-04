@@ -46,10 +46,10 @@ function classifyAssistantTimelineBlocks(rawBlocks) {
   const blocks = Array.isArray(rawBlocks) ? rawBlocks : [];
   const finalIndexes = [];
   blocks.forEach((block, index) => {
-    if (
-      String(block && block.type || "").trim().toLowerCase() === "stream-text"
-      && String(block && block.phase || "").trim().toLowerCase() === "final"
-    ) {
+    const type = String(block && block.type || "").trim().toLowerCase();
+    const phase = String(block && block.phase || "").trim().toLowerCase();
+    // A host-measured change list is part of the answer, not process detail.
+    if ((type === "stream-text" || type === "patch") && phase === "final") {
       finalIndexes.push(index);
     }
   });
@@ -412,6 +412,15 @@ function normalizePatchDiffEntry(entry) {
     additions: parseCount(entry.additions),
     deletions: parseCount(entry.deletions),
   };
+}
+
+// Host-measured excerpts carry the line number where the excerpt starts.
+function normalizeInlinePatchDiff(entry) {
+  const normalized = normalizePatchDiffEntry(entry);
+  if (!normalized) return null;
+  const startLine = Number(entry && entry.startLine);
+  normalized.startLine = Number.isSafeInteger(startLine) && startLine > 0 ? startLine : 1;
+  return normalized;
 }
 
 function inferPatchActionFromDiff(diffEntry, fallbackEntry) {
@@ -830,6 +839,7 @@ const blockUtilsMethods = {
 };
 
 const blockUtilsInternal = {
+  normalizeInlinePatchDiff,
   truncateSummaryText,
   normalizePatchPath,
   normalizePatchChangeType,

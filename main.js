@@ -3,7 +3,8 @@ const { setRuntimeLocale } = (() => {
   try {
     return require("./runtime/runtime-locale-state");
   } catch (_e) {
-    return { setRuntimeLocale: () => "en" };
+    try { return requireRuntimeModuleSafe("runtime-locale-state"); }
+    catch { return { setRuntimeLocale: () => "en" }; }
   }
 })();
 const {
@@ -16,10 +17,14 @@ const {
   normalizePath = (value) => String(value || ""),
   requestUrl = async () => ({ status: 500, text: "", json: null }),
 } = obsidianModule;
-const {
-  migrateLegacyTemplaterConfig,
-} = require("./runtime/templater-config-migration");
-const { DiagnosticTrace } = require("./runtime/diagnostic-trace");
+const { migrateLegacyTemplaterConfig } = (() => {
+  try { return require("./runtime/templater-config-migration"); }
+  catch { return requireRuntimeModuleSafe("templater-config-migration"); }
+})();
+const { DiagnosticTrace } = (() => {
+  try { return require("./runtime/diagnostic-trace"); }
+  catch { return requireRuntimeModuleSafe("diagnostic-trace"); }
+})();
 
 const FLOWNOTE_ICON_ID = "flownote-journal-glow";
 
@@ -36,6 +41,14 @@ function resolveRuntimeModuleAbsolutePath(relativePath) {
   const relative = String(relativePath || "").replace(/^\/+/, "");
   if (!relative) return "";
   const candidates = [];
+  // A source checkout uses Obsidian's renderer-scoped require. Resolve
+  // bootstrap modules against this window's vault before Node's cwd.
+  const hostApp = typeof window !== "undefined" ? window.app : null;
+  const vault = hostApp && hostApp.vault;
+  const vaultRoot = vault && vault.adapter && vault.adapter.basePath;
+  if (typeof vaultRoot === "string" && vaultRoot) {
+    candidates.push(pathMod.join(vaultRoot, vault.configDir || ".obsidian", "plugins", "flownote"));
+  }
   if (typeof __dirname === "string" && __dirname) candidates.push(__dirname);
   if (typeof process !== "undefined" && process && typeof process.cwd === "function") {
     const cwd = String(process.cwd() || "");
@@ -416,8 +429,11 @@ class FLOWnoteAssistantPlugin extends Plugin {
     // mobile) calls addRibbonIcon with it. Skipping this causes the
     // mobile quick-capture entry to render with a missing leading icon.
     try {
-      const { registerFLOWnoteIcons } = require("./runtime/icons");
-      registerFLOWnoteIcons(obsidianModule.addIcon);
+      const icons = (() => {
+        try { return require("./runtime/icons"); }
+        catch { return requireRuntimeModuleSafe("icons"); }
+      })();
+      icons.registerFLOWnoteIcons(obsidianModule.addIcon);
     } catch (_e) { /* non-fatal */ }
 
     await this.reconcileLegacyTemplaterConfig();

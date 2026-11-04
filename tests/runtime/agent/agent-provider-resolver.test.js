@@ -7,6 +7,7 @@ const {
 } = require("../../../runtime/agent/agent-provider-resolver");
 const {
   defaultAgentSettings,
+  migrateAgentSettings,
   setApiKeyFor,
   switchActiveProvider,
 } = require("../../../runtime/agent/agent-settings");
@@ -22,6 +23,48 @@ test("resolveAgentProvider builds an anthropic-messages Provider for DeepSeek", 
   assert.equal(provider.spec.protocol, "anthropic-messages");
   assert.equal(provider.userConfig.apiKey, "sk-deepseek");
   assert.equal(provider.userConfig.model, "deepseek-v4-flash");
+});
+
+test("persisted DeepSeek reasoning mode reaches the outgoing request body", async () => {
+  const input = { model: "deepseek-v4-flash", messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], maxTokens: 256 };
+  const response = { status: 200, text: async () => JSON.stringify({ content: [], stop_reason: "end_turn", usage: {} }) };
+  for (const [savedMode, expectedThinking, expectedEffort] of [
+    [undefined, "enabled", "low"],
+    ["high", "enabled", "high"],
+    ["disabled", "disabled", undefined],
+    ["invalid", "enabled", "low"],
+  ]) {
+    const saved = { agentProvider: { mode: "direct", direct: { providerId: "deepseek", apiKeys: { deepseek: "test-key" }, stream: false } } };
+    if (savedMode !== undefined) saved.agentProvider.direct.reasoningMode = savedMode;
+    migrateAgentSettings(saved);
+    let requestBody;
+    const provider = resolveAgentProvider(saved.agentProvider, { requestImpl: async (request) => {
+      requestBody = JSON.parse(request.body);
+      return response;
+    } });
+    for await (const _event of provider.createMessage(input)) { /* consume response */ }
+    assert.equal(requestBody.model, input.model);
+    assert.equal(requestBody.thinking.type, expectedThinking);
+    assert.equal(requestBody.output_config && requestBody.output_config.effort, expectedEffort);
+    assert.equal("budget_tokens" in requestBody, false);
+  }
+});
+
+test("another Anthropic-compatible provider receives no DeepSeek thinking parameters", async () => {
+  const settings = defaultAgentSettings();
+  switchActiveProvider(settings, "zhipu-glm");
+  settings.direct.reasoningMode = "high";
+  settings.direct.stream = false;
+  setApiKeyFor(settings, "zhipu-glm", "test-key");
+  let requestBody;
+  const provider = resolveAgentProvider(settings, { requestImpl: async (request) => {
+    requestBody = JSON.parse(request.body);
+    return { status: 200, text: async () => JSON.stringify({ content: [], stop_reason: "end_turn", usage: {} }) };
+  } });
+  for await (const _event of provider.createMessage({ model: settings.direct.model, messages: [], maxTokens: 256 })) { /* consume response */ }
+  assert.equal("reasoningMode" in provider.userConfig, false);
+  assert.equal("thinking" in requestBody, false);
+  assert.equal("output_config" in requestBody, false);
 });
 
 test("resolveAgentProvider builds an openai-chat Provider for OpenAI official", () => {

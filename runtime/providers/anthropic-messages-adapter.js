@@ -101,7 +101,7 @@ function stripUnsupportedParams(body, spec) {
  * @param {import('./provider').ProviderConfig} spec
  * @returns {Object}
  */
-function buildRequestBody(input, spec) {
+function buildRequestBody(input, spec, userConfig = {}) {
   /** @type {Object} */
   const body = {
     model: input.model,
@@ -111,6 +111,15 @@ function buildRequestBody(input, spec) {
   if (input.system) body.system = input.system;
   if (input.tools && input.tools.length > 0) body.tools = input.tools;
   if (typeof input.temperature === "number") body.temperature = input.temperature;
+  if (spec.id === "deepseek") {
+    const mode = userConfig.reasoningMode;
+    if (mode === "disabled") {
+      body.thinking = { type: "disabled" };
+    } else {
+      body.thinking = { type: "enabled" };
+      body.output_config = { effort: mode === "high" ? "high" : "low" };
+    }
+  }
   return stripUnsupportedParams(body, spec);
 }
 
@@ -196,7 +205,7 @@ function createAnthropicMessagesProvider({ spec, userConfig, requestImpl }) {
     const url = buildEndpointUrl(baseUrl);
     const headers = buildHeaders(spec, userConfig);
     const wantsStream = userConfig.stream !== false;
-    const body = JSON.stringify({ ...buildRequestBody(input, spec), stream: wantsStream });
+    const body = JSON.stringify({ ...buildRequestBody(input, spec, userConfig), stream: wantsStream });
 
     // Streaming path: fetch() so we read response body as a
     // ReadableStream (requestUrl buffers the whole thing). Anthropic's

@@ -85,6 +85,11 @@ function isDangerousToolUse({ tool, toolName, input, permission, capabilities } 
 }
 
 function resolvePermissionDecision({ mode, tool, toolName, input, permission, capabilities } = {}) {
+  // A request that may repeat an external change of unknown outcome is never
+  // auto-allowed, whatever the permission mode or earlier session grants.
+  if (permission && permission.requiresExplicitConfirmation === true) {
+    return { behavior: "ask", reason: "explicit_confirmation" };
+  }
   const normalized = normalizeToolPermissionMode(mode);
   if (normalized === TOOL_PERMISSION_MODES.AUTO) {
     return { behavior: "allow", reason: "auto" };

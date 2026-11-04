@@ -2,6 +2,7 @@
 // UI updates flow through chat-orchestrator callbacks; this file does not touch the DOM.
 const { runAgentLoop } = require("../agent/agent-loop");
 const { DirectExecutionJournal } = require("./direct-execution-journal");
+const { collectUnresolvedEffectAttempts } = require("../agent/execution-ledger");
 const { projectCheckpointRef } = require("../agent/durable-execution-projection");
 const { buildAnthropicHistory } = require("./history-builder");
 const { prepareContinuationContext, buildSuspensionCopy } = require("./direct-continuation-context");
@@ -11,21 +12,23 @@ const {
 } = require("./direct-checkpoint-lifecycle");
 const { createDirectActivityTimeline } = require("./direct-activity-timeline");
 const { createDirectUsageAccumulator } = require("./direct-response-stats");
-const {
-  buildVerifiedCompletionSummary,
-  mergeVerifiedCompletionSummary,
-} = require("./direct-completion-summary");
-const {
-  EXECUTION_FALLBACK_COPY,
-  resolveTurnExecutionContract, createExplicitSkillWorkflowContract, createExecutionState,
-  acceptAssistantDelta, recordExecutionReceipt, executionContractLog,
-} = require("../agent/execution-contract");
+const { meterProvider } = require("./metered-provider");
+const { resolveWorkflowUsageId, workflowUsageSummary } = require("./workflow-usage");
+const { seedLinkedEvidence } = require("./linked-evidence");
+const { buildTurnTimeContext } = require("./direct-turn-context");
+const { buildTurnChangeBlock } = require("./turn-change-block");
+const { EXECUTION_FALLBACK_COPY, createExplicitSkillWorkflowContract } = require("../agent/execution-contract");
+const { createVaultChangeRecorder, describeChanges } = require("../agent/vault-change-recorder");
+const { runTurnAudit, evaluateTurnReport, buildHostCheckMessage } = require("../agent/turn-audit");
 const { ToolRegistry } = require("../agent/tool-registry");
 const { createVaultReadTool } = require("../agent/tools/vault-read");
 const { createVaultWriteTool } = require("../agent/tools/vault-write");
 const { createVaultEditTool } = require("../agent/tools/vault-edit");
 const { createVaultListTool } = require("../agent/tools/vault-list");
 const { createVaultSearchTool } = require("../agent/tools/vault-search");
+const { createCardPrepareTool } = require("../agent/tools/card-prepare");
+const { createCardCommitTool } = require("../agent/tools/card-commit");
+const { createCardExpandToolsTool } = require("../agent/card-tool-surface");
 const { createVaultDailyTool } = require("../agent/tools/vault-daily");
 const { createVaultPropertyTool } = require("../agent/tools/vault-property");
 const { createVaultBacklinksTool } = require("../agent/tools/vault-backlinks");
@@ -44,7 +47,8 @@ const {
   buildSkillManifest, normalizeResourcePaths, substituteArguments, renderSkillTemplateVariables,
 } = require("../agent/skill-registry");
 const { skillIdentityKeys } = require("../skill-catalog");
-const { NOTE_PATH_DEFAULTS_BY_LOCALE, getDefaultNotePaths, getSkillDocLocale } = require("../localized-defaults");
+const { getSkillDocLocale } = require("../localized-defaults");
+const { formatNotePathOverrides } = require("./note-path-context");
 
 // Embedded fallback for devices where synced dotfolders are absent.
 const {
@@ -53,6 +57,7 @@ const {
 } = require("../embedded-skill-documents");
 const { resolveAgentProvider } = require("../agent/agent-provider-resolver");
 const { getActiveApiKey } = require("../agent/agent-settings");
+const { getEffectiveAgentMode } = require("../agent/agent-mode");
 const { getProviderSpec } = require("../providers/registry");
 const { getIntlLocale, normalizeSupportedLocale, materializeLocalizedMarkdownFiles } = require("../i18n-locale-utils");
 const {
@@ -71,25 +76,7 @@ const SUPPLEMENTAL_SKILL_ROOTS = [
 ];
 const pad2 = (value) => String(value).padStart(2, "0");
 
-function resolveMainTurnTokenBudget(settings, provider) {
-  const modelId = provider && provider.userConfig && provider.userConfig.model;
-  const models = provider && provider.spec && Array.isArray(provider.spec.models)
-    ? provider.spec.models
-    : [];
-  const activeModel = models.find((model) => model && model.id === modelId);
-  const modelMax = Number(activeModel && activeModel.maxOutput);
-  const normalizedModelMax = Number.isFinite(modelMax) && modelMax > 0
-    ? Math.floor(modelMax)
-    : 0;
-  const userMax = Number(settings && settings.direct && settings.direct.maxOutputTokens);
-  if (Number.isFinite(userMax) && userMax > 0) {
-    const normalizedUserMax = Math.floor(userMax);
-    return normalizedModelMax > 0
-      ? Math.min(normalizedUserMax, normalizedModelMax)
-      : normalizedUserMax;
-  }
-  return normalizedModelMax || 16_384;
-}
+const { resolveMainTurnTokenBudget } = require("./direct-request-budget");
 
 // User-local calendar date for daily and weekly note workflows.
 function getLocalISODate(now) {
@@ -161,20 +148,6 @@ function buildSystemPrompt(skillManifests, opts) {
   const parts = [BASE_SYSTEM_PROMPT];
   const ctxLines = [];
   const locale = normalizeSupportedLocale(opts && opts.locale, "en");
-  if (opts && opts.todayLabel) {
-    ctxLines.push(runnerText(
-      locale,
-      `# currentDate\n今天是 ${opts.todayLabel}。涉及"今天 / 昨天 / 本周"等相对时间时，以这个日期为准。`,
-      `# currentDate\nToday is ${opts.todayLabel}. Resolve relative dates such as "today", "yesterday", and "this week" against this date.`,
-    ));
-  }
-  if (opts && opts.currentDateTimeLabel) {
-    ctxLines.push(runnerText(
-      locale,
-      `# currentDateTime\n当前本地时间是 ${opts.currentDateTimeLabel}。需要给捕获记录、更新时间、时间戳写入时，使用这里的真实本地时间，不要自行猜测。`,
-      `# currentDateTime\nThe current local time is ${opts.currentDateTimeLabel}. Use this real local time for capture entries, update times, and timestamps; do not guess.`,
-    ));
-  }
   if (opts && opts.outputLocale) {
     const outputLanguage = describeOutputLanguage(opts.outputLocale);
     ctxLines.push(`# outputLanguage\nUI language: ${outputLanguage.label}. ${outputLanguage.instruction}`);
@@ -203,49 +176,8 @@ function buildSystemPrompt(skillManifests, opts) {
   return parts.join("\n\n");
 }
 
-// Default bundled layout; configured overrides are authoritative.
-const DEFAULT_NOTE_PATH_LAYOUT = getDefaultNotePaths("zh-CN");
-const NOTE_PATH_LABELS = {
-  dailyNotes:       "Daily notes 每日笔记",
-  weeklyReviews:    "Weekly reviews 周记",
-  monthlyReviews:   "Monthly reviews 月记",
-  yearlyReviews:    "Yearly reviews 年记",
-  permanentNotes:   "Permanent notes 永久笔记",
-  topicNotes:       "Topic notes 主题笔记 (📍)",
-  literatureNotes:  "Literature notes 文献笔记 (《》)",
-  domainPages:      "Domain pages 领域页 (🌱)",
-  activeProjects:   "Active projects 项目",
-  archive:          "Archive 归档",
-};
-
-function formatNotePathOverrides(notePaths, locale = "zh-CN") {
-  const live = (notePaths && typeof notePaths === "object") ? notePaths : {};
-  const defaults = getDefaultNotePaths(locale);
-  // Always emit the full table so the model has a single source of
-  // truth, even if every value matches the default — it's only ~10
-  // lines and dramatically reduces "AI guessed the wrong path" cases.
-  const lines = [
-    "Note path conventions (USE THESE EXACT FOLDERS when reading or writing the listed note kinds; OVERRIDE any path mentioned inside a skill body):",
-  ];
-  for (const key of Object.keys(DEFAULT_NOTE_PATH_LAYOUT)) {
-    const dflt = defaults[key] || DEFAULT_NOTE_PATH_LAYOUT[key];
-    const v = String((live[key] || "")).replace(/\\/g, "/").replace(/\/+$/, "").trim() || dflt;
-    const label = NOTE_PATH_LABELS[key] || key;
-    const tag = v !== dflt ? "  (user-customized)" : "";
-    lines.push(`  - ${label}: ${v}${tag}`);
-  }
-  const defaultAliases = Object.values(NOTE_PATH_DEFAULTS_BY_LOCALE)
-    .flatMap((defaultsForLocale) => Object.values(defaultsForLocale || {}))
-    .filter(Boolean);
-  lines.push(
-    "",
-    `When a skill body contains a hardcoded default path, treat it as an alias for the matching row above. Known default aliases include: ${[...new Set(defaultAliases)].join("; ")}. If the table above lists a different value for that note kind, use the table's value. If a skill body contains placeholders like "{{notePaths.dailyNotes}}" or "{{notePaths.activeProjects}}", replace them mentally with the matching folder from this table. Never invent a new folder.`,
-  );
-  return lines.join("\n");
-}
-
 /** Build the direct agent's Obsidian, web, user-input, and Skill tools. */
-function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin, now = new Date()) {
+function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin, now = new Date(), { includeCardTools = false } = {}) {
   const registry = new ToolRegistry();
   if (app && app.vault) {
     registry.register(createVaultReadTool({ vault: app.vault, normalizePath }));
@@ -253,6 +185,14 @@ function buildDefaultToolRegistry(app, normalizePath, skillRegistry, plugin, now
     registry.register(createVaultSearchTool({ vault: app.vault, normalizePath }));
     registry.register(createVaultEditTool({ vault: app.vault, normalizePath }));
     registry.register(createVaultWriteTool({ vault: app.vault, normalizePath }));
+    if (includeCardTools) {
+      const variables = buildSkillTemplateVariables(plugin, now);
+      registry.register(createCardPrepareTool({ vault: app.vault, normalizePath, paths: {
+        ...variables.notePaths, statusPath: `${variables.metaPaths.memory}/STATUS.md`,
+      } }));
+      if (typeof app.vault.process === "function") registry.register(createCardCommitTool({ vault: app.vault }));
+      registry.register(createCardExpandToolsTool());
+    }
     // Obsidian-native tools — replace the operations the old skills used
     // to delegate to `obsidian-cli`. Each one is gated on the relevant
     // app sub-API existing, so we degrade gracefully on minimal vault
@@ -613,13 +553,13 @@ async function runDirectAgentTurn({
   requestImpl,
   toolRegistryOverride,
   runAgentLoopImpl,
-  resolveExecutionContractImpl,
-  executionContractOverride,
+  runTurnAuditImpl,
   skillRegistryOverride,
   preloadedSkillCommand,
   continuationMessageId,
   continuationRunId,
   checkpointStoreOverride,
+  linkedContextEvidence,
 }) {
   const plugin = view.plugin;
   let settings = plugin.settings.agentProvider || {};
@@ -652,7 +592,28 @@ async function runDirectAgentTurn({
   }
 
   // Resolve Provider (missing configuration is surfaced to the caller).
-  const provider = resolveAgentProvider(settings, { requestImpl });
+  const usageAccumulator = createDirectUsageAccumulator();
+  let workflowId = `${sessionId}:${draftId}`;
+  let workflowStoredMessages = [];
+  function usageSnapshot() {
+    const workflow = workflowUsageSummary({ storedMessages: workflowStoredMessages, workflowId, runId: draftId,
+      requests: usageAccumulator.requests() });
+    return { runId: draftId, workflowId, requestCount: usageAccumulator.requestCount(), usage: usageAccumulator.snapshot(), usageReported: usageAccumulator.snapshotReported(),
+      requestUsage: workflow.requests.filter(request => request.runId === draftId), workflowUsage: workflow.totals,
+      accounting: workflow.accounting };
+  }
+  let usagePhase = "main";
+  const provider = meterProvider(
+    resolveAgentProvider({ ...settings, mode: getEffectiveAgentMode(settings) }, { requestImpl }),
+    usageAccumulator,
+    {
+      getPhase: () => usagePhase,
+      onComplete: async (record) => {
+        if (typeof plugin.traceDiagnostic === "function") void plugin.traceDiagnostic("agent.request_usage", record);
+        if (handlers && typeof handlers.onUsageSnapshot === "function") await handlers.onUsageSnapshot(usageSnapshot());
+      },
+    },
+  );
 
   // Load skills and build the tool registry against the live vault.
   let normalizePath;
@@ -666,7 +627,6 @@ async function runDirectAgentTurn({
   const explicitSkillInvocation = resolveExplicitSkillInvocation(skillRegistry, preloadedSkillCommand);
   const locale = getRunnerLocale(view);
   const turnNow = new Date();
-  const registry = toolRegistryOverride || buildDefaultToolRegistry(view.app, normalizePath, skillRegistry, plugin, turnNow);
   const vaultName = view.app && view.app.vault && typeof view.app.vault.getName === "function"
     ? String(view.app.vault.getName() || "")
     : "";
@@ -674,8 +634,6 @@ async function runDirectAgentTurn({
   const systemPrompt = buildSystemPrompt(
     skillRegistry.list ? skillRegistry.list() : [],
     {
-      todayLabel: describeToday(turnNow, locale),
-      currentDateTimeLabel: describeCurrentDateTime(turnNow, locale),
       outputLocale: locale,
       vaultName,
       notePaths,
@@ -709,6 +667,18 @@ async function runDirectAgentTurn({
     checkpointStore,
   });
   const continuation = continuationContext.continuation;
+  workflowStoredMessages = stored;
+  workflowId = resolveWorkflowUsageId({ storedMessages: stored, sessionId, runId: draftId,
+    resumeFromRunId: continuationContext.resumeFromRunId });
+  const cardWorkflow = String((explicitSkillInvocation && explicitSkillInvocation.skillName)
+    || (continuationContext.executionContract && continuationContext.executionContract.skillName) || "") === "ah-card";
+  // Every vault write API handed to tools is measured. The recorder, not
+  // tool text or model prose, decides which files this turn changed.
+  const changeRecorder = view.app && view.app.vault
+    ? createVaultChangeRecorder({ vault: view.app.vault })
+    : null;
+  const toolApp = changeRecorder ? changeRecorder.instrumentApp(view.app) : view.app;
+  const registry = toolRegistryOverride || buildDefaultToolRegistry(toolApp, normalizePath, skillRegistry, plugin, turnNow, { includeCardTools: true });
   let history;
   if (continuation) {
     history = continuationContext.history;
@@ -725,12 +695,13 @@ async function runDirectAgentTurn({
       locale,
       now: turnNow,
     });
-    history.push({ role: "user", content: [{ type: "text", text: turnText }] });
+    history.push({ role: "user", content: [{ type: "text", text: turnText }, { type: "text", text: buildTurnTimeContext(describeCurrentDateTime(turnNow, locale), locale) }] });
   }
 
-  // An explicit standard Skill is already an authoritative host-side routing
-  // decision.  It enters the main model turn directly; only ordinary natural
-  // language uses the model-based task-contract resolver.
+  // Natural-language turns carry no predicted task contract: the model works
+  // with its tools and the host reconciles its final message with measured
+  // vault changes when it stops. An explicit Skill records its declared
+  // completion policy, which the end-of-turn check enforces.
   const executionContract = continuation
     ? continuationContext.executionContract
     : explicitSkillInvocation
@@ -740,24 +711,20 @@ async function runDirectAgentTurn({
         args: explicitSkillInvocation.args,
         completionPolicy: explicitSkillInvocation.skill.completionPolicy,
       })
-    : await resolveTurnExecutionContract({
-        override: executionContractOverride,
-        resolver: resolveExecutionContractImpl,
-        hasInjectedLoop: !!runAgentLoopImpl,
-        provider,
-        userText: intentText === undefined ? userText : intentText,
-        signal,
-      });
+    : null;
 
-  const state = createExecutionState(executionContract);
-  if (continuation) state.effectReceipts = continuationContext.effectReceipts;
-  state.workflowDisposition = null;
-  state.workflowCompletionMode = null;
-  state.workflowReleased = false;
-  state.standardSkillAnswerOnly = false;
-  state.suspension = null;
+  const state = {
+    text: "",
+    toolUses: [],
+    effectReceipts: continuation && Array.isArray(continuationContext.effectReceipts)
+      ? continuationContext.effectReceipts.slice()
+      : [],
+    suspension: null,
+    retryPending: false,
+    cancelled: false,
+  };
   const activityTimeline = createDirectActivityTimeline(draftId);
-  const usageAccumulator = createDirectUsageAccumulator();
+  const contextRequests = [];
   const journal = new DirectExecutionJournal({
     runId: draftId,
     onSnapshot: handlers && handlers.onExecutionSnapshot,
@@ -766,7 +733,6 @@ async function runDirectAgentTurn({
     resumeFromRunId: continuationContext.resumeFromRunId,
   });
   let stopReason = null;
-  let lastWorkflowCandidateText = "";
 
   function findToolUse(toolUseId) {
     return state.toolUses.find((t) => t.id === toolUseId);
@@ -776,25 +742,6 @@ async function runDirectAgentTurn({
     if (handlers && typeof handlers.onBlocks === "function") {
       handlers.onBlocks(activityTimeline.blocks());
     }
-  }
-
-  function releaseWorkflowProse(disposition, verified) {
-    if (state.workflowReleased) return;
-    const canRelease = disposition === "blocked"
-      || disposition === "cancelled"
-      || (disposition === "completed" && verified === true);
-    if (!canRelease) return;
-    state.workflowDisposition = disposition;
-    state.workflowReleased = true;
-    if (disposition === "completed") state.effectVerified = true;
-    const releasedText = String(state.provisionalText || lastWorkflowCandidateText || "").trim();
-    state.text = releasedText;
-    state.provisionalText = "";
-    if (releasedText) activityTimeline.appendFinalText(releasedText);
-    if (handlers && typeof handlers.onToken === "function" && state.text) {
-      handlers.onToken(state.text);
-    }
-    pushBlocksUpdate();
   }
 
   async function onPermissionAsk(req) {
@@ -808,6 +755,8 @@ async function runDirectAgentTurn({
       title: `${req.tool || "tool"}: ${req.summary || ""}`.trim(),
       pattern: req.summary || "",
       metadata: req.input || {},
+      requiresExplicitConfirmation: req.requiresExplicitConfirmation === true || undefined,
+      unresolvedEffect: req.unresolvedEffect,
     };
     try {
       const decision = await handlers.onPermissionRequest(permObj);
@@ -835,8 +784,7 @@ async function runDirectAgentTurn({
     }
   };
 
-  // Output ceiling: user override (clamped to the model's declared maximum),
-  // model limit, then a provider-safe 16K only for unknown model catalogs.
+  // Reserve a bounded default output budget; explicit overrides still respect model limits.
   const activeModelInfo = (provider.spec.models || []).find((m) => m && m.id === provider.userConfig.model);
   const maxTokensPerTurn = resolveMainTurnTokenBudget(settings, provider);
 
@@ -875,213 +823,257 @@ async function runDirectAgentTurn({
   // read-before-edit, and by vault_backlinks to sidestep metadataCache
   // reindex lag. Fresh instance each turn so stale state can't leak.
   const fileStateCache = continuationContext.fileStateCache;
-  for await (const ev of loopImpl({
-    provider,
-    registry,
-    system: systemPrompt,
-    messages: history,
-    maxTokensPerTurn,
-    executionContract,
-    resumeState: continuationContext.resumeState,
-    allowedToolPolicy: explicitSkillInvocation && explicitSkillInvocation.skill.allowedTools,
-    signal,
-    ctx: {
-      app: view.app,
+  if (!continuation) await seedLinkedEvidence({ evidence: linkedContextEvidence,
+    vault: view.app && view.app.vault, cache: fileStateCache, history });
+
+  const skillCompletion = describeSkillCompletion(executionContract);
+  const previousAssistantText = lastAssistantText(stored, draftId);
+  const auditImpl = runTurnAuditImpl || runTurnAudit;
+  // End-of-turn reconciliation. The host compares what the final message
+  // claims with what it measured; a mismatch goes back to the model as an
+  // internal note so it performs the change or says plainly it did not.
+  async function stopCheck({ finalContent, interactionReceipts, provider: loopProvider }) {
+    const finalText = assistantTextFromContent(finalContent);
+    if (!finalText) return { allow: true };
+    const { changes } = changeRecorder ? await changeRecorder.snapshot() : { changes: [] };
+    const previousPhase = usagePhase;
+    usagePhase = "audit";
+    let audit;
+    try {
+      audit = await auditImpl({
+        provider: loopProvider || provider,
+        signal,
+        userRequest: intentText === undefined ? userText : intentText,
+        previousAssistantText,
+        finalText,
+        changes: describeChanges(changes),
+      });
+    } finally {
+      usagePhase = previousPhase;
+    }
+    if (!audit || !audit.ok) {
+      trace("agent.turn_audit_unavailable", { errorType: String((audit && audit.error) || "audit_failed") });
+      return { allow: true };
+    }
+    const decision = evaluateTurnReport({
+      report: audit.report,
+      changes,
+      requiresChange: skillCompletion.requiresChange,
+      requiredInteractions: skillCompletion.requiredInteractions,
+      interactionReceipts,
+    });
+    trace("agent.turn_audit", {
+      allow: decision.allow,
+      claimCount: audit.report.claims.length,
+      changeCount: changes.length,
+      issueCount: decision.issues.length,
+    });
+    if (decision.allow) return { allow: true };
+    return {
+      allow: false,
+      issues: decision.issues,
+      feedback: buildHostCheckMessage({
+        changes: describeChanges(changes),
+        issues: decision.issues,
+        skillCommand: skillCompletion.command,
+      }),
+    };
+  }
+
+  if (changeRecorder) changeRecorder.start();
+  try {
+    for await (const ev of loopImpl({
+      provider,
+      registry,
+      system: systemPrompt,
+      messages: history,
+      maxTokensPerTurn,
+      executionContract,
+      resumeState: continuationContext.resumeState,
+      allowedToolPolicy: explicitSkillInvocation && explicitSkillInvocation.skill.allowedTools,
+      stopCheck,
       signal,
-      grants: {},
-      askUserFn,
-      fileStateCache,
-      toolPermissionMode: plugin.settings && plugin.settings.toolPermissionMode,
-    },
-    onPermissionAsk,
-  })) {
-    if (!ev) continue;
-    let durableEvent = ev;
-    if (ev.type === "suspended") {
-      try {
-        if (!checkpointStore || typeof checkpointStore.store !== "function") {
-          throw continuationStoreUnavailableError();
-        }
-        const storedRef = projectCheckpointRef(await checkpointStore.store(ev.checkpoint));
-        if (!storedRef) {
-          const error = new Error("Continuation checkpoint storage returned an invalid reference.");
-          error.code = "CONTINUATION_CHECKPOINT_REFERENCE_INVALID";
+      ctx: {
+        app: toolApp,
+        signal,
+        grants: {},
+        askUserFn,
+        fileStateCache,
+        cardWorkflow,
+        changeRecorder,
+        // External sends are journaled (and persisted) before they leave.
+        onEffectAttempt: (record) => journal.recordEffectAttempt(record),
+        unresolvedEffectAttempts: collectUnresolvedEffectAttempts(stored, { excludeMessageId: draftId }),
+        toolPermissionMode: plugin.settings && plugin.settings.toolPermissionMode,
+      },
+      onPermissionAsk,
+    })) {
+      if (!ev) continue;
+      let durableEvent = ev;
+      if (ev.type === "suspended") {
+        try {
+          if (!checkpointStore || typeof checkpointStore.store !== "function") {
+            throw continuationStoreUnavailableError();
+          }
+          const storedRef = projectCheckpointRef(await checkpointStore.store(ev.checkpoint));
+          if (!storedRef) {
+            const error = new Error("Continuation checkpoint storage returned an invalid reference.");
+            error.code = "CONTINUATION_CHECKPOINT_REFERENCE_INVALID";
+            throw error;
+          }
+          durableEvent = { ...ev, checkpointRef: storedRef };
+          delete durableEvent.checkpoint;
+        } catch (error) {
+          const code = String((error && error.code) || "CONTINUATION_CHECKPOINT_STORE_FAILED");
+          await journal.consume({ type: "error", error: { type: code } });
           throw error;
         }
-        durableEvent = { ...ev, checkpointRef: storedRef };
-        delete durableEvent.checkpoint;
-      } catch (error) {
-        const code = String((error && error.code) || "CONTINUATION_CHECKPOINT_STORE_FAILED");
-        await journal.consume({ type: "error", error: { type: code } });
-        throw error;
       }
-    }
-    await journal.consume(durableEvent);
-    switch (durableEvent.type) {
-      case "stream": {
-        const inner = ev.event;
-        if (!inner) break;
-        usageAccumulator.observe(inner);
-        if (inner.type === "content_block_delta" && inner.delta && inner.delta.type === "text_delta") {
-          const deltaText = inner.delta.text || "";
-          const accepted = acceptAssistantDelta(state, executionContract, deltaText);
-          // Timeline visibility and completion authority are separate. Every
-          // model segment stays in arrival order, while only verified prose is
-          // allowed into the terminal assistant text.
-          activityTimeline.appendText(deltaText);
-          if (accepted && handlers && typeof handlers.onToken === "function") handlers.onToken(state.text);
-          pushBlocksUpdate();
-        }
-        if (inner.type === "message_delta" && inner.delta && typeof inner.delta.stop_reason === "string") {
-          stopReason = inner.delta.stop_reason;
-        }
-        break;
-      }
-      case "tool_start": {
-        trace("agent.tool_started", { tool: ev.tool });
-        state.toolUses.push({
-          id: ev.toolUseId,
-          name: ev.tool,
-          input: ev.input,
-          capabilities: ev.capabilities,
-          status: "running",
-          output: "",
-          isError: false,
-          startedAt: Date.now(),
-          durationMs: 0,
-        });
-        activityTimeline.startTool(state.toolUses[state.toolUses.length - 1]);
-        pushBlocksUpdate();
-        break;
-      }
-      case "effect_receipt": {
-        if (executionContract && executionContract.mode === "workflow") {
-          if (ev.receipt) state.effectReceipts.push(ev.receipt);
-        } else {
-          recordExecutionReceipt(state, executionContract, ev.receipt);
-        }
-        if (ev.receipt && ev.receipt.toolUseId) {
-          const receiptTool = findToolUse(ev.receipt.toolUseId);
-          if (receiptTool) activityTimeline.syncTool(receiptTool, ev.receipt);
-        }
-        pushBlocksUpdate();
-        trace("agent.effect_receipt", {
-          tool: ev.receipt && ev.receipt.tool,
-          verified: state.effectVerified,
-        });
-        break;
-      }
-      case "workflow_finish": {
-        state.workflowDisposition = durableEvent.disposition || null;
-        state.workflowCompletionMode = durableEvent.declaration && durableEvent.declaration.mode
-          ? String(durableEvent.declaration.mode)
-          : null;
-        releaseWorkflowProse(durableEvent.disposition, durableEvent.verified);
-        if (durableEvent.disposition === "completed" && durableEvent.verified !== true) {
-          state.completionFailure = {
-            type: "workflow_completion_unverified",
-            message: "Workflow completion was not verified.",
-          };
-          state.provisionalText = "";
-        }
-        trace("agent.workflow_finished", { disposition: durableEvent.disposition, verified: durableEvent.verified === true });
-        break;
-      }
-      case "completion_retry": {
-        const candidate = assistantTextFromContent(ev.provisionalContent)
-          || String(state.provisionalText || "").trim();
-        if (executionContract && executionContract.mode === "workflow" && candidate) {
-          lastWorkflowCandidateText = candidate;
-        }
-        state.provisionalText = "";
-        trace("agent.completion_retry", { attempt: ev.attempt });
-        break;
-      }
-      case "tool_progress": {
-        const t = findToolUse(ev.toolUseId);
-        if (t) {
-          if (ev.message) t.output = ev.message;
-          pushBlocksUpdate();
-        }
-        break;
-      }
-      case "tool_finish": {
-        const t = findToolUse(ev.toolUseId);
-        if (t) {
-          t.status = ev.isError ? "error" : "done";
-          t.output = ev.content;
-          t.isError = !!ev.isError;
-          t.outcome = ev.outcome;
-          if (ev.capabilities) t.capabilities = ev.capabilities;
-          t.durationMs = Date.now() - t.startedAt;
-          const receipt = state.effectReceipts.find((item) => item && item.toolUseId === t.id);
-          activityTimeline.syncTool(t, receipt);
-          trace("agent.tool_finished", { tool: ev.tool, status: t.status, durationMs: t.durationMs, isError: !!ev.isError });
-        }
-        pushBlocksUpdate();
-        break;
-      }
-      case "turn_complete": {
-        const unresolvedWorkflow = Boolean(
-          executionContract
-          && executionContract.mode === "workflow"
-          && !state.workflowReleased,
-        );
-        const unresolvedEffect = Boolean(
-          executionContract
-          && executionContract.mode !== "answer"
-          && !state.effectVerified,
-        );
-        if (unresolvedWorkflow) {
-          const candidate = String(state.provisionalText || "").trim();
-          if (candidate) lastWorkflowCandidateText = candidate;
-          state.provisionalText = "";
-        }
-        activityTimeline.completeTurn({ forceProcess: unresolvedWorkflow || unresolvedEffect });
-        usageAccumulator.completeTurn();
-        trace("agent.turn_completed", {
-          turnIndex: ev.turnIndex,
-          stopReason: ev.stopReason,
-          textLength: state.text.length,
-          toolCount: state.toolUses.length,
-        });
-        break;
-      }
-      case "done":
-        if (executionContract && executionContract.mode === "workflow" && ev.disposition) {
-          state.workflowDisposition = state.workflowDisposition || ev.disposition;
-          releaseWorkflowProse(ev.disposition, ev.verified);
-        }
-        break;
-      case "cancelled":
-        state.cancelled = true;
-        break;
-      case "suspended":
-        state.suspension = {
-          reason: durableEvent.reason || "workflow_suspended",
-          stage: durableEvent.stage || "between_turns",
-          turns: durableEvent.turns,
-          checkpointRef: durableEvent.checkpointRef,
-        };
-        state.provisionalText = "";
-        trace("agent.workflow_suspended", { reason: state.suspension.reason, stage: state.suspension.stage, turns: durableEvent.turns });
-        break;
-      case "error": {
-        const err = ev.error || {};
-        const message = err.message || err.type || "Agent runtime error.";
-        trace("agent.error", { errorType: err.type || "agent_error" });
-        if (err.type === "completion_contract_failed") {
-          state.completionFailure = err;
-          state.provisionalText = "";
+      await journal.consume(durableEvent);
+      switch (durableEvent.type) {
+        case "context_usage": {
+          const { type, ...metrics } = ev;
+          contextRequests.push(metrics);
+          trace("agent.context_usage", metrics);
           break;
         }
-        const wrapped = new Error(message);
-        if (err.type) wrapped.code = err.type;
-        throw wrapped;
+        case "stream": {
+          const inner = ev.event;
+          if (!inner) break;
+          // Injected loops may synthesize stream events without calling the
+          // provider. Production usage is captured at the provider boundary.
+          if (runAgentLoopImpl) usageAccumulator.observe(inner);
+          const deltaText = inner.type === "content_block_delta" && inner.delta && inner.delta.type === "text_delta"
+            ? inner.delta.text || ""
+            : inner.type === "content_block_start" && inner.content_block && inner.content_block.type === "text"
+              ? inner.content_block.text || "" : "";
+          if (deltaText) {
+            state.text += deltaText;
+            activityTimeline.appendText(deltaText);
+            if (handlers && typeof handlers.onToken === "function") handlers.onToken(state.text);
+            pushBlocksUpdate();
+          }
+          if (inner.type === "message_delta" && inner.delta && typeof inner.delta.stop_reason === "string") {
+            stopReason = inner.delta.stop_reason;
+          }
+          break;
+        }
+        case "tool_start": {
+          trace("agent.tool_started", { tool: ev.tool });
+          state.toolUses.push({
+            id: ev.toolUseId,
+            name: ev.tool,
+            input: ev.input,
+            capabilities: ev.capabilities,
+            status: "running",
+            output: "",
+            isError: false,
+            startedAt: Date.now(),
+            durationMs: 0,
+          });
+          activityTimeline.startTool(state.toolUses[state.toolUses.length - 1]);
+          pushBlocksUpdate();
+          break;
+        }
+        case "effect_receipt": {
+          if (ev.receipt) state.effectReceipts.push(ev.receipt);
+          if (ev.receipt && ev.receipt.toolUseId) {
+            const receiptTool = findToolUse(ev.receipt.toolUseId);
+            if (receiptTool) activityTimeline.syncTool(receiptTool, ev.receipt);
+          }
+          pushBlocksUpdate();
+          trace("agent.effect_receipt", {
+            tool: ev.receipt && ev.receipt.tool,
+            verified: !!(ev.receipt && ev.receipt.verified),
+          });
+          break;
+        }
+        case "completion_retry": {
+          // The host check returned the turn to the model. Whatever it said
+          // in that turn becomes process narration; the answer is what it
+          // says after acting on the feedback.
+          state.retryPending = true;
+          state.text = "";
+          if (handlers && typeof handlers.onToken === "function") handlers.onToken("");
+          trace("agent.completion_retry", { attempt: ev.attempt, issues: ev.issues || [] });
+          break;
+        }
+        case "tool_progress": {
+          const t = findToolUse(ev.toolUseId);
+          if (t) {
+            if (ev.message) t.output = ev.message;
+            pushBlocksUpdate();
+          }
+          break;
+        }
+        case "tool_finish": {
+          const t = findToolUse(ev.toolUseId);
+          if (t) {
+            t.status = ev.isError ? "error" : "done";
+            t.output = ev.content;
+            t.isError = !!ev.isError;
+            t.outcome = ev.outcome;
+            if (ev.capabilities) t.capabilities = ev.capabilities;
+            t.durationMs = Date.now() - t.startedAt;
+            const receipt = state.effectReceipts.find((item) => item && item.toolUseId === t.id);
+            activityTimeline.syncTool(t, receipt);
+            trace("agent.tool_finished", { tool: ev.tool, status: t.status, durationMs: t.durationMs, isError: !!ev.isError });
+          }
+          pushBlocksUpdate();
+          break;
+        }
+        case "turn_complete": {
+          activityTimeline.completeTurn({ forceProcess: state.retryPending });
+          state.retryPending = false;
+          const requestUsage = usageAccumulator.completeTurn();
+          if (requestUsage) trace("agent.request_usage", requestUsage);
+          trace("agent.turn_completed", {
+            turnIndex: ev.turnIndex,
+            stopReason: ev.stopReason,
+            textLength: state.text.length,
+            toolCount: state.toolUses.length,
+          });
+          break;
+        }
+        case "cancelled":
+          state.cancelled = true;
+          break;
+        case "suspended":
+          state.suspension = {
+            reason: durableEvent.reason || "workflow_suspended",
+            stage: durableEvent.stage || "between_turns",
+            turns: durableEvent.turns,
+            checkpointRef: durableEvent.checkpointRef,
+          };
+          trace("agent.workflow_suspended", { reason: state.suspension.reason, stage: state.suspension.stage, turns: durableEvent.turns });
+          break;
+        case "error": {
+          const err = ev.error || {};
+          const message = err.message || err.type || "Agent runtime error.";
+          trace("agent.error", { errorType: err.type || "agent_error" });
+          const wrapped = new Error(message);
+          if (err.type) wrapped.code = err.type;
+          throw wrapped;
+        }
+        default:
+          break;
       }
-      default:
-        break;
     }
+  } catch (error) {
+    // A failed or cancelled run may already have changed files. Attach the
+    // measured list so the stored message still shows what really changed.
+    if (changeRecorder && error && typeof error === "object") {
+      try {
+        const partial = await changeRecorder.finalize();
+        const block = buildTurnChangeBlock({ runId: draftId, changes: partial.changes });
+        if (block) error.flownoteChangeBlock = block;
+      } catch (_measureError) {
+        // Measurement is best effort on the failure path.
+      }
+    }
+    throw error;
+  } finally {
+    if (changeRecorder) changeRecorder.stop();
   }
 
   // Do not delete a consumed checkpoint here. The caller has not yet durably
@@ -1089,82 +1081,58 @@ async function runDirectAgentTurn({
   // the previous recovery point intact. Once final state is persisted, the
   // existing mark-and-sweep lifecycle removes the now-unreferenced blob.
 
+  const measured = changeRecorder ? await changeRecorder.finalize() : { changes: [], external: [] };
   trace("agent.turn_finished", {
     stopReason,
     textLength: state.text.length,
     toolCount: state.toolUses.length,
+    changeCount: measured.changes.length,
   });
-  // If the model ran out of output budget before producing anything
-  // useful, surface a clear message instead of a silent empty bubble.
   let finalText = activityTimeline.finalText() || state.text;
-  const genericVerifiedCopy = runnerText(
-    locale,
-    EXECUTION_FALLBACK_COPY.verified.zh,
-    EXECUTION_FALLBACK_COPY.verified.en,
-  );
   if (state.suspension) {
     finalText = buildSuspensionCopy(locale, state, runnerText);
-  } else if (state.completionFailure) {
-    finalText = runnerText(locale, EXECUTION_FALLBACK_COPY.incomplete.zh, EXECUTION_FALLBACK_COPY.incomplete.en);
-  } else if (executionContract && executionContract.mode !== "answer" && state.effectVerified && !finalText) {
-    finalText = genericVerifiedCopy;
+  } else if (!finalText && measured.changes.length > 0) {
+    finalText = runnerText(locale, EXECUTION_FALLBACK_COPY.verified.zh, EXECUTION_FALLBACK_COPY.verified.en);
   }
-  if (!state.suspension && !state.completionFailure && state.effectVerified) {
-    const verifiedSummary = buildVerifiedCompletionSummary({
-      locale,
-      effectReceipts: state.effectReceipts,
-      toolUses: state.toolUses,
-      includeObservations: !finalText || finalText === genericVerifiedCopy,
-    });
-    finalText = mergeVerifiedCompletionSummary(finalText, verifiedSummary, genericVerifiedCopy);
-  }
+  // If the model ran out of output budget before producing anything
+  // useful, surface a clear message instead of a silent empty bubble.
   if (!finalText && stopReason === "max_tokens") {
     const modelLabel = activeModelInfo ? activeModelInfo.label : provider.userConfig.model;
     finalText = runnerText(
       locale,
       "⚠️ 模型在还没产生输出之前就用尽了本轮的输出额度。\n\n" +
         "已经按当前模型（" + modelLabel +
-        "）的硬上限 " + maxTokensPerTurn + " tokens 请求，超过这个就是该模型的固有限制。\n\n" +
+        "）设置本轮输出上限为 " + maxTokensPerTurn + " tokens。\n\n" +
         "建议：\n" +
-        "• 换支持更大输出的模型（如 DeepSeek V4 Flash/Pro 支持 384K 输出）\n" +
+        "• 在设置中提高单次输出 token 上限，或降低思考强度\n" +
         "• 拆分任务：先让模型只输出 [总结部分]，再单独写回文件",
       "The model used up this turn's output budget before producing content.\n\n" +
-        "FLOWnote already requested the current model's hard limit (" + modelLabel +
-        ") of " + maxTokensPerTurn + " tokens. Anything beyond that is a model limit.\n\n" +
+        "The configured output limit for " + modelLabel +
+        " is " + maxTokensPerTurn + " tokens.\n\n" +
         "Suggestions:\n" +
-        "• Switch to a model with a larger output limit.\n" +
+        "• Increase the output token limit in settings, or lower the thinking effort.\n" +
         "• Split the task into smaller steps, then write each part back separately.",
     );
   }
-  if (
-    executionContract
-    && executionContract.mode === "workflow"
-    && executionContract.completionPolicyState === "legacy_unclassified"
-    && state.workflowDisposition === "completed"
-    && state.workflowCompletionMode === "answer"
-    && !state.effectReceipts.some((receipt) => receipt && receipt.verified === true)
-  ) {
-    state.standardSkillAnswerOnly = true;
-    const answerOnlyNotice = runnerText(
-      locale,
-      "ℹ️ 本次标准 Skill 只返回了回答；FLOWnote 没有记录到已验证的笔记读取或更改。",
-      "ℹ️ This standard Skill returned an answer only; FLOWnote recorded no verified note read or change.",
-    );
-    finalText = finalText ? `${answerOnlyNotice}\n\n${finalText}` : answerOnlyNotice;
-  }
   const finalBlocks = activityTimeline.settle(finalText);
-  const meta = composeMetaLine(provider, stopReason, state);
+  const changeBlock = buildTurnChangeBlock({ runId: draftId, changes: measured.changes });
+  if (changeBlock) finalBlocks.push(changeBlock);
+  const meta = composeMetaLine(provider, stopReason, state, measured.changes);
   const usage = usageAccumulator.snapshot();
   return {
     messageId: `direct-${Date.now()}`,
     text: finalText,
     reasoning: "",
     meta,
+    changes: describeChanges(measured.changes),
     stats: {
+      ...usageSnapshot(),
       providerLabel: String((provider.spec && provider.spec.displayName) || provider.id || ""),
       modelId: String(provider.userConfig && provider.userConfig.model || ""),
       modelLabel: String((activeModelInfo && activeModelInfo.label) || (provider.userConfig && provider.userConfig.model) || ""),
       toolCount: state.toolUses.length,
+      requestCount: usageAccumulator.requestCount(),
+      contextRequests,
       usage,
     },
     blocks: finalBlocks,
@@ -1173,19 +1141,42 @@ async function runDirectAgentTurn({
   };
 }
 
-function composeMetaLine(provider, stopReason, state) {
+// Completion requirements an explicit Skill declares in its metadata. Ordinary
+// chat turns declare none: there the check only rejects unbacked claims.
+function describeSkillCompletion(contract) {
+  if (!contract || contract.source !== "explicit_skill") {
+    return { requiresChange: false, requiredInteractions: [], command: "" };
+  }
+  const requiredEffects = (Array.isArray(contract.requiredEffects) ? contract.requiredEffects : [])
+    .map((effect) => String((effect && effect.kind) || effect || ""));
+  const requiresChange = contract.completionMode === "effect"
+    && (requiredEffects.length === 0 || requiredEffects.includes("vault_mutation"));
+  return {
+    requiresChange,
+    requiredInteractions: Array.isArray(contract.requiredInteractions) ? contract.requiredInteractions.slice() : [],
+    command: String(contract.command || ""),
+  };
+}
+
+function lastAssistantText(storedMessages, draftId) {
+  const list = Array.isArray(storedMessages) ? storedMessages : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const message = list[index];
+    if (!message || message.id === draftId || message.role !== "assistant" || message.pending) continue;
+    return String(message.text || "");
+  }
+  return "";
+}
+
+function composeMetaLine(provider, stopReason, state, changes) {
   const parts = [];
   const spec = provider && provider.spec;
   const model = provider && provider.userConfig && provider.userConfig.model;
   if (spec && spec.displayName) parts.push(spec.displayName);
   if (model) parts.push(model);
   if (state.toolUses.length > 0) parts.push(`tools=${state.toolUses.length}`);
-  if (state.completionFailure) parts.push("execution=incomplete");
-  else if (state.suspension) parts.push("execution=suspended");
-  else if (state.standardSkillAnswerOnly) parts.push("execution=answer-only");
-  else if (state.effectReceipts && state.effectReceipts.some((receipt) => receipt && receipt.verified)) {
-    parts.push("execution=verified");
-  }
+  if (state.suspension) parts.push("execution=suspended");
+  if (Array.isArray(changes) && changes.length > 0) parts.push(`changes=${changes.length}`);
   if (stopReason && stopReason !== "end_turn") parts.push(`stop=${stopReason}`);
   return parts.join(" · ");
 }

@@ -5,13 +5,16 @@
 // of a long file it cares about.
 
 const { buildTool } = require("../tool-registry");
-const { byteLengthUtf8 } = require("../utils/byte-length");
 const { resolveReadablePath } = require("./vault-path-aliases");
+const { pageNotice } = require("./utf8-page");
+const { pageReadOutput } = require("./read-output-budget");
 
 const DESCRIPTION =
   "Read the contents of a note from the user's Obsidian vault. " +
   "Provide the path relative to the vault root (e.g. \"daily/2026-05-15.md\"). " +
-  "Optionally pass `offset` and `limit` to read a slice of lines (1-indexed). " +
+  "Optionally pass `offset` and `limit` to read a slice of lines (1-indexed), " +
+  "then `byteOffset` from a truncated result to continue that slice. " +
+  "By default, returns as much content as the available context allows. " +
   "Returns the file contents as plain text. Returns an error result if the file " +
   "does not exist.";
 
@@ -32,11 +35,14 @@ const INPUT_SCHEMA = {
       description: "Maximum number of lines to return. Omit to read until EOF.",
       minimum: 1,
     },
+    byteOffset: {
+      type: "integer",
+      description: "UTF-8 byte offset within the selected line slice; use the next byte offset returned on truncation.",
+      minimum: 0,
+    },
   },
   required: ["path"],
 };
-
-const MAX_BYTES_DEFAULT = 256 * 1024; // 256 KB — chat-context-friendly default
 
 function defaultNormalizePath(p) {
   // Cheap normalization for non-Obsidian callers (tests). Real users get
@@ -46,6 +52,18 @@ function defaultNormalizePath(p) {
     .replace(/\/{2,}/g, "/")
     .replace(/^\/+/, "")
     .replace(/\/+$/, "");
+}
+
+function utf16IndexAtByteOffset(text, byteOffset) {
+  let bytes = 0;
+  for (let index = 0; index < text.length;) {
+    if (bytes === byteOffset) return index;
+    const point = text.codePointAt(index);
+    const width = point > 0xffff ? 2 : 1;
+    bytes += new TextEncoder().encode(text.slice(index, index + width)).length;
+    index += width;
+  }
+  return bytes === byteOffset ? text.length : -1;
 }
 
 /**
@@ -60,7 +78,7 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
     throw new Error("createVaultReadTool: vault with getFileByPath + cachedRead is required");
   }
   const normalize = typeof normalizePath === "function" ? normalizePath : defaultNormalizePath;
-  const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? maxBytes : MAX_BYTES_DEFAULT;
+  const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? Math.max(4, Math.floor(maxBytes)) : undefined;
 
   return buildTool({
     name: "vault_read",
@@ -82,11 +100,14 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
       if (!input || typeof input.path !== "string" || !input.path.trim()) {
         return { ok: false, error: "Missing path." };
       }
-      if (input.offset !== undefined && !Number.isInteger(input.offset)) {
-        return { ok: false, error: "offset must be an integer." };
+      if (input.offset !== undefined && (!Number.isInteger(input.offset) || input.offset < 1)) {
+        return { ok: false, error: "offset must be a positive integer." };
       }
-      if (input.limit !== undefined && !Number.isInteger(input.limit)) {
-        return { ok: false, error: "limit must be an integer." };
+      if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
+        return { ok: false, error: "limit must be a positive integer." };
+      }
+      if (input.byteOffset !== undefined && (!Number.isInteger(input.byteOffset) || input.byteOffset < 0)) {
+        return { ok: false, error: "byteOffset must be a non-negative integer." };
       }
       return { ok: true };
     },
@@ -109,19 +130,11 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
       const raw = await vault.cachedRead(file);
       const text = typeof raw === "string" ? raw : String(raw || "");
 
-      // Record the full file content in the session's FileStateCache
-      // so vault_edit can verify read-before-edit and vault_backlinks
-      // can sidestep metadataCache lag. Always record the WHOLE file
-      // (not a slice) so the cache stays trustworthy for downstream
-      // string-replacement / link-scanning consumers.
-      if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordRead === "function") {
-        ctx.fileStateCache.recordRead(normalized, text);
-      }
-
       const offset = Number.isInteger(input.offset) ? input.offset : 1;
       const limit = Number.isInteger(input.limit) ? input.limit : null;
 
       let sliced;
+      let sliceStart = 0;
       if (offset === 1 && limit === null) {
         sliced = text;
       } else {
@@ -129,20 +142,34 @@ function createVaultReadTool({ vault, normalizePath, maxBytes } = {}) {
         const start = Math.max(0, offset - 1);
         const end = limit === null ? lines.length : Math.min(lines.length, start + limit);
         sliced = lines.slice(start, end).join("\n");
+        const lineBreaks = /\r?\n/g;
+        for (let line = 0; line < start; line += 1) {
+          const match = lineBreaks.exec(text);
+          if (!match) { sliceStart = text.length; break; }
+          sliceStart = lineBreaks.lastIndex;
+        }
       }
 
-      if (byteLengthUtf8(sliced) > byteCap) {
-        const truncated = sliced.slice(0, byteCap);
-        yield {
-          type: "result",
-          content:
-            `${truncated}\n\n[vault_read: content truncated at ${byteCap} bytes — ` +
-            "use offset/limit to read remaining lines]",
-        };
+      let page;
+      try {
+        page = pageReadOutput(sliced, { ctx, byteOffset: input.byteOffset || 0, maxBytes: byteCap });
+      } catch (error) {
+        yield { type: "result", content: `vault_read: ${error.message}`, isError: true };
         return;
       }
-
-      yield { type: "result", content: sliced };
+      const lineArgs = `${offset !== 1 ? `offset=${offset}, ` : ""}${limit !== null ? `limit=${limit}, ` : ""}`;
+      const { text: pageText, ...pageMeta } = page;
+      // Keep the full host text for backlinks/checkpoints, but credit only
+      // bytes actually returned to the model. CRLF slices are not byte-exact
+      // after line joining, so they conservatively grant no edit visibility.
+      if (ctx && ctx.fileStateCache && typeof ctx.fileStateCache.recordRead === "function") {
+        const pageStart = utf16IndexAtByteOffset(sliced, page.offset);
+        const visibleStart = sliceStart + pageStart;
+        const visible = pageStart >= 0 && text.slice(visibleStart, visibleStart + pageText.length) === pageText
+          ? [[visibleStart, visibleStart + pageText.length]] : [];
+        ctx.fileStateCache.recordRead(normalized, text, { visibleRanges: visible });
+      }
+      yield { type: "result", content: pageText + pageNotice("vault_read", page, lineArgs), data: { page: pageMeta } };
     },
   });
 }

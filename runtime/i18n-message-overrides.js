@@ -68,7 +68,7 @@ const I18N_MESSAGE_OVERRIDES = {
         streamName: "启用流式回复",
         streamDesc: "开启：模型回答逐字蹦出。关闭：等模型回答完成后一次性显示。移动端遇到流式问题可临时关闭。",
         maxOutputName: "单次输出 token 上限",
-        maxOutputDesc: "留 0 或空 = 直接用当前模型的硬上限（推荐，模型只生成需要的长度，多余不浪费）。",
+        maxOutputDesc: "留 0 或空 = 自动使用适度输出上限（最多 32,768 tokens，且不超过模型限制）。长文写入可调高；较小值可能截断回复。",
         advancedHeading: "AI 高级（可选）",
       },
       notePaths: {
@@ -179,6 +179,11 @@ const I18N_MESSAGE_OVERRIDES = {
       request: {
         failed: "请求失败：{message}",
         failedPartial: "流程已停止，但已保留 {count} 项经过验证的文件更改。重试前请先检查下方记录。",
+      },
+      block: {
+        patchLabel: "文件变更",
+        patchFileCount: "{count} 个文件变更",
+        patchAction: { added: "新建", modified: "修改", deleted: "删除", renamed: "重命名", copied: "复制" },
       },
       message: {
         continue: "继续暂停的流程",
@@ -364,7 +369,7 @@ const I18N_MESSAGE_OVERRIDES = {
         streamName: "Enable streaming replies",
         streamDesc: "On: tokens appear as the model responds. Off: show the reply after completion. Turn off temporarily if mobile streaming misbehaves.",
         maxOutputName: "Max output tokens",
-        maxOutputDesc: "0 or empty = use the model hard limit directly. Recommended; the model only generates what it needs.",
+        maxOutputDesc: "0 or empty uses a moderate limit up to 32,768 tokens, within the model limit. Increase for long notes; low limits may truncate replies.",
         advancedHeading: "AI Advanced (optional)",
       },
       notePaths: {
@@ -475,6 +480,11 @@ const I18N_MESSAGE_OVERRIDES = {
       request: {
         failed: "Request failed: {message}",
         failedPartial: "The workflow stopped, but {count} verified file change(s) were preserved. Check the items below before retrying.",
+      },
+      block: {
+        patchLabel: "File change",
+        patchFileCount: "{count} file(s) changed",
+        patchAction: { added: "Added", modified: "Modified", deleted: "Deleted", renamed: "Renamed", copied: "Copied" },
       },
       message: {
         continue: "Continue suspended workflow",

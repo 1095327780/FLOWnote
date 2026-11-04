@@ -13,32 +13,38 @@ const SAFE_ENUM_FIELDS = new Set([
   "reason",
   "stopReason",
   "stage",
+  "phase",
   "disposition",
   "errorType",
 ]);
 
 const SAFE_NUMERIC_FIELDS = new Set([
   "promptLength",
+  "promptTokens", "contextWindow", "maxTokens", "economicTargetTokens",
+  "inputTokens", "outputTokens", "totalTokens", "cachedInputTokens", "cacheWriteInputTokens", "reasoningTokens",
   "linkedFileCount",
   "historyLength",
   "maxOutputTokens",
   "toolCount",
   "textLength",
   "durationMs",
-  "turnIndex",
+  "turnIndex", "requestIndex",
   "turns",
   "attempt",
   "skippedVaultBundledCount",
+  "claimCount", "changeCount", "issueCount",
 ]);
 
 const SAFE_BOOLEAN_FIELDS = new Set([
-  "hasLinkedFiles",
+  "hasLinkedFiles", "compacted", "overEconomicTarget", "cacheReported", "reasoningReported", "responseComplete",
   "hasFlowNoteFileTag",
   "verified",
   "isError",
+  "allow",
 ]);
 
 const STRICT_ENUM_VALUES = Object.freeze({
+  phase: new Set(["contract", "main", "audit"]),
   status: new Set(["pending", "running", "completed", "error", "failed", "cancelled", "blocked", "suspended"]),
   reason: new Set(["no_progress", "turn_boundary", "permission_denied", "user_input_dismissed", "workflow_suspended"]),
   stopReason: new Set(["end_turn", "tool_use", "max_tokens", "stop", "stop_sequence", "length", "content_filter", "error", "cancelled", "unknown"]),
@@ -51,6 +57,11 @@ const STRICT_ENUM_VALUES = Object.freeze({
     "permission_ask_failed",
     "outgoing_user_shape_failed",
     "max_tokens",
+    "missing_report",
+    "invalid_report",
+    "multiple_reports",
+    "audit_failed",
+    "aborted",
   ]),
 });
 

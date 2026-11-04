@@ -45,6 +45,38 @@ test("web_request sends POST JSON with substituted secret headers", async () => 
   assert.doesNotMatch(result[result.length - 1].content, /wrk-test-secret/);
 });
 
+test("web_request POST continuation is a read-only cache observation, including a cache miss", async () => {
+  let calls = 0;
+  const effectAttempts = [];
+  const tool = createWebRequestTool({ requestUrl: async () => {
+    calls += 1;
+    return { status: 200, headers: { "content-type": "text/plain" }, text: "🙂".repeat(600) };
+  } });
+  const input = { url: "https://example.com/api", method: "POST", json: { action: "list" }, maxBytes: 1024 };
+  const continuation = { ...input, byteOffset: 1024 };
+  assert.equal(tool.capabilities(input).effect, "network_mutation");
+  assert.deepEqual(tool.capabilities(continuation), {
+    effect: "observation", risk: "low", concurrency: "parallel", presentation: "web", targets: [input.url],
+  });
+  assert.equal(tool.isReadOnly(continuation), true);
+  assert.equal(tool.isDestructive(continuation), false);
+  assert.equal(tool.isConcurrencySafe(continuation), true);
+  assert.deepEqual(await tool.checkPermissions(continuation), { behavior: "allow" });
+
+  const miss = (await collect(tool.execute(continuation, { effectAttempts }))).at(-1);
+  assert.equal(miss.isError, true);
+  assert.match(miss.content, /no cached response/);
+  assert.equal(calls, 0);
+  assert.equal(effectAttempts.length, 0);
+
+  const first = (await collect(tool.execute(input, { effectAttempts }))).at(-1);
+  const next = (await collect(tool.execute({ ...input, byteOffset: first.data.page.nextOffset }, { effectAttempts }))).at(-1);
+  assert.equal(next.code, "cached_response");
+  assert.equal(next.data.originalCode, "accepted_unverified");
+  assert.equal(calls, 1);
+  assert.equal(effectAttempts.length, 1);
+});
+
 test("web_request suppresses a replay after an ambiguous external mutation and reuses a durable attempt identity", async () => {
   let calls = 0;
   let firstIdempotencyKey = "";

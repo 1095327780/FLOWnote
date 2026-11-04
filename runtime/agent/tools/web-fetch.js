@@ -7,7 +7,7 @@
 //     header/footer/aside/iframe/noscript) then return body innerText.
 //     If the page exposes <article> or <main>, we prefer that.
 //   - For text/json/markdown we return the raw payload verbatim.
-//   - Output is capped (default 60 KB) so the model context stays small.
+//   - The host allocates output from the remaining model context.
 //   - Permission gated (ask) because it makes outbound network calls.
 //
 // The DOM parser is available wherever Obsidian renders (desktop +
@@ -15,14 +15,16 @@
 // uses the platform's native HTTP client.
 
 const { buildTool } = require("../tool-registry");
-const { byteLengthUtf8 } = require("../utils/byte-length");
+const { pageNotice } = require("./utf8-page");
+const { pageReadOutput } = require("./read-output-budget");
 
 const DESCRIPTION =
   "Fetch a URL and return its readable text content. " +
   "For HTML pages this returns extracted readable text (scripts/styles/nav/footer removed). " +
   "For JSON / plain text / markdown it returns the raw body. " +
   "Use this when the user pastes a link and asks you to summarize, quote, or extract content. " +
-  "Input: `url` (http or https). Optional `maxBytes` to cap output (default 60000).";
+  "Input: `url` (http or https). By default, returns as much readable text as available context allows. " +
+  "Use maxBytes for a smaller slice and `byteOffset` from a truncated result to continue the cached response.";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -33,15 +35,15 @@ const INPUT_SCHEMA = {
     },
     maxBytes: {
       type: "integer",
-      description: "Maximum bytes of extracted text to return. Default 60000.",
+      description: "Optional maximum bytes of extracted text to return.",
       minimum: 1024,
       maximum: 500000,
     },
+    byteOffset: { type: "integer", minimum: 0, description: "UTF-8 byte offset in the cached extracted response; use nextOffset from the prior result." },
   },
   required: ["url"],
 };
 
-const DEFAULT_MAX_BYTES = 60 * 1024;
 const FETCH_TIMEOUT_MS = 25000;
 
 // Block obvious non-public targets so a stray model call can't probe
@@ -167,8 +169,9 @@ function createWebFetchTool({ requestUrl, maxBytes, timeoutMs } = {}) {
   if (typeof requestUrl !== "function") {
     throw new Error("createWebFetchTool: requestUrl function is required");
   }
-  const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? maxBytes : DEFAULT_MAX_BYTES;
+  const byteCap = typeof maxBytes === "number" && maxBytes > 0 ? maxBytes : undefined;
   const timeout = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : FETCH_TIMEOUT_MS;
+  const cachedPages = new Map();
 
   return buildTool({
     name: "web_fetch",
@@ -200,6 +203,9 @@ function createWebFetchTool({ requestUrl, maxBytes, timeoutMs } = {}) {
       if (isBlockedHost(parsed.hostname)) {
         return { ok: false, error: `Refusing to fetch private/internal host: ${parsed.hostname}` };
       }
+      if (input.byteOffset !== undefined && (!Number.isInteger(input.byteOffset) || input.byteOffset < 0)) {
+        return { ok: false, error: "byteOffset must be a non-negative integer." };
+      }
       return { ok: true };
     },
 
@@ -218,12 +224,29 @@ function createWebFetchTool({ requestUrl, maxBytes, timeoutMs } = {}) {
       return { behavior: "ask", message: `Fetch ${input && input.url ? input.url : "URL"}?` };
     },
 
-    async *execute(input) {
+    async *execute(input, ctx) {
       const url = String(input.url).trim();
       const requestedCap = Number.isInteger(input.maxBytes) ? input.maxBytes : byteCap;
-      const cap = Math.max(1024, Math.min(500000, requestedCap));
+      const cap = requestedCap === undefined ? undefined : Math.max(1024, Math.min(500000, requestedCap));
+
+      if (input.byteOffset > 0) {
+        const cached = cachedPages.get(url);
+        if (!cached) {
+          yield { type: "result", content: "web_fetch: no cached response for continuation; fetch from byteOffset=0 first.", isError: true };
+          return;
+        }
+        try {
+          const page = pageReadOutput(cached.text, { ctx, byteOffset: input.byteOffset, maxBytes: cap });
+          const { text: pageText, ...pageMeta } = page;
+          yield { type: "result", content: cached.header + pageText + pageNotice("web_fetch", page), data: { page: pageMeta } };
+        } catch (error) {
+          yield { type: "result", content: `web_fetch: ${error.message}`, isError: true };
+        }
+        return;
+      }
 
       let response;
+      let timeoutId = null;
       try {
         const fetchPromise = requestUrl({
           url,
@@ -237,14 +260,16 @@ function createWebFetchTool({ requestUrl, maxBytes, timeoutMs } = {}) {
         });
         response = await Promise.race([
           fetchPromise,
-          new Promise((_resolve, reject) =>
-            setTimeout(() => reject(new Error(`Timed out after ${timeout}ms`)), timeout),
-          ),
+          new Promise((_resolve, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Timed out after ${timeout}ms`)), timeout);
+          }),
         ]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         yield { type: "result", content: `web_fetch: request failed — ${msg}`, isError: true };
         return;
+      } finally {
+        if (timeoutId !== null) clearTimeout(timeoutId);
       }
 
       const status = Number(response && response.status) || 0;
@@ -274,17 +299,20 @@ function createWebFetchTool({ requestUrl, maxBytes, timeoutMs } = {}) {
       }
       const cleaned = extracted.trim() || "(empty body)";
 
-      let payload = cleaned;
-      let truncatedNotice = "";
-      if (byteLengthUtf8(cleaned) > cap) {
-        payload = cleaned.slice(0, cap);
-        truncatedNotice = `\n\n[web_fetch: truncated at ${cap} bytes — re-call with a different page or higher maxBytes if you need more]`;
+      const header = `URL: ${url}\nHTTP ${status} · ${contentType || "unknown content-type"}\n\n`;
+      cachedPages.set(url, { header, text: cleaned });
+      if (cachedPages.size > 4) cachedPages.delete(cachedPages.keys().next().value);
+      try {
+        const page = pageReadOutput(cleaned, { ctx, maxBytes: cap });
+        const { text: pageText, ...pageMeta } = page;
+        yield {
+          type: "result",
+          content: header + pageText + pageNotice("web_fetch", page),
+          data: { page: pageMeta },
+        };
+      } catch (error) {
+        yield { type: "result", content: `web_fetch: ${error.message}`, isError: true };
       }
-
-      yield {
-        type: "result",
-        content: `URL: ${url}\nHTTP ${status} · ${contentType || "unknown content-type"}\n\n${payload}${truncatedNotice}`,
-      };
     },
   });
 }

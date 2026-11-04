@@ -75,6 +75,19 @@ function describePermissionAction(permission, t) {
     }
     case "vault_create_dir":
       return tr_("modals.permission.action.create_dir", "新建文件夹 {path}", { path });
+    case "web_request": {
+      const unresolved = permission && permission.unresolvedEffect;
+      if (unresolved && unresolved.endpoint) {
+        return tr_(
+          "modals.permission.action.web_request_unresolved",
+          "之前发往 {previous} 的 {previousMethod} 请求已发出，但结果没有记录下来，可能已经生效。请先到该服务核对；确认仍要发送时，才再向它发送 {method} 请求。",
+          { previous: unresolved.endpoint, previousMethod: unresolved.method, method: String(input.method || "GET").toUpperCase() },
+        );
+      }
+      return permission && typeof permission.pattern === "string" && permission.pattern.trim()
+        ? permission.pattern.trim()
+        : tr_("modals.permission.action.generic", "执行 {tool} 操作", { tool });
+    }
     default: {
       if (permission && typeof permission.pattern === "string" && permission.pattern.trim()) {
         return permission.pattern.trim();

@@ -1,5 +1,6 @@
 const { ExecutionLedger, reduceExecutionEvents } = require("../agent/execution-ledger");
 const { projectDurableExecutionFact, projectCheckpointRef } = require("../agent/durable-execution-projection");
+const { buildToolInputPreview, buildToolResultPreview } = require("../agent/tool-history-preview");
 
 function definedFields(value) {
   return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined));
@@ -33,6 +34,16 @@ class DirectExecutionJournal {
     return event;
   }
 
+  /**
+   * Durably record that an external mutation is about to be sent. Resolves
+   * only after the snapshot is persisted; the caller must not send otherwise.
+   */
+  async recordEffectAttempt({ toolUseId, attempt } = {}) {
+    if (!this.started || this.terminalDisposition) throw new Error("Execution journal is not open.");
+    if (!this.onSnapshot) throw new Error("Execution journal persistence is unavailable.");
+    await this.append({ type: "effect_attempt_sending", toolUseId, attempt });
+  }
+
   async start(contract, detail = {}) {
     if (this.started) return;
     await this.append(definedFields({
@@ -44,49 +55,6 @@ class DirectExecutionJournal {
     this.started = true;
   }
 
-  async finishWorkflow(event) {
-    if (this.terminalDisposition) return;
-    const disposition = String(event && event.disposition || "");
-    const detail = definedFields({
-      disposition,
-      declaration: event && event.declaration,
-      verified: event && event.verified,
-    });
-    if (disposition === "completed") {
-      if (!event || event.verified !== true) {
-        await this.append({ type: "completion_rejected", final: true });
-        await this.append({
-          type: "run_failed",
-          code: "workflow_completion_unverified",
-          message: "Workflow completion was not verified.",
-        });
-        this.terminalDisposition = "failed";
-        return;
-      }
-      await this.append({ type: "completion_accepted" });
-      await this.append({ type: "run_completed", ...detail });
-      this.terminalDisposition = disposition;
-      return;
-    }
-    if (disposition === "blocked") {
-      await this.append({ type: "run_blocked", ...detail });
-      this.terminalDisposition = disposition;
-      return;
-    }
-    if (disposition === "cancelled") {
-      await this.append({ type: "cancel_requested", stage: "workflow_finish" });
-      await this.append({ type: "run_cancelled", stage: "workflow_finish", ...detail });
-      this.terminalDisposition = disposition;
-      return;
-    }
-    await this.append({
-      type: "run_failed",
-      code: "workflow_disposition_missing",
-      message: "Workflow ended without a valid disposition.",
-    });
-    this.terminalDisposition = "failed";
-  }
-
   async consume(event) {
     if (!event || !this.started) return;
     if (event.type === "tool_start") {
@@ -95,8 +63,11 @@ class DirectExecutionJournal {
         toolUseId: event.toolUseId,
         tool: event.tool,
         input: event.input,
+        inputPreview: buildToolInputPreview(event.input),
         capabilities: event.capabilities,
       }));
+      this.toolEffects = this.toolEffects || new Map();
+      this.toolEffects.set(event.toolUseId, event.capabilities && event.capabilities.effect);
       return;
     }
     if (event.type === "tool_progress") {
@@ -110,6 +81,11 @@ class DirectExecutionJournal {
         toolUseId: event.toolUseId,
         isError: event.isError === true,
         content: event.content,
+        resultPreview: buildToolResultPreview(event.content, {
+          isError: event.isError === true,
+          effect: (event.capabilities && event.capabilities.effect)
+            || (this.toolEffects && this.toolEffects.get(event.toolUseId)),
+        }),
         outcome: event.outcome,
       }));
       return;
@@ -127,16 +103,8 @@ class DirectExecutionJournal {
       await this.append(definedFields({ type: "completion_rejected", attempt: event.attempt }));
       return;
     }
-    if (event.type === "workflow_finish") {
-      await this.finishWorkflow(event);
-      return;
-    }
     if (event.type === "done") {
       if (this.terminalDisposition) return;
-      if (event.disposition || (this.contract && this.contract.mode === "workflow")) {
-        await this.finishWorkflow(event);
-        return;
-      }
       await this.append({ type: "completion_accepted" });
       await this.append({ type: "run_completed" });
       this.terminalDisposition = "completed";
@@ -168,9 +136,6 @@ class DirectExecutionJournal {
     }
     if (event.type === "error") {
       const error = event.error || {};
-      if (error.type === "completion_contract_failed") {
-        await this.append({ type: "completion_rejected", final: true });
-      }
       await this.append(definedFields({
         type: "run_failed",
         code: error.type,
